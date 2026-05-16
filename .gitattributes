@@ -1,0 +1,4 @@
+# Auto detect text files and perform LF normalization
+* text=auto
+**/uk_world_data_gb/hoverpreviews/** filter=lfs diff=lfs merge=lfs -text
+**/uk_world_data/hoverpreviews/** filter=lfs diff=lfs merge=lfs -text
