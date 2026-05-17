@@ -1,0 +1,37 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ukgeo-tools"
+version = "0.1.0"
+description = "Preprocess OS Terrain 50 and BGS geology into UK Geo Minecraft runtime tiles."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "numpy",
+  "affine",
+  "rasterio",
+  "geopandas",
+  "shapely",
+  "pyproj",
+  "fiona",
+  "typer",
+  "rich",
+  "tqdm",
+  "Pillow",
+  "PyYAML",
+]
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[project.scripts]
+ukgeo = "ukgeo.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ukgeo"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

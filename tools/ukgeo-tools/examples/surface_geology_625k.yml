@@ -1,0 +1,88 @@
+classes:
+  default:
+    id: 0
+    block: minecraft:stone
+    fallback_block: minecraft:stone
+    color: "#5f625d"
+
+  chalk:
+    id: 1
+    block: minecraft:calcite
+    fallback_block: minecraft:calcite
+    color: "#eee8cf"
+    layers: [625k_V5_BEDROCK_Geology]
+    fields: [LEX_D, LEX_RCS_D, RCS_D, GP_EQ_D, PREV_NAME]
+    keywords: [chalk, white chalk subgroup, grey chalk subgroup]
+
+  limestone:
+    id: 2
+    block: create:limestone
+    fallback_block: minecraft:calcite
+    color: "#bdb895"
+    layers: [625k_V5_BEDROCK_Geology]
+    fields: [LEX_D, LEX_RCS_D, RCS_D, GP_EQ_D, PREV_NAME]
+    keywords: [limestone, dolostone, dolomite, calcareous]
+
+  granite:
+    id: 3
+    block: minecraft:granite
+    fallback_block: minecraft:granite
+    color: "#b17e6a"
+    layers: [625k_V5_BEDROCK_Geology, 625k_V5_DYKES_Geology]
+    fields: [LEX_D, LEX_RCS_D, RCS_D, GP_EQ_D, PREV_NAME]
+    keywords: [granite, granitic-rock, granitic rock]
+
+  basalt:
+    id: 4
+    block: minecraft:smooth_basalt
+    fallback_block: minecraft:deepslate
+    color: "#383c42"
+    layers: [625k_V5_BEDROCK_Geology, 625k_V5_DYKES_Geology]
+    fields: [LEX_D, LEX_RCS_D, RCS_D, GP_EQ_D, PREV_NAME]
+    keywords: [basalt, basaltic, mafic igneous, mafic-rock, dolerite]
+
+  andesite:
+    id: 5
+    block: minecraft:andesite
+    fallback_block: minecraft:andesite
+    color: "#7a7e7b"
+    layers: [625k_V5_BEDROCK_Geology, 625k_V5_DYKES_Geology]
+    fields: [LEX_D, LEX_RCS_D, RCS_D, GP_EQ_D, PREV_NAME]
+    keywords: [andesite, andesitic, intermediate igneous]
+
+  diorite:
+    id: 6
+    block: minecraft:diorite
+    fallback_block: minecraft:diorite
+    color: "#d2d0c8"
+    layers: [625k_V5_BEDROCK_Geology, 625k_V5_DYKES_Geology]
+    fields: [LEX_D, LEX_RCS_D, RCS_D, GP_EQ_D, PREV_NAME]
+    keywords: [diorite, intermediate igneous, intrusive]
+
+  tuff:
+    id: 7
+    block: minecraft:tuff
+    fallback_block: minecraft:tuff
+    color: "#687062"
+    layers: [625k_V5_BEDROCK_Geology]
+    fields: [LEX_D, LEX_RCS_D, RCS_D, GP_EQ_D, PREV_NAME]
+    keywords: [tuff, pyroclastic, volcaniclastic, volcanic ash]
+
+  sandstone:
+    id: 8
+    block: minecraft:sandstone
+    fallback_block: minecraft:sandstone
+    color: "#c6ad68"
+    layers: [625k_V5_BEDROCK_Geology]
+    fields: [LEX_D, LEX_RCS_D, RCS_D, GP_EQ_D, PREV_NAME]
+    keywords: [sandstone]
+
+  slate:
+    id: 9
+    block: minecraft:deepslate
+    fallback_block: minecraft:deepslate
+    color: "#4d5660"
+    layers: [625k_V5_BEDROCK_Geology]
+    fields: [LEX_D, LEX_RCS_D, RCS_D, GP_EQ_D, PREV_NAME]
+    keywords: [slate, mudstone, siltstone, shale]
+
