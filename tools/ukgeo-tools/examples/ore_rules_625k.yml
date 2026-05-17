@@ -1,0 +1,159 @@
+ores:
+  coal:
+    layers: [625k_V5_BEDROCK_Geology]
+    fields: [LEX_D, LEX_RCS_D, RCS_D, GP_EQ_D, PREV_NAME]
+    maximum_score: 255
+    keyword_groups:
+      - score: 220
+        keywords: [coal, coal measures, coal-bearing]
+  iron:
+    layers: [625k_V5_BEDROCK_Geology, 625k_V5_DYKES_Geology]
+    fields: [LEX_D, LEX_RCS_D, RCS_D, GP_EQ_D, PREV_NAME]
+    maximum_score: 255
+    keyword_groups:
+      - score: 220
+        keywords: [ironstone, ferruginous, haematite, hematite, magnetite]
+      - score: 100
+        keywords: [mafic igneous, basalt, dolerite]
+  copper:
+    layers: [625k_V5_BEDROCK_Geology, 625k_V5_DYKES_Geology]
+    fields: [LEX_D, LEX_RCS_D, RCS_D, GP_EQ_D, PREV_NAME]
+    maximum_score: 255
+    keyword_groups:
+      - score: 220
+        keywords: [copper]
+      - score: 90
+        keywords: [mafic igneous, basalt, dolerite, volcanic]
+  zinc:
+    layers: [625k_V5_BEDROCK_Geology, 625k_V5_FAULTS]
+    fields: [LEX_D, LEX_RCS_D, RCS_D, GP_EQ_D, PREV_NAME, FLTNAME_D]
+    maximum_score: 255
+    keyword_groups:
+      - score: 230
+        keywords: [zinc, lead-zinc, lead, sphalerite, mineral vein]
+      - score: 130
+        keywords: [limestone, carboniferous limestone, fault]
+  tin:
+    layers: [625k_V5_BEDROCK_Geology, 625k_V5_DYKES_Geology]
+    fields: [LEX_D, LEX_RCS_D, RCS_D, GP_EQ_D, PREV_NAME]
+    maximum_score: 255
+    keyword_groups:
+      - score: 230
+        keywords: [tin, cassiterite, granite]
+      - score: 160
+        keywords: [granitic-rock, felsic-rock, granite]
+  gold:
+    layers: [625k_V5_BEDROCK_Geology, 625k_V5_FAULTS]
+    fields: [LEX_D, LEX_RCS_D, RCS_D, GP_EQ_D, PREV_NAME, FLTNAME_D]
+    maximum_score: 255
+    keyword_groups:
+      - score: 230
+        keywords: [gold, auriferous]
+      - score: 90
+        keywords: [fault, shear, quartz, volcanic]
+  andesite:
+    layers: [625k_V5_BEDROCK_Geology, 625k_V5_DYKES_Geology]
+    fields: [LEX_D, LEX_RCS_D, RCS_D, GP_EQ_D, PREV_NAME]
+    maximum_score: 255
+    keyword_groups:
+      - score: 230
+        keywords: [andesite, andesitic, intermediate igneous, intermediate lava, volcanic]
+      - score: 120
+        keywords: [igneous, dyke]
+  diorite:
+    layers: [625k_V5_BEDROCK_Geology, 625k_V5_DYKES_Geology]
+    fields: [LEX_D, LEX_RCS_D, RCS_D, GP_EQ_D, PREV_NAME]
+    maximum_score: 255
+    keyword_groups:
+      - score: 230
+        keywords: [diorite, intermediate igneous, intrusive]
+      - score: 120
+        keywords: [igneous intrusion]
+  granite:
+    layers: [625k_V5_BEDROCK_Geology, 625k_V5_DYKES_Geology]
+    fields: [LEX_D, LEX_RCS_D, RCS_D, GP_EQ_D, PREV_NAME]
+    maximum_score: 255
+    keyword_groups:
+      - score: 240
+        keywords: [granite, granitic-rock, granitic rock]
+      - score: 170
+        keywords: [felsic-rock, felsic rock, felsite, rhyolite]
+  ochrum:
+    layers: [625k_V5_BEDROCK_Geology, 625k_V5_SUPERFICIAL_Geology]
+    fields: [LEX_D, LEX_RCS_D, RCS_D, ROCK_D, GP_EQ_D, PREV_NAME]
+    maximum_score: 255
+    keyword_groups:
+      - score: 220
+        keywords: [ferruginous, ironstone, ochre, sandstone]
+      - score: 120
+        keywords: [sand, gravel]
+  calcite:
+    layers: [625k_V5_BEDROCK_Geology, 625k_V5_SUPERFICIAL_Geology]
+    fields: [LEX_D, LEX_RCS_D, RCS_D, ROCK_D, GP_EQ_D, PREV_NAME]
+    maximum_score: 255
+    keyword_groups:
+      - score: 230
+        keywords: [limestone, chalk, calcite, calcareous, dolostone, dolomite]
+  scoria:
+    layers: [625k_V5_BEDROCK_Geology, 625k_V5_DYKES_Geology]
+    fields: [LEX_D, LEX_RCS_D, RCS_D, GP_EQ_D, PREV_NAME]
+    maximum_score: 255
+    keyword_groups:
+      - score: 220
+        keywords: [scoria, basalt, basaltic, mafic igneous, lava]
+      - score: 120
+        keywords: [volcanic]
+  tuff:
+    layers: [625k_V5_BEDROCK_Geology]
+    fields: [LEX_D, LEX_RCS_D, RCS_D, GP_EQ_D, PREV_NAME]
+    maximum_score: 255
+    keyword_groups:
+      - score: 230
+        keywords: [tuff, pyroclastic, volcanic ash, volcaniclastic]
+      - score: 130
+        keywords: [volcanic]
+  crimsite:
+    layers: [625k_V5_BEDROCK_Geology, 625k_V5_SUPERFICIAL_Geology]
+    fields: [LEX_D, LEX_RCS_D, RCS_D, ROCK_D, GP_EQ_D, PREV_NAME]
+    maximum_score: 255
+    keyword_groups:
+      - score: 220
+        keywords: [haematite, hematite, ferruginous, ironstone, red sandstone]
+      - score: 110
+        keywords: [sandstone]
+  limestone:
+    layers: [625k_V5_BEDROCK_Geology]
+    fields: [LEX_D, LEX_RCS_D, RCS_D, GP_EQ_D, PREV_NAME]
+    maximum_score: 255
+    keyword_groups:
+      - score: 240
+        keywords: [limestone]
+      - score: 160
+        keywords: [chalk, dolostone, dolomite, calcareous]
+  asurine:
+    layers: [625k_V5_BEDROCK_Geology, 625k_V5_DYKES_Geology]
+    fields: [LEX_D, LEX_RCS_D, RCS_D, GP_EQ_D, PREV_NAME]
+    maximum_score: 255
+    keyword_groups:
+      - score: 220
+        keywords: [copper, azurite, mineral vein]
+      - score: 120
+        keywords: [mafic igneous, volcanic]
+  veridium:
+    layers: [625k_V5_BEDROCK_Geology, 625k_V5_DYKES_Geology]
+    fields: [LEX_D, LEX_RCS_D, RCS_D, GP_EQ_D, PREV_NAME]
+    maximum_score: 255
+    keyword_groups:
+      - score: 220
+        keywords: [serpentinite, serpentine, ultramafic, greenstone]
+      - score: 130
+        keywords: [mafic igneous, basalt]
+  smooth_basalt:
+    layers: [625k_V5_BEDROCK_Geology, 625k_V5_DYKES_Geology]
+    fields: [LEX_D, LEX_RCS_D, RCS_D, GP_EQ_D, PREV_NAME]
+    maximum_score: 255
+    keyword_groups:
+      - score: 240
+        keywords: [basalt, basaltic, mafic igneous]
+      - score: 170
+        keywords: [dolerite, mafic-rock, mafic rock]
