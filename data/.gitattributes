@@ -1,2 +1,5 @@
 terr50_gagg_gb.zip filter=lfs diff=lfs merge=lfs -text
 BGS_Geology_50k_GeoPackage_SAMPLE.zip filter=lfs diff=lfs merge=lfs -text
+BGS_Geology_625k_bedrock_gpkg.zip filter=lfs diff=lfs merge=lfs -text
+oprvrs_gpkg_gb.zip filter=lfs diff=lfs merge=lfs -text
+osni_opendata_50m_dtm.zip filter=lfs diff=lfs merge=lfs -text
