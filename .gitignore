@@ -1,27 +1,51 @@
-# Compiled class file
-*.class
+# OS / editor
+.idea/
+.vscode/
+*.iml
+*.swp
+*~
 
-# Log file
+# Logs and JVM crash output
 *.log
+hs_err_pid*
+replay_pid*
 
-# BlueJ files
-*.ctxt
-
-# Mobile Tools for Java (J2ME)
-.mtj.tmp/
-
-# Package Files #
+# Java / Gradle output
+*.class
 *.jar
-*.war
-*.nar
-*.ear
+!mods/ukgeo-neoforge/gradle/wrapper/gradle-wrapper.jar
+**/.gradle/
+**/build/
+**/run/
+
+# Python output
+__pycache__/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+**/.pytest_cache/
+.venv/
+**/.venv/
+*.egg-info/
+dist/
+
+# Generated UKGeo runtime/debug outputs
+tools/ukgeo-tools/uk_world_data*/
+tools/ukgeo-tools/**/*.png
+tools/ukgeo-tools/**/*.tif
+tools/ukgeo-tools/**/*.tiff
+tools/ukgeo-tools/**/*.gpkg
+
+# Large source GIS/archive files. Existing tracked LFS data remains tracked.
 *.zip
 *.tar.gz
 *.rar
-
-# virtual machine crash logs, see http://www.java.com/en/download/help/error_hotspot.xml
-hs_err_pid*
-replay_pid*
-/.gradle
-/.idea
-/build
+*.7z
+*.gpkg
+*.shp
+*.dbf
+*.shx
+*.prj
+*.asc
+*.tif
+*.tiff
