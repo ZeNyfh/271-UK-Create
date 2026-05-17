@@ -1,0 +1,50 @@
+{
+  "dimensions": {
+    "minecraft:overworld": {
+      "type": "ukgeo:uk_high",
+      "generator": {
+        "type": "ukgeo:heightmap",
+        "biome_source": {
+          "type": "minecraft:fixed",
+          "biome": "minecraft:plains"
+        },
+        "sea_level_y": 64,
+        "height_scale": 0.18,
+        "lowland_extra_scale": 0.03,
+        "lowland_ceiling_metres": 120.0,
+        "highland_scale": 0.2,
+        "highland_start_metres": 120.0,
+        "highland_full_metres": 750.0,
+        "highland_smoothing_radius": 20,
+        "nodata_surface_y": 48,
+        "river_widen_radius": 2,
+        "river_carve_depth": 2,
+        "min_y": -256,
+        "gen_depth": 2288,
+        "fallback_height": 72,
+        "use_config_data_root": true
+      }
+    },
+    "minecraft:the_end": {
+      "type": "minecraft:the_end",
+      "generator": {
+        "type": "minecraft:noise",
+        "biome_source": {
+          "type": "minecraft:the_end"
+        },
+        "settings": "minecraft:end"
+      }
+    },
+    "minecraft:the_nether": {
+      "type": "minecraft:the_nether",
+      "generator": {
+        "type": "minecraft:noise",
+        "biome_source": {
+          "type": "minecraft:multi_noise",
+          "preset": "minecraft:nether"
+        },
+        "settings": "minecraft:nether"
+      }
+    }
+  }
+}
