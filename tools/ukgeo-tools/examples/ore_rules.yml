@@ -1,0 +1,46 @@
+ores:
+  coal:
+    layers: [gb_50k_bedrock_V9, gb_50k_superficial_V9]
+    fields: [LEX_D, RCS_D, RANK, LITH_D, NAME]
+    maximum_score: 255
+    keyword_groups:
+      - score: 220
+        keywords: [coal, coal measures]
+  iron:
+    layers: [gb_50k_bedrock_V9, gb_50k_superficial_V9]
+    fields: [LEX_D, RCS_D, RANK, LITH_D, NAME]
+    maximum_score: 255
+    keyword_groups:
+      - score: 220
+        keywords: [ironstone, ferruginous, haematite, hematite, magnetite]
+  copper:
+    layers: [gb_50k_bedrock_V9, gb_50k_linear_V9]
+    fields: [LEX_D, RCS_D, RANK, LITH_D, NAME]
+    maximum_score: 255
+    keyword_groups:
+      - score: 220
+        keywords: [copper]
+  zinc:
+    layers: [gb_50k_bedrock_V9, gb_50k_linear_V9]
+    fields: [LEX_D, RCS_D, RANK, LITH_D, NAME]
+    maximum_score: 255
+    keyword_groups:
+      - score: 230
+        keywords: [zinc, lead-zinc, lead, sphalerite, mineral vein]
+      - score: 120
+        keywords: [limestone, carboniferous limestone]
+  tin:
+    layers: [gb_50k_bedrock_V9, gb_50k_linear_V9]
+    fields: [LEX_D, RCS_D, RANK, LITH_D, NAME]
+    maximum_score: 255
+    keyword_groups:
+      - score: 230
+        keywords: [tin, cassiterite, granite]
+  gold:
+    layers: [gb_50k_bedrock_V9, gb_50k_linear_V9]
+    fields: [LEX_D, RCS_D, RANK, LITH_D, NAME]
+    maximum_score: 255
+    keyword_groups:
+      - score: 230
+        keywords: [gold, auriferous]
+
