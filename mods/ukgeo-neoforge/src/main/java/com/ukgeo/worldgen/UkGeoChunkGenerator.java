@@ -35,6 +35,10 @@ import net.minecraft.world.level.levelgen.blending.Blender;
 import net.minecraft.world.level.material.Fluids;
 
 public final class UkGeoChunkGenerator extends ChunkGenerator {
+    private static final int WATER_EDGE_SMOOTHING_RADIUS = 16;
+    private static final int WATER_EDGE_SAMPLE_STEP = 1;
+    private static final int WATER_EDGE_MAX_LAND_HEIGHT_ABOVE_SEA = 24;
+    private static final int SHALLOW_WATER_DEPTH = 2;
     private static final double BACKGROUND_ORE_ATTEMPT_MULTIPLIER = 0.1;
     private static final double ORE_AREA_ATTEMPT_MULTIPLIER = 3.0;
 
@@ -314,11 +318,87 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         if (data != null) {
             OptionalInt decimetres = data.height.sampleDecimetres(x, z);
             if (decimetres.isPresent()) {
-                return seaLevelY + Math.round((float) shapedHeightMetres(x, z, decimetres.getAsInt() / 10.0));
+                int rawSurfaceY = rawSurfaceY(x, z, decimetres.getAsInt());
+                return waterSmoothedSurfaceY(data, x, z, decimetres.getAsInt(), rawSurfaceY);
             }
-            return nodataSurfaceY;
+            return waterFloorY(data, x, z, nodataSurfaceY);
         }
         return fallbackHeight;
+    }
+
+    private int rawSurfaceY(int x, int z, int decimetres) {
+        return seaLevelY + Math.round((float) shapedHeightMetres(x, z, decimetres / 10.0));
+    }
+
+    private int waterSmoothedSurfaceY(RuntimeData data, int x, int z, int decimetres, int rawSurfaceY) {
+        // Treat nodata and non-positive terrain as water, then blend nearby low land into a shallow shore.
+        if (decimetres <= 0) {
+            return waterFloorY(data, x, z, Math.min(rawSurfaceY, seaLevelY - SHALLOW_WATER_DEPTH));
+        }
+        int heightAboveSea = rawSurfaceY - seaLevelY;
+        if (heightAboveSea <= 0 || heightAboveSea > WATER_EDGE_MAX_LAND_HEIGHT_ABOVE_SEA) {
+            return rawSurfaceY;
+        }
+        Optional<WaterDistance> nearestWater = nearestHeightWater(data, x, z, WATER_EDGE_SMOOTHING_RADIUS);
+        if (nearestWater.isEmpty()) {
+            return rawSurfaceY;
+        }
+        double shoreWeight = 1.0 - smoothstep(nearestWater.get().blocks() / WATER_EDGE_SMOOTHING_RADIUS);
+        double lowLandWeight = 1.0 - Math.clamp(heightAboveSea / (double) WATER_EDGE_MAX_LAND_HEIGHT_ABOVE_SEA, 0.0, 1.0);
+        double amount = shoreWeight * lowLandWeight;
+        int shoreSurfaceY = seaLevelY + 1;
+        return Math.round((float) lerp(rawSurfaceY, shoreSurfaceY, amount));
+    }
+
+    private int waterFloorY(RuntimeData data, int x, int z, int deepFloorY) {
+        Optional<LandDistance> nearestLand = nearestHeightLand(data, x, z, WATER_EDGE_SMOOTHING_RADIUS);
+        if (nearestLand.isEmpty()) {
+            return deepFloorY;
+        }
+        double deepWaterWeight = smoothstep(nearestLand.get().blocks() / WATER_EDGE_SMOOTHING_RADIUS);
+        int shoreFloorY = seaLevelY - SHALLOW_WATER_DEPTH;
+        return Math.round((float) lerp(shoreFloorY, deepFloorY, deepWaterWeight));
+    }
+
+    private Optional<WaterDistance> nearestHeightWater(RuntimeData data, int x, int z, int radius) {
+        double bestDistance = Double.POSITIVE_INFINITY;
+        int step = Math.max(1, WATER_EDGE_SAMPLE_STEP);
+        for (int dz = -radius; dz <= radius; dz += step) {
+            for (int dx = -radius; dx <= radius; dx += step) {
+                int distanceSquared = dx * dx + dz * dz;
+                if (distanceSquared > radius * radius) {
+                    continue;
+                }
+                OptionalInt sample = data.height.sampleDecimetres(x + dx, z + dz);
+                if (sample.isPresent() && sample.getAsInt() > 0) {
+                    continue;
+                }
+                bestDistance = Math.min(bestDistance, Math.sqrt(distanceSquared));
+            }
+        }
+        return Double.isInfinite(bestDistance) ? Optional.empty() : Optional.of(new WaterDistance(bestDistance));
+    }
+
+    private Optional<LandDistance> nearestHeightLand(RuntimeData data, int x, int z, int radius) {
+        double bestDistance = Double.POSITIVE_INFINITY;
+        int step = Math.max(1, WATER_EDGE_SAMPLE_STEP);
+        for (int dz = -radius; dz <= radius; dz += step) {
+            for (int dx = -radius; dx <= radius; dx += step) {
+                int distanceSquared = dx * dx + dz * dz;
+                if (distanceSquared > radius * radius) {
+                    continue;
+                }
+                OptionalInt sample = data.height.sampleDecimetres(x + dx, z + dz);
+                if (sample.isEmpty() || sample.getAsInt() <= 0) {
+                    continue;
+                }
+                double distance = Math.sqrt(distanceSquared);
+                if (distance < bestDistance) {
+                    bestDistance = distance;
+                }
+            }
+        }
+        return Double.isInfinite(bestDistance) ? Optional.empty() : Optional.of(new LandDistance(bestDistance));
     }
 
     private double shapedHeightMetres(int x, int z, double metres) {
@@ -641,6 +721,12 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         boolean found() {
             return score > 0;
         }
+    }
+
+    private record WaterDistance(double blocks) {
+    }
+
+    private record LandDistance(double blocks) {
     }
 
     private record BlockStatePair(BlockState normal, BlockState deepslate) {
