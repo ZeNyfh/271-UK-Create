@@ -154,7 +154,9 @@ public final class UkGeoVegetationBiomeSource extends BiomeSource {
             Path root = UkGeoConfig.dataRoot(Path.of(".").toAbsolutePath().normalize());
             try {
                 TileManifest manifest = TileManifest.load(root);
-                U8OreTileLayer vegetationLayer = manifest.vegetationPath == null ? null : new U8OreTileLayer(manifest, "vegetation", manifest.vegetationPath);
+                U8OreTileLayer vegetationLayer = manifest.vegetationPath == null
+                    ? null
+                    : new U8OreTileLayer(manifest, "vegetation", manifest.vegetationPath, manifest.vegetationCellBlocks, manifest.paddedWidth, manifest.paddedDepth);
                 U8OreTileLayer riverLayer = manifest.riversPath == null ? null : new U8OreTileLayer(manifest, "rivers", manifest.riversPath);
                 runtimeData = new RuntimeData(vegetationLayer, riverLayer);
             } catch (IOException | RuntimeException ex) {

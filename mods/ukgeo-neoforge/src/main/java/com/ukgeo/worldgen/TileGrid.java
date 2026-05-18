@@ -10,9 +10,16 @@ public final class TileGrid {
     }
 
     public Optional<Cell> locate(int minecraftX, int minecraftZ) {
-        int dataX = minecraftX - manifest.minecraftMinX;
-        int dataZ = minecraftZ - manifest.minecraftMinZ;
-        if (dataX < 0 || dataZ < 0 || dataX >= manifest.paddedWidth || dataZ >= manifest.paddedDepth) {
+        return locate(minecraftX, minecraftZ, 1, manifest.paddedWidth, manifest.paddedDepth);
+    }
+
+    public Optional<Cell> locate(int minecraftX, int minecraftZ, int cellBlocks, int paddedWidth, int paddedDepth) {
+        int blocks = Math.max(1, cellBlocks);
+        int dataX = Math.floorDiv(minecraftX - manifest.minecraftMinX, blocks);
+        int dataZ = Math.floorDiv(minecraftZ - manifest.minecraftMinZ, blocks);
+        int dataWidth = Math.floorDiv(paddedWidth + blocks - 1, blocks);
+        int dataDepth = Math.floorDiv(paddedDepth + blocks - 1, blocks);
+        if (dataX < 0 || dataZ < 0 || dataX >= dataWidth || dataZ >= dataDepth) {
             return Optional.empty();
         }
         int tileX = Math.floorDiv(dataX, manifest.tileSize);

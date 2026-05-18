@@ -7,8 +7,8 @@ public record OreDefinition(
     String deepslateBlock,
     int baseAttempts,
     int maxBonusAttempts,
-    int minDepthBelowSurface,
-    int maxDepthBelowSurface,
+    int vanillaMinY,
+    int vanillaMaxY,
     int veinSize
 ) {
     public boolean hasScoreLayer() {
