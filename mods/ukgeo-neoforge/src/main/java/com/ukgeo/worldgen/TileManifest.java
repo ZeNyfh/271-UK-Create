@@ -27,6 +27,7 @@ public final class TileManifest {
     public final String surfaceGeologyPath;
     public final Map<Integer, SurfaceGeologyClass> surfaceGeologyClasses;
     public final String vegetationPath;
+    public final int vegetationCellBlocks;
     public final Map<Integer, VegetationClass> vegetationClasses;
     public final String riversPath;
 
@@ -67,6 +68,7 @@ public final class TileManifest {
         JsonObject vegetation = json.getAsJsonObject("vegetation");
         if (vegetation != null) {
             this.vegetationPath = vegetation.get("path").getAsString();
+            this.vegetationCellBlocks = vegetation.has("cell_blocks") ? Math.max(1, vegetation.get("cell_blocks").getAsInt()) : 1;
             JsonObject classes = vegetation.getAsJsonObject("classes");
             if (classes != null) {
                 for (Map.Entry<String, JsonElement> entry : classes.entrySet()) {
@@ -79,6 +81,7 @@ public final class TileManifest {
             }
         } else {
             this.vegetationPath = null;
+            this.vegetationCellBlocks = 1;
         }
         JsonObject rivers = json.getAsJsonObject("rivers");
         this.riversPath = rivers == null ? null : rivers.get("path").getAsString();

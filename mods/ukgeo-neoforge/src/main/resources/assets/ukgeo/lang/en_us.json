@@ -1,4 +1,16 @@
 {
-  "generator.ukgeo.uk_geological_create": "UK Geological Create"
+  "generator.ukgeo.uk_geological_create": "UK Geological Create",
+  "biome.ukgeo.broadleaf_woodland": "Broadleaf Woodland",
+  "biome.ukgeo.conifer_woodland": "Conifer Woodland",
+  "biome.ukgeo.arable": "Arable and Horticulture",
+  "biome.ukgeo.improved_grassland": "Improved Grassland",
+  "biome.ukgeo.neutral_grassland": "Neutral Grassland",
+  "biome.ukgeo.calcareous_grassland": "Calcareous Grassland",
+  "biome.ukgeo.acid_grassland": "Acid Grassland",
+  "biome.ukgeo.wetland": "Wetland / Bog / Fen",
+  "biome.ukgeo.heath": "Heath / Heather",
+  "biome.ukgeo.freshwater": "Freshwater",
+  "biome.ukgeo.urban": "Urban / Suburban",
+  "biome.ukgeo.rocky": "Rocky Ground",
+  "biome.ukgeo.coastal_ocean": "Coastal Ocean"
 }
-

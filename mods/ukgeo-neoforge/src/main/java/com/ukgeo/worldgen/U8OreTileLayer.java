@@ -9,17 +9,27 @@ public final class U8OreTileLayer {
     private final String oreName;
     private final String path;
     private final TileGrid grid;
+    private final int cellBlocks;
+    private final int paddedWidth;
+    private final int paddedDepth;
     private final TileCache<TileCoord, byte[]> cache = new TileCache<>(96);
 
     public U8OreTileLayer(TileManifest manifest, String oreName, String path) {
+        this(manifest, oreName, path, 1, manifest.paddedWidth, manifest.paddedDepth);
+    }
+
+    public U8OreTileLayer(TileManifest manifest, String oreName, String path, int cellBlocks, int paddedWidth, int paddedDepth) {
         this.manifest = manifest;
         this.oreName = oreName;
         this.path = path;
         this.grid = new TileGrid(manifest);
+        this.cellBlocks = Math.max(1, cellBlocks);
+        this.paddedWidth = paddedWidth;
+        this.paddedDepth = paddedDepth;
     }
 
     public OptionalInt sample(int x, int z) {
-        return grid.locate(x, z).flatMap(cell -> {
+        return grid.locate(x, z, cellBlocks, paddedWidth, paddedDepth).flatMap(cell -> {
             try {
                 byte[] tile = cache.get(cell.coord(), this::load);
                 return java.util.Optional.of(Byte.toUnsignedInt(tile[cell.localZ() * manifest.tileSize + cell.localX()]));

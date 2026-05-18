@@ -9,6 +9,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
@@ -19,6 +20,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
 import net.minecraft.core.HolderSet;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.WorldGenRegion;
@@ -26,6 +28,7 @@ import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.LevelHeightAccessor;
 import net.minecraft.world.level.NoiseColumn;
 import net.minecraft.world.level.StructureManager;
+import net.minecraft.world.level.WorldGenLevel;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.biome.BiomeGenerationSettings;
 import net.minecraft.world.level.biome.BiomeManager;
@@ -70,6 +73,9 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     private static final int SHALLOW_WATER_DEPTH = 2;
     private static final double BACKGROUND_ORE_ATTEMPT_MULTIPLIER = 0.1;
     private static final double ORE_AREA_ATTEMPT_MULTIPLIER = 3.0;
+    private static final int SNOW_ICE_MIN_Y = 550;
+    private static final int VANILLA_MIN_Y = -64;
+    private static final int VANILLA_MAX_Y = 320;
     private static volatile boolean createDieselGeneratorsOilLookupAttempted;
     private static volatile Method createDieselGeneratorsSetOilAmount;
     private static final BlockState PERSISTENT_OAK_LEAVES = Blocks.OAK_LEAVES.defaultBlockState().setValue(LeavesBlock.PERSISTENT, true);
@@ -134,7 +140,7 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         int fallbackHeight,
         boolean useConfigDataRoot
     ) {
-        super(biomeSource, UkGeoChunkGenerator::withoutVanillaOres);
+        super(biomeSource, UkGeoChunkGenerator::sanitizeBiomeSettings);
         this.seaLevelY = seaLevelY;
         this.heightScale = heightScale;
         this.lowlandExtraScale = Math.max(0.0, lowlandExtraScale);
@@ -152,13 +158,35 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         this.useConfigDataRoot = useConfigDataRoot;
     }
 
-    private static BiomeGenerationSettings withoutVanillaOres(Holder<Biome> biome) {
-        List<HolderSet<PlacedFeature>> features = new ArrayList<>(biome.value().getGenerationSettings().features());
-        int oreStep = GenerationStep.Decoration.UNDERGROUND_ORES.ordinal();
-        if (features.size() > oreStep) {
-            features.set(oreStep, HolderSet.direct(List.<Holder<PlacedFeature>>of()));
+    private static BiomeGenerationSettings sanitizeBiomeSettings(Holder<Biome> biome) {
+        List<HolderSet<PlacedFeature>> sanitized = new ArrayList<>();
+        for (HolderSet<PlacedFeature> step : biome.value().getGenerationSettings().features()) {
+            List<Holder<PlacedFeature>> kept = new ArrayList<>();
+            for (Holder<PlacedFeature> feature : step) {
+                if (!isExcludedBiomeFeature(feature)) {
+                    kept.add(feature);
+                }
+            }
+            sanitized.add(HolderSet.direct(kept));
         }
-        return new BiomeGenerationSettings(Map.of(), List.copyOf(features));
+        int oreStep = GenerationStep.Decoration.UNDERGROUND_ORES.ordinal();
+        if (sanitized.size() > oreStep) {
+            sanitized.set(oreStep, HolderSet.direct(List.<Holder<PlacedFeature>>of()));
+        }
+        return new BiomeGenerationSettings(Map.of(), List.copyOf(sanitized));
+    }
+
+    private static boolean isExcludedBiomeFeature(Holder<PlacedFeature> feature) {
+        Optional<ResourceKey<PlacedFeature>> key = feature.unwrapKey();
+        if (key.isEmpty()) {
+            return false;
+        }
+        String path = key.get().location().getPath().toLowerCase(Locale.ROOT);
+        return path.contains("freeze")
+            || path.contains("frozen")
+            || path.contains("ice")
+            || path.contains("snow")
+            || path.contains("icicle");
     }
 
     @Override
@@ -228,9 +256,6 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         if (y == surfaceY) {
             if (vegetationClass == VEGETATION_URBAN) {
                 return Blocks.STONE.defaultBlockState();
-            }
-            if (vegetationClass == VEGETATION_ROCKY) {
-                return Blocks.GRAVEL.defaultBlockState();
             }
             return Blocks.GRASS_BLOCK.defaultBlockState();
         }
@@ -537,9 +562,14 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
                 int worldX = pos.getMinBlockX() + localX;
                 int worldZ = pos.getMinBlockZ() + localZ;
                 int top = surfaceY(worldX, worldZ);
-                int min = Math.max(chunk.getMinBuildHeight() + 1, top - ore.maxDepthBelowSurface());
-                int max = Math.max(min, top - ore.minDepthBelowSurface());
-                int y = min + random.nextInt(Math.max(1, max - min + 1));
+                int bandMin = scaleVanillaY(ore.vanillaMinY(), chunk);
+                int bandMax = scaleVanillaY(ore.vanillaMaxY(), chunk);
+                int min = Math.max(chunk.getMinBuildHeight() + 1, bandMin);
+                int max = Math.min(top - 1, bandMax);
+                if (min > max) {
+                    continue;
+                }
+                int y = min + random.nextInt(max - min + 1);
                 for (int i = 0; i < ore.veinSize(); i++) {
                     int px = Math.clamp(localX + random.nextInt(5) - 2, 0, 15);
                     int pz = Math.clamp(localZ + random.nextInt(5) - 2, 0, 15);
@@ -612,7 +642,9 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
                     layers.put(entry.getKey(), new U8OreTileLayer(manifest, entry.getKey(), entry.getValue()));
                 }
                 U8OreTileLayer surfaceLayer = manifest.surfaceGeologyPath == null ? null : new U8OreTileLayer(manifest, "surface_geology", manifest.surfaceGeologyPath);
-                U8OreTileLayer vegetationLayer = manifest.vegetationPath == null ? null : new U8OreTileLayer(manifest, "vegetation", manifest.vegetationPath);
+                U8OreTileLayer vegetationLayer = manifest.vegetationPath == null
+                    ? null
+                    : new U8OreTileLayer(manifest, "vegetation", manifest.vegetationPath, manifest.vegetationCellBlocks, manifest.paddedWidth, manifest.paddedDepth);
                 U8OreTileLayer riverLayer = manifest.riversPath == null ? null : new U8OreTileLayer(manifest, "rivers", manifest.riversPath);
                 runtimeData = new RuntimeData(manifest, new R16HeightTileLayer(manifest), surfaceLayer, vegetationLayer, riverLayer, layers, OreSettings.defaults());
                 UkGeoMod.LOGGER.info("Loaded ukgeo manifest at {} with {}x{} tiles", root, manifest.tilesX(), manifest.tilesZ());
@@ -704,7 +736,21 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     public void buildSurface(WorldGenRegion level, StructureManager structureManager, RandomState random, ChunkAccess chunk) {
         scheduleWaterTicks(level, chunk);
         placeVegetation(chunk);
+        placeHighAltitudeSnowAndIce(chunk);
         populateCreateDieselGeneratorsOil(level.getLevel(), chunk.getPos());
+    }
+
+    @Override
+    public void applyBiomeDecoration(WorldGenLevel level, ChunkAccess chunk, StructureManager structureManager) {
+        super.applyBiomeDecoration(level, chunk, structureManager);
+        removeSnowAndIceBelowMinY(chunk);
+    }
+
+    private static int scaleVanillaY(int vanillaY, LevelHeightAccessor level) {
+        int worldMin = level.getMinBuildHeight();
+        int worldMax = level.getMaxBuildHeight() - 1;
+        float amount = (vanillaY - VANILLA_MIN_Y) / (float) (VANILLA_MAX_Y - VANILLA_MIN_Y);
+        return worldMin + Math.round(amount * (worldMax - worldMin));
     }
 
     private void placeVegetation(ChunkAccess chunk) {
@@ -718,15 +764,23 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
         int minBuildY = chunk.getMinBuildHeight();
         int maxY = chunk.getMaxBuildHeight() - 1;
+        Heightmap surfaceMap = chunk.getOrCreateHeightmapUnprimed(Heightmap.Types.WORLD_SURFACE_WG);
+        int cellBlocks = data.manifest.vegetationCellBlocks;
         for (int localX = 0; localX < 16; localX++) {
             int worldX = pos.getMinBlockX() + localX;
             for (int localZ = 0; localZ < 16; localZ++) {
                 int worldZ = pos.getMinBlockZ() + localZ;
-                int vegetationClass = data.vegetationLayer.sample(worldX, worldZ).orElse(0);
-                if (vegetationClass == 0 || vegetationClass == VEGETATION_URBAN || vegetationClass == VEGETATION_ROCKY) {
+                if (Math.floorMod(worldX, cellBlocks) != 0 || Math.floorMod(worldZ, cellBlocks) != 0) {
                     continue;
                 }
-                int top = Math.clamp(surfaceY(worldX, worldZ), minBuildY + 1, maxY);
+                int vegetationClass = data.vegetationLayer.sample(worldX, worldZ).orElse(0);
+                if (vegetationClass == VEGETATION_URBAN) {
+                    continue;
+                }
+                int top = surfaceMap.getHighestTaken(localX, localZ);
+                if (top < minBuildY + 1 || top >= maxY) {
+                    continue;
+                }
                 RiverShape river = riverShape(worldX, worldZ, top, minBuildY);
                 if (river.hasWater() || top <= seaLevelY || river.terrainSurfaceY() != top) {
                     continue;
@@ -740,6 +794,45 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
                     continue;
                 }
                 placeVegetationForClass(chunk, cursor, random, vegetationClass, localX, y, localZ);
+            }
+        }
+    }
+
+    private void placeHighAltitudeSnowAndIce(ChunkAccess chunk) {
+        ChunkPos pos = chunk.getPos();
+        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+        Heightmap surfaceMap = chunk.getOrCreateHeightmapUnprimed(Heightmap.Types.WORLD_SURFACE_WG);
+        int maxY = chunk.getMaxBuildHeight() - 1;
+        for (int localX = 0; localX < 16; localX++) {
+            for (int localZ = 0; localZ < 16; localZ++) {
+                int top = surfaceMap.getHighestTaken(localX, localZ);
+                if (top < SNOW_ICE_MIN_Y) {
+                    continue;
+                }
+                BlockState surface = chunk.getBlockState(cursor.set(localX, top, localZ));
+                if (surface.is(Blocks.WATER) && top + 1 < maxY && chunk.getBlockState(cursor.set(localX, top + 1, localZ)).isAir()) {
+                    chunk.setBlockState(cursor, Blocks.ICE.defaultBlockState(), false);
+                    continue;
+                }
+                if ((surface.is(Blocks.GRASS_BLOCK) || surface.is(Blocks.DIRT) || surface.is(Blocks.STONE))
+                    && top + 1 < maxY
+                    && chunk.getBlockState(cursor.set(localX, top + 1, localZ)).isAir()) {
+                    chunk.setBlockState(cursor, Blocks.SNOW.defaultBlockState(), false);
+                }
+            }
+        }
+    }
+
+    private static void removeSnowAndIceBelowMinY(ChunkAccess chunk) {
+        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+        for (int localX = 0; localX < 16; localX++) {
+            for (int localZ = 0; localZ < 16; localZ++) {
+                for (int y = chunk.getMinBuildHeight(); y < SNOW_ICE_MIN_Y; y++) {
+                    BlockState state = chunk.getBlockState(cursor.set(localX, y, localZ));
+                    if (state.is(Blocks.SNOW) || state.is(Blocks.SNOW_BLOCK) || state.is(Blocks.ICE) || state.is(Blocks.FROSTED_ICE) || state.is(Blocks.POWDER_SNOW)) {
+                        chunk.setBlockState(cursor, Blocks.AIR.defaultBlockState(), false);
+                    }
+                }
             }
         }
     }
@@ -812,6 +905,11 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
                     placePlant(chunk, cursor, localX, y, localZ, random.nextBoolean() ? Blocks.FERN.defaultBlockState() : Blocks.SHORT_GRASS.defaultBlockState());
                 } else if (random.nextInt(45) == 0) {
                     placeDoublePlant(chunk, cursor, localX, y, localZ, Blocks.LARGE_FERN.defaultBlockState());
+                }
+            }
+            case 0, VEGETATION_ROCKY -> {
+                if (random.nextInt(10) == 0) {
+                    placePlant(chunk, cursor, localX, y, localZ, Blocks.SHORT_GRASS.defaultBlockState());
                 }
             }
             default -> {
