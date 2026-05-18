@@ -63,7 +63,7 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     private static final int VEGETATION_WETLAND = 8;
     private static final int VEGETATION_HEATH = 9;
     private static final int VEGETATION_URBAN = 11;
-    private static final int VEGETATION_ROCK_OR_COASTAL = 12;
+    private static final int VEGETATION_ROCKY = 12;
     private static final int WATER_EDGE_SMOOTHING_RADIUS = 16;
     private static final int WATER_EDGE_SAMPLE_STEP = 1;
     private static final int WATER_EDGE_MAX_LAND_HEIGHT_ABOVE_SEA = 24;
@@ -229,7 +229,7 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
             if (vegetationClass == VEGETATION_URBAN) {
                 return Blocks.STONE.defaultBlockState();
             }
-            if (vegetationClass == VEGETATION_ROCK_OR_COASTAL) {
+            if (vegetationClass == VEGETATION_ROCKY) {
                 return Blocks.GRAVEL.defaultBlockState();
             }
             return Blocks.GRASS_BLOCK.defaultBlockState();
@@ -723,7 +723,7 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
             for (int localZ = 0; localZ < 16; localZ++) {
                 int worldZ = pos.getMinBlockZ() + localZ;
                 int vegetationClass = data.vegetationLayer.sample(worldX, worldZ).orElse(0);
-                if (vegetationClass == 0 || vegetationClass == VEGETATION_URBAN || vegetationClass == VEGETATION_ROCK_OR_COASTAL) {
+                if (vegetationClass == 0 || vegetationClass == VEGETATION_URBAN || vegetationClass == VEGETATION_ROCKY) {
                     continue;
                 }
                 int top = Math.clamp(surfaceY(worldX, worldZ), minBuildY + 1, maxY);

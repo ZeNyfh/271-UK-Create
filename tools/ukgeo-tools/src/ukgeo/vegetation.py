@@ -32,7 +32,7 @@ VEGETATION_CLASSES: dict[int, dict[str, str]] = {
     9: {"name": "heath/heather", "color": "#8c5a99"},
     10: {"name": "freshwater", "color": "#3b82c4"},
     11: {"name": "urban/suburban", "color": "#777777"},
-    12: {"name": "rock/coastal sediment", "color": "#b9b0a2"},
+    12: {"name": "rocky", "color": "#b9b0a2"},
 }
 
 LCM_TO_VEGETATION = np.zeros(256, dtype=np.uint8)

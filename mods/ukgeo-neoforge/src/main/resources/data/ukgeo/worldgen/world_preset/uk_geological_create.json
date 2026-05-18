@@ -5,8 +5,22 @@
       "generator": {
         "type": "ukgeo:heightmap",
         "biome_source": {
-          "type": "minecraft:fixed",
-          "biome": "minecraft:plains"
+          "type": "ukgeo:vegetation",
+          "fallback": "minecraft:plains",
+          "ocean": "minecraft:ocean",
+          "river": "minecraft:river",
+          "broadleaf_woodland": "minecraft:forest",
+          "conifer_woodland": "minecraft:taiga",
+          "arable": "minecraft:plains",
+          "improved_grassland": "minecraft:plains",
+          "neutral_grassland": "minecraft:meadow",
+          "calcareous_grassland": "minecraft:flower_forest",
+          "acid_grassland": "minecraft:windswept_hills",
+          "wetland": "minecraft:swamp",
+          "heath": "minecraft:windswept_forest",
+          "freshwater": "minecraft:river",
+          "urban": "minecraft:plains",
+          "rocky": "minecraft:stony_shore"
         },
         "sea_level_y": 64,
         "height_scale": 0.18,
