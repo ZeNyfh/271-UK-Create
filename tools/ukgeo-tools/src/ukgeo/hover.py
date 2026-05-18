@@ -187,6 +187,17 @@ def open_height_hover_map(root: Path, max_size: int = 4096, style: str = "auto")
         for name in available_layers
     }
     layer_buttons: dict[str, ttk.Checkbutton] = {}
+    # Per-ore toggles (dropdown menu) — controlled separately from the main 'ores' layer.
+    ore_names = [ore for ore, layer in manifest.get("ore_layers", {}).items() if (root / layer["path"]).exists()]
+    ore_enabled: dict[str, tk.BooleanVar] = {ore: tk.BooleanVar(value=True) for ore in ore_names}
+
+    def on_ore_toggle(_ore: str | None = None) -> None:
+        # Reload the ores overlay when selection changes and the main ores layer is enabled.
+        if enabled_layers.get("ores", tk.BooleanVar()).get():
+            # Force a reload of the ores layer
+            if "ores" in layer_images:
+                del layer_images["ores"]
+            request_layer("ores")
 
     def rebuild_preview() -> None:
         nonlocal preview_image
@@ -209,9 +220,14 @@ def open_height_hover_map(root: Path, max_size: int = 4096, style: str = "auto")
         layer_buttons[name].state(["disabled"])
         status.set(f"Loading {name.replace('_', ' ')} overlay...")
 
+        # capture selected ores if loading ores overlay
+        selected_ores = None
+        if name == "ores":
+            selected_ores = [ore for ore, var in ore_enabled.items() if var.get()]
+
         def load() -> tuple[str, Image.Image | BaseException]:
             try:
-                return name, _load_layer_image(name, root, manifest, tiles_x, tiles_z, tile_size, scale, preview_values)
+                return name, _load_layer_image(name, root, manifest, tiles_x, tiles_z, tile_size, scale, preview_values, ores_filter=selected_ores)
             except BaseException as exc:
                 return name, exc
 
@@ -220,11 +236,30 @@ def open_height_hover_map(root: Path, max_size: int = 4096, style: str = "auto")
 
         worker_pool.submit(load).add_done_callback(done)
 
-    for index, name in enumerate(available_layers):
+    col = 0
+    for name in available_layers:
         label = name.replace("_", " ")
-        button = ttk.Checkbutton(controls, text=label, variable=enabled_layers[name], command=lambda layer=name: request_layer(layer))
-        button.grid(row=0, column=index, padx=(0, 10), sticky="w")
-        layer_buttons[name] = button
+        if name == "ores":
+            # main ores checkbox in its own column
+            button = ttk.Checkbutton(controls, text=label, variable=enabled_layers[name], command=lambda layer=name: request_layer(layer))
+            button.grid(row=0, column=col, padx=(0, 2), sticky="w")
+            # dropdown menu for per-ore selection placed in the next column
+            if ore_names:
+                mb = ttk.Menubutton(controls, text="\u25BE")
+                menu = tk.Menu(mb, tearoff=0)
+                for ore in ore_names:
+                    menu.add_checkbutton(label=ore.replace("_", " "), variable=ore_enabled[ore], command=lambda o=ore: on_ore_toggle(o))
+                mb["menu"] = menu
+                mb.grid(row=0, column=col + 1, padx=(2, 10), sticky="w")
+                col += 2
+            else:
+                col += 1
+            layer_buttons[name] = button
+        else:
+            button = ttk.Checkbutton(controls, text=label, variable=enabled_layers[name], command=lambda layer=name: request_layer(layer))
+            button.grid(row=0, column=col, padx=(0, 10), sticky="w")
+            layer_buttons[name] = button
+            col += 1
 
     status = tk.StringVar(
         value="Mouse wheel zooms. Middle/right drag pans. Left click copies the current Minecraft coordinates."
@@ -298,12 +333,14 @@ def open_height_hover_map(root: Path, max_size: int = 4096, style: str = "auto")
         bng = ""
         if sample.bng_easting is not None and sample.bng_northing is not None:
             bng = f" | BNG E {sample.bng_easting:.0f}, N {sample.bng_northing:.0f}"
+            selected_ores = [ore for ore, var in ore_enabled.items() if var.get()]
         details = _sample_layer_text(
             u8_samplers,
             manifest,
             sample.data_x,
             sample.data_z,
             {name: var.get() for name, var in enabled_layers.items()},
+            selected_ores,
         )
         suffix = f" | {details}" if details else ""
         return (
@@ -464,7 +501,7 @@ def _available_layer_names(root: Path, manifest: dict) -> list[str]:
     return names
 
 
-def _load_layer_image(name: str, root: Path, manifest: dict, tiles_x: int, tiles_z: int, tile_size: int, scale: int, height_values) -> Image.Image:
+def _load_layer_image(name: str, root: Path, manifest: dict, tiles_x: int, tiles_z: int, tile_size: int, scale: int, height_values, ores_filter: list[str] | None = None) -> Image.Image:
     if name == "surface":
         values = _read_u8_preview(root, manifest["surface_geology"]["path"], tiles_x, tiles_z, tile_size, scale, missing_ok=False)
         return _categorical_overlay_image(values, manifest["surface_geology"].get("classes", {}), alpha=166, transparent_zero=False)
@@ -475,7 +512,7 @@ def _load_layer_image(name: str, root: Path, manifest: dict, tiles_x: int, tiles
         values = _read_u8_preview(root, manifest["rivers"]["path"], tiles_x, tiles_z, tile_size, scale, missing_ok=False)
         return _mask_overlay_image(values, (65, 145, 230))
     if name == "ores":
-        return _ores_overlay_image(root, manifest, tiles_x, tiles_z, tile_size, scale, height_values)
+        return _ores_overlay_image(root, manifest, tiles_x, tiles_z, tile_size, scale, height_values, only_ores=ores_filter)
     raise ValueError(f"Unknown hover-map layer {name!r}")
 
 
@@ -501,10 +538,12 @@ def _mask_overlay_image(values, color_value: tuple[int, int, int]) -> Image.Imag
     return Image.fromarray(rgba, mode="RGBA")
 
 
-def _ores_overlay_image(root: Path, manifest: dict, tiles_x: int, tiles_z: int, tile_size: int, scale: int, height_values) -> Image.Image:
+def _ores_overlay_image(root: Path, manifest: dict, tiles_x: int, tiles_z: int, tile_size: int, scale: int, height_values, only_ores: list[str] | None = None) -> Image.Image:
     weighted_color = np.zeros((*height_values.shape, 3), dtype=np.float32)
     weights = np.zeros(height_values.shape, dtype=np.float32)
     for ore, layer in manifest.get("ore_layers", {}).items():
+        if only_ores is not None and ore not in only_ores:
+            continue
         if not (root / layer["path"]).exists():
             continue
         values = _read_u8_preview(root, layer["path"], tiles_x, tiles_z, tile_size, scale, missing_ok=True)
@@ -535,7 +574,7 @@ def _make_u8_samplers(root: Path, manifest: dict) -> dict[str, U8TileSampler]:
     return samplers
 
 
-def _sample_layer_text(samplers: dict[str, U8TileSampler], manifest: dict, data_x: int, data_z: int, enabled: dict[str, bool]) -> str:
+def _sample_layer_text(samplers: dict[str, U8TileSampler], manifest: dict, data_x: int, data_z: int, enabled: dict[str, bool], selected_ores: list[str] | None = None) -> str:
     parts: list[str] = []
     surface = samplers.get("surface")
     if surface is not None and enabled.get("surface", False):
@@ -557,9 +596,12 @@ def _sample_layer_text(samplers: dict[str, U8TileSampler], manifest: dict, data_
         for key, sampler in samplers.items():
             if not key.startswith("ore:"):
                 continue
+            ore_name = key.split(":", 1)[1]
+            if selected_ores is not None and ore_name not in selected_ores:
+                continue
             score = sampler.sample(data_x, data_z) or 0
             if score > 0:
-                ore_scores.append((key.split(":", 1)[1], score))
+                ore_scores.append((ore_name, score))
     if ore_scores:
         best = sorted(ore_scores, key=lambda item: item[1], reverse=True)[:4]
         parts.append("ores " + ", ".join(f"{name} {score}" for name, score in best))
