@@ -3,6 +3,8 @@ package com.ukgeo.worldgen;
 import java.util.List;
 
 public final class OreSettings {
+    private static final String BACKGROUND_ONLY = "";
+
     private OreSettings() {
     }
 
@@ -14,6 +16,10 @@ public final class OreSettings {
             new OreDefinition("zinc", "zinc", "create:zinc_ore", "create:deepslate_zinc_ore", 1, 14, 80, 500, 12),
             new OreDefinition("tin", "tin", "minecraft:copper_ore", "minecraft:deepslate_copper_ore", 0, 6, 100, 600, 6),
             new OreDefinition("gold", "gold", "minecraft:gold_ore", "minecraft:deepslate_gold_ore", 0, 5, 200, 900, 5),
+            new OreDefinition("redstone", BACKGROUND_ONLY, "minecraft:redstone_ore", "minecraft:deepslate_redstone_ore", 8, 0, 80, 900, 8),
+            new OreDefinition("lapis", BACKGROUND_ONLY, "minecraft:lapis_ore", "minecraft:deepslate_lapis_ore", 2, 0, 80, 900, 7),
+            new OreDefinition("diamond", BACKGROUND_ONLY, "minecraft:diamond_ore", "minecraft:deepslate_diamond_ore", 4, 0, 96, 1000, 6),
+            new OreDefinition("emerald", BACKGROUND_ONLY, "minecraft:emerald_ore", "minecraft:deepslate_emerald_ore", 2, 0, 40, 400, 3),
             new OreDefinition("andesite", "andesite", "minecraft:andesite", "minecraft:andesite", 0, 18, 5, 700, 28),
             new OreDefinition("diorite", "diorite", "minecraft:diorite", "minecraft:diorite", 0, 14, 5, 700, 24),
             new OreDefinition("granite", "granite", "minecraft:granite", "minecraft:granite", 0, 18, 5, 900, 30),
