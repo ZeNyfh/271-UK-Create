@@ -38,7 +38,8 @@ public final class UkGeoCommands {
                                 }
                                 StringBuilder message = new StringBuilder("surfaceY=").append(generator.surfaceY(x, z))
                                     .append(" surfaceGeology=").append(generator.sampleSurface(x, z))
-                                    .append(" river=").append(generator.sampleRiver(x, z));
+                                    .append(" river=").append(generator.sampleRiver(x, z))
+                                    .append(" oilMb=").append(generator.sampleOilAmount(ctx.getSource().getLevel().getSeed(), x, z));
                                 for (Map.Entry<String, Integer> entry : generator.sampleOres(x, z).entrySet()) {
                                     message.append(" ").append(entry.getKey()).append("=").append(entry.getValue());
                                 }

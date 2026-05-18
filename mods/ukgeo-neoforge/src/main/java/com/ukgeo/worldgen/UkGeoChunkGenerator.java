@@ -4,6 +4,7 @@ import com.mojang.serialization.Codec;
 import com.mojang.serialization.MapCodec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
 import java.io.IOException;
+import java.lang.reflect.Method;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -19,6 +20,7 @@ import net.minecraft.core.Holder;
 import net.minecraft.core.HolderSet;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.WorldGenRegion;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.LevelHeightAccessor;
@@ -39,14 +41,23 @@ import net.minecraft.world.level.levelgen.RandomState;
 import net.minecraft.world.level.levelgen.blending.Blender;
 import net.minecraft.world.level.levelgen.placement.PlacedFeature;
 import net.minecraft.world.level.material.Fluids;
+import net.neoforged.fml.ModList;
 
 public final class UkGeoChunkGenerator extends ChunkGenerator {
+    private static final String CREATE_DIESEL_GENERATORS_MOD_ID = "createdieselgenerators";
+    private static final String CREATE_DIESEL_GENERATORS_OIL_DATA_CLASS = "com.jesz.createdieselgenerators.world.OilChunksSavedData";
+    private static final int OIL_SCORE_THRESHOLD = 64;
+    private static final int OIL_DEPOSIT_MIN_MILLIBUCKETS = 4_250_000;
+    private static final int OIL_DEPOSIT_MAX_MILLIBUCKETS = 9_500_000;
+    private static final int[] OIL_SAMPLE_OFFSETS = {4, 8, 12};
     private static final int WATER_EDGE_SMOOTHING_RADIUS = 16;
     private static final int WATER_EDGE_SAMPLE_STEP = 1;
     private static final int WATER_EDGE_MAX_LAND_HEIGHT_ABOVE_SEA = 24;
     private static final int SHALLOW_WATER_DEPTH = 2;
     private static final double BACKGROUND_ORE_ATTEMPT_MULTIPLIER = 0.1;
     private static final double ORE_AREA_ATTEMPT_MULTIPLIER = 3.0;
+    private static volatile boolean createDieselGeneratorsOilLookupAttempted;
+    private static volatile Method createDieselGeneratorsSetOilAmount;
 
     public static final MapCodec<UkGeoChunkGenerator> CODEC = RecordCodecBuilder.mapCodec(instance -> instance.group(
         BiomeSource.CODEC.fieldOf("biome_source").forGetter(generator -> generator.biomeSource),
@@ -636,9 +647,18 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         return data.riverLayer.sample(x, z).orElse(0);
     }
 
+    public int sampleOilAmount(long seed, int x, int z) {
+        RuntimeData data = data();
+        if (data == null) {
+            return 0;
+        }
+        return oilAmountForChunk(data, seed, new ChunkPos(Math.floorDiv(x, 16), Math.floorDiv(z, 16)));
+    }
+
     @Override
     public void buildSurface(WorldGenRegion level, StructureManager structureManager, RandomState random, ChunkAccess chunk) {
         scheduleWaterTicks(level, chunk);
+        populateCreateDieselGeneratorsOil(level.getLevel(), chunk.getPos());
     }
 
     private void scheduleWaterTicks(WorldGenRegion level, ChunkAccess chunk) {
@@ -671,6 +691,117 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
                 level.scheduleTick(cursor.immutable(), Fluids.WATER, tickDelay);
             }
         }
+    }
+
+    private void populateCreateDieselGeneratorsOil(ServerLevel level, ChunkPos chunkPos) {
+        RuntimeData data = data();
+        Optional<Method> setOilAmount = createDieselGeneratorsSetOilAmount();
+        if (data == null || setOilAmount.isEmpty()) {
+            return;
+        }
+        int amount = oilAmountForChunk(data, level.getSeed(), chunkPos);
+        try {
+            setOilAmount.get().invoke(null, level, chunkPos, amount);
+        } catch (ReflectiveOperationException ex) {
+            UkGeoMod.LOGGER.warn("Could not set Create: Diesel Generators oil amount for chunk {}: {}", chunkPos, ex.getMessage());
+        }
+    }
+
+    private static Optional<Method> createDieselGeneratorsSetOilAmount() {
+        if (!ModList.get().isLoaded(CREATE_DIESEL_GENERATORS_MOD_ID)) {
+            return Optional.empty();
+        }
+        Method current = createDieselGeneratorsSetOilAmount;
+        if (current != null) {
+            return Optional.of(current);
+        }
+        if (createDieselGeneratorsOilLookupAttempted) {
+            return Optional.empty();
+        }
+        synchronized (UkGeoChunkGenerator.class) {
+            if (createDieselGeneratorsSetOilAmount != null) {
+                return Optional.of(createDieselGeneratorsSetOilAmount);
+            }
+            if (createDieselGeneratorsOilLookupAttempted) {
+                return Optional.empty();
+            }
+            createDieselGeneratorsOilLookupAttempted = true;
+            try {
+                Class<?> savedDataClass = Class.forName(CREATE_DIESEL_GENERATORS_OIL_DATA_CLASS);
+                createDieselGeneratorsSetOilAmount = savedDataClass.getMethod("setChunkOilAmount", ServerLevel.class, ChunkPos.class, int.class);
+                UkGeoMod.LOGGER.info("Create: Diesel Generators oil integration enabled");
+                return Optional.of(createDieselGeneratorsSetOilAmount);
+            } catch (ReflectiveOperationException ex) {
+                UkGeoMod.LOGGER.warn("Create: Diesel Generators is loaded, but UKGeo could not find its oil chunk API: {}", ex.getMessage());
+                return Optional.empty();
+            }
+        }
+    }
+
+    private int oilAmountForChunk(RuntimeData data, long seed, ChunkPos chunkPos) {
+        int score = oilScoreForChunk(data, chunkPos);
+        if (score < OIL_SCORE_THRESHOLD) {
+            return 0;
+        }
+        double richness = (score - OIL_SCORE_THRESHOLD) / (double) (255 - OIL_SCORE_THRESHOLD);
+        long mixedSeed = seed ^ (((long) chunkPos.x) << 32) ^ (chunkPos.z & 0xffffffffL) ^ 0x4f494c554b47454fL;
+        java.util.Random random = new java.util.Random(mixedSeed);
+        double variation = 0.85 + random.nextDouble() * 0.3;
+        int amount = (int) Math.round(lerp(OIL_DEPOSIT_MIN_MILLIBUCKETS, OIL_DEPOSIT_MAX_MILLIBUCKETS, richness) * variation);
+        return Math.clamp(amount, OIL_DEPOSIT_MIN_MILLIBUCKETS, OIL_DEPOSIT_MAX_MILLIBUCKETS);
+    }
+
+    private int oilScoreForChunk(RuntimeData data, ChunkPos chunkPos) {
+        int score = 0;
+        for (int localZ : OIL_SAMPLE_OFFSETS) {
+            int z = chunkPos.getMinBlockZ() + localZ;
+            for (int localX : OIL_SAMPLE_OFFSETS) {
+                int x = chunkPos.getMinBlockX() + localX;
+                score = Math.max(score, oilScoreAt(data, x, z));
+            }
+        }
+        return score;
+    }
+
+    private int oilScoreAt(RuntimeData data, int x, int z) {
+        int score = Math.max(oreLayerScore(data, "limestone", x, z), oreLayerScore(data, "calcite", x, z));
+        return Math.max(score, surfaceOilScore(data, x, z));
+    }
+
+    private static int oreLayerScore(RuntimeData data, String layerName, int x, int z) {
+        U8OreTileLayer layer = data.oreLayers.get(layerName);
+        return layer == null ? 0 : layer.sample(x, z).orElse(0);
+    }
+
+    private static int surfaceOilScore(RuntimeData data, int x, int z) {
+        if (data.surfaceLayer == null) {
+            return 0;
+        }
+        int classId = data.surfaceLayer.sample(x, z).orElse(0);
+        SurfaceGeologyClass surfaceClass = data.manifest.surfaceGeologyClasses.get(classId);
+        if (surfaceClass == null) {
+            return 0;
+        }
+        return isOilBearingSurface(surfaceClass) ? 220 : 0;
+    }
+
+    private static boolean isOilBearingSurface(SurfaceGeologyClass surfaceClass) {
+        return isOilBearingText(surfaceClass.name())
+            || isOilBearingText(surfaceClass.block())
+            || isOilBearingText(surfaceClass.fallbackBlock());
+    }
+
+    private static boolean isOilBearingText(String value) {
+        if (value == null) {
+            return false;
+        }
+        String lower = value.toLowerCase(java.util.Locale.ROOT);
+        return lower.contains("limestone")
+            || lower.contains("calcite")
+            || lower.contains("chalk")
+            || lower.contains("dolomite")
+            || lower.contains("dolostone")
+            || lower.contains("calcareous");
     }
 
     @Override
