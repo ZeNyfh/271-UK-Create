@@ -34,7 +34,7 @@
         "river_widen_radius": 2,
         "river_carve_depth": 2,
         "min_y": -128,
-        "gen_depth": 1628,
+        "gen_depth": 1632,
         "fallback_height": 72,
         "use_config_data_root": true
       }

@@ -97,7 +97,7 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         Codec.INT.optionalFieldOf("river_widen_radius", 0).forGetter(generator -> generator.riverWidenRadius),
         Codec.INT.optionalFieldOf("river_carve_depth", 2).forGetter(generator -> generator.riverCarveDepth),
         Codec.INT.optionalFieldOf("min_y", -128).forGetter(generator -> generator.minY),
-        Codec.INT.optionalFieldOf("gen_depth", 1628).forGetter(generator -> generator.genDepth),
+        Codec.INT.optionalFieldOf("gen_depth", 1632).forGetter(generator -> generator.genDepth),
         Codec.INT.optionalFieldOf("fallback_height", 72).forGetter(generator -> generator.fallbackHeight),
         Codec.BOOL.optionalFieldOf("use_config_data_root", true).forGetter(generator -> generator.useConfigDataRoot)
     ).apply(instance, UkGeoChunkGenerator::new));

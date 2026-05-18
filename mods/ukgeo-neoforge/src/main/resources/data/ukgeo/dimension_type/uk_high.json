@@ -11,8 +11,8 @@
   "respawn_anchor_works": false,
   "has_raids": true,
   "min_y": -128,
-  "height": 1628,
-  "logical_height": 1628,
+  "height": 1632,
+  "logical_height": 1632,
   "infiniburn": "#minecraft:infiniburn_overworld",
   "effects": "minecraft:overworld",
   "monster_spawn_light_level": {
