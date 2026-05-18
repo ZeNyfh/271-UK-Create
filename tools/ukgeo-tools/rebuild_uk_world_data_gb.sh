@@ -9,8 +9,8 @@ DATA_DIR="${DATA_DIR:-$REPO_ROOT/data}"
 GENERATE_PREVIEWS="${GENERATE_PREVIEWS:-0}"
 MAX_SIZE="${MAX_SIZE:-12000}"
 LEGEND_SCALE="${LEGEND_SCALE:-20}"
-ORE_JOBS="${ORE_JOBS:-4}"
-VEGETATION_JOBS="${VEGETATION_JOBS:-4}"
+ORE_JOBS="${ORE_JOBS:-1}"
+VEGETATION_JOBS="${VEGETATION_JOBS:-1}"
 
 OS_TERRAIN_ZIP="${OS_TERRAIN_ZIP:-$DATA_DIR/terr50_gagg_gb.zip}"
 BGS_GEOLOGY_ZIP="${BGS_GEOLOGY_ZIP:-$DATA_DIR/BGS_Geology_625k_bedrock_gpkg.zip}"
@@ -112,6 +112,7 @@ echo "Rebuilding GB runtime tiles into: $TMP_ROOT"
   --landcover "$LANDCOVER_ZIP" \
   --manifest "$TMP_ROOT/manifest.json" \
   --out "$TMP_ROOT" \
+  --cell-metres 50 \
   --jobs "$VEGETATION_JOBS"
 
 "$UKGEO" validate-tiles "$TMP_ROOT"

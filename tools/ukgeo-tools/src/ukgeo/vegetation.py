@@ -50,17 +50,29 @@ LCM_TO_VEGETATION[[20, 21]] = 11
 LCM_TO_VEGETATION[[12, 15, 16, 17, 18]] = 12
 
 
-def make_vegetation_tiles(*, landcover: Path, manifest_path: Path, out: Path, band: int = 1, debug_geotiff: Path | None = None, jobs: int = 4) -> None:
+def make_vegetation_tiles(
+    *,
+    landcover: Path,
+    manifest_path: Path,
+    out: Path,
+    band: int = 1,
+    cell_metres: float = 50.0,
+    debug_geotiff: Path | None = None,
+    jobs: int = 1,
+) -> None:
     manifest = read_manifest(manifest_path)
     geo = manifest["georeferencing"]
     world = manifest["world"]
     tile_size = int(manifest["tile_size"])
     width = int(world["width"])
     depth = int(world["depth"])
-    padded_width = int(world["padded_width"])
-    padded_depth = int(world["padded_depth"])
-    tiles_x = math.ceil(padded_width / tile_size)
-    tiles_z = math.ceil(padded_depth / tile_size)
+    cell_blocks = cell_blocks_for_metres(cell_metres, geo, width, depth)
+    width_cells = math.ceil(width / cell_blocks)
+    depth_cells = math.ceil(depth / cell_blocks)
+    padded_width_cells = math.ceil(int(world["padded_width"]) / cell_blocks)
+    padded_depth_cells = math.ceil(int(world["padded_depth"]) / cell_blocks)
+    tiles_x = math.ceil(padded_width_cells / tile_size)
+    tiles_z = math.ceil(padded_depth_cells / tile_size)
     raster_path = _resolve_raster_path(landcover)
     root = out / "vegetation"
     root.mkdir(parents=True, exist_ok=True)
@@ -74,6 +86,7 @@ def make_vegetation_tiles(*, landcover: Path, manifest_path: Path, out: Path, ba
         console.print(f"Reading land cover raster {raster_path}")
         console.print(f"source CRS={src.crs}, size={src.width}x{src.height}, band={band}")
 
+    console.print(f"Vegetation cell size: {cell_metres:.0f} m (~{cell_blocks} blocks/cell)")
     tasks = [
         (
             raster_path,
@@ -81,6 +94,9 @@ def make_vegetation_tiles(*, landcover: Path, manifest_path: Path, out: Path, ba
             geo,
             width,
             depth,
+            cell_blocks,
+            width_cells,
+            depth_cells,
             tile_size,
             tiles_x,
             str(root),
@@ -101,6 +117,10 @@ def make_vegetation_tiles(*, landcover: Path, manifest_path: Path, out: Path, ba
         "path": "vegetation",
         "extension": ".u8.gz",
         "dtype": "uint8",
+        "cell_blocks": cell_blocks,
+        "cell_metres": cell_metres,
+        "width_cells": width_cells,
+        "depth_cells": depth_cells,
         "source": str(landcover),
         "source_band": band,
         "classes": {str(class_id): meta for class_id, meta in VEGETATION_CLASSES.items()},
@@ -130,34 +150,74 @@ def make_vegetation_tiles(*, landcover: Path, manifest_path: Path, out: Path, ba
     }
     write_manifest(manifest_path, manifest)
     if debug_geotiff:
-        _write_debug_geotiff(debug_geotiff, out / "vegetation", manifest, tiles_x, tiles_z, tile_size)
+        _write_debug_geotiff(debug_geotiff, out / "vegetation", manifest, tiles_x, tiles_z, tile_size, width_cells, depth_cells)
+
+
+def cell_blocks_for_metres(cell_metres: float, geo: dict, width: int, depth: int) -> int:
+    metres_x, metres_z = block_metres_scale(geo, width, depth)
+    metres_per_block = (metres_x + metres_z) / 2.0
+    return max(1, int(round(cell_metres / metres_per_block)))
+
+
+def block_metres_scale(geo: dict, width: int, depth: int) -> tuple[float, float]:
+    min_e = float(geo["bng_min_easting"])
+    min_n = float(geo["bng_min_northing"])
+    max_e = float(geo["bng_max_easting"])
+    max_n = float(geo["bng_max_northing"])
+    return (max_e - min_e) / width, (max_n - min_n) / depth
+
+
+def resample_blocks_to_cells(block_data: np.ndarray, cell_blocks: int) -> np.ndarray:
+    if cell_blocks <= 1:
+        return block_data.astype(np.uint8, copy=False)
+    height, width = block_data.shape
+    cells_z = math.ceil(height / cell_blocks)
+    cells_x = math.ceil(width / cell_blocks)
+    cells = np.zeros((cells_z, cells_x), dtype=np.uint8)
+    for cell_z in range(cells_z):
+        z0 = cell_z * cell_blocks
+        z1 = min(height, z0 + cell_blocks)
+        for cell_x in range(cells_x):
+            x0 = cell_x * cell_blocks
+            x1 = min(width, x0 + cell_blocks)
+            patch = block_data[z0:z1, x0:x1]
+            if patch.size == 0:
+                continue
+            counts = np.bincount(patch.ravel(), minlength=256)
+            cells[cell_z, cell_x] = np.uint8(counts.argmax())
+    return cells
 
 
 def _write_vegetation_tile_row(task: tuple) -> int:
-    raster_path, band, geo, width, depth, tile_size, tiles_x, root, tile_z = task
+    raster_path, band, geo, width, depth, cell_blocks, width_cells, depth_cells, tile_size, tiles_x, root, tile_z = task
     root_path = Path(root)
     with rasterio.open(raster_path) as src:
         for tile_x in range(tiles_x):
             tile = np.zeros((tile_size, tile_size), dtype=np.uint8)
-            x0 = tile_x * tile_size
-            z0 = tile_z * tile_size
-            valid_w = max(0, min(tile_size, width - x0))
-            valid_h = max(0, min(tile_size, depth - z0))
+            cell_x0 = tile_x * tile_size
+            cell_z0 = tile_z * tile_size
+            valid_w = max(0, min(tile_size, width_cells - cell_x0))
+            valid_h = max(0, min(tile_size, depth_cells - cell_z0))
             if valid_w > 0 and valid_h > 0:
-                raw = np.zeros((valid_h, valid_w), dtype=np.uint8)
-                dst_transform = _window_transform(geo, width, depth, x0, z0, valid_w, valid_h)
+                block_x0 = cell_x0 * cell_blocks
+                block_z0 = cell_z0 * cell_blocks
+                block_w = min(valid_w * cell_blocks, width - block_x0)
+                block_h = min(valid_h * cell_blocks, depth - block_z0)
+                raw_blocks = np.zeros((block_h, block_w), dtype=np.uint8)
+                dst_transform = _window_transform(geo, width, depth, block_x0, block_z0, block_w, block_h)
                 reproject(
                     source=rasterio.band(src, band),
-                    destination=raw,
+                    destination=raw_blocks,
                     src_transform=src.transform,
                     src_crs=src.crs,
                     src_nodata=0,
                     dst_transform=dst_transform,
                     dst_crs="EPSG:27700",
                     dst_nodata=0,
-                    resampling=Resampling.nearest,
+                    resampling=Resampling.average,
                 )
-                tile[:valid_h, :valid_w] = LCM_TO_VEGETATION[raw]
+                raw_blocks = LCM_TO_VEGETATION[raw_blocks]
+                tile[:valid_h, :valid_w] = resample_blocks_to_cells(raw_blocks, cell_blocks)
             write_u8_tile(root_path / f"{tile_x:03d}_{tile_z:03d}.u8.gz", tile)
     return tile_z
 
@@ -188,29 +248,35 @@ def _window_transform(geo: dict, width: int, depth: int, x0: int, z0: int, valid
     return from_bounds(west, south, east, north, valid_w, valid_h)
 
 
-def _write_debug_geotiff(path: Path, tile_root: Path, manifest: dict, tiles_x: int, tiles_z: int, tile_size: int) -> None:
+def _write_debug_geotiff(
+    path: Path,
+    tile_root: Path,
+    manifest: dict,
+    tiles_x: int,
+    tiles_z: int,
+    tile_size: int,
+    width_cells: int,
+    depth_cells: int,
+) -> None:
     from .tiles import read_u8_tile
 
-    world = manifest["world"]
-    width = int(world["width"])
-    depth = int(world["depth"])
-    arr = np.zeros((depth, width), dtype=np.uint8)
+    arr = np.zeros((depth_cells, width_cells), dtype=np.uint8)
     for tile_z in range(tiles_z):
         for tile_x in range(tiles_x):
             tile = read_u8_tile(tile_root / f"{tile_x:03d}_{tile_z:03d}.u8.gz", tile_size)
             y0 = tile_z * tile_size
             x0 = tile_x * tile_size
-            y1 = min(depth, y0 + tile_size)
-            x1 = min(width, x0 + tile_size)
-            if y0 < depth and x0 < width:
+            y1 = min(depth_cells, y0 + tile_size)
+            x1 = min(width_cells, x0 + tile_size)
+            if y0 < depth_cells and x0 < width_cells:
                 arr[y0:y1, x0:x1] = tile[: y1 - y0, : x1 - x0]
     transform = from_bounds(
         manifest["georeferencing"]["bng_min_easting"],
         manifest["georeferencing"]["bng_min_northing"],
         manifest["georeferencing"]["bng_max_easting"],
         manifest["georeferencing"]["bng_max_northing"],
-        width,
-        depth,
+        width_cells,
+        depth_cells,
     )
     path.parent.mkdir(parents=True, exist_ok=True)
     with rasterio.open(path, "w", driver="GTiff", height=depth, width=width, count=1, dtype="uint8", crs="EPSG:27700", transform=transform) as dst:
