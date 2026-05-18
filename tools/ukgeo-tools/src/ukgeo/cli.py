@@ -10,7 +10,7 @@ from rich.table import Table
 
 from .asc import iter_nested_asc_headers
 from .bgs import likely_geology_fields, resolve_gpkg
-from .coords import WorldBounds, minecraft_to_tile_cell
+from .coords import WorldBounds, minecraft_to_layer_cell, minecraft_to_tile_cell
 from .height import make_height_tiles as make_height_tiles_impl
 from .landmask import mask_height_to_bgs_land as mask_height_to_bgs_land_impl
 from .manifest import read_manifest
@@ -107,7 +107,7 @@ def make_ore_tiles(
     manifest: Path = typer.Option(..., "--manifest"),
     out: Path = typer.Option(..., "--out"),
     debug_geotiff_dir: Path | None = typer.Option(None, "--debug-geotiff-dir"),
-    jobs: int = typer.Option(4, "--jobs", help="Ore/mineral layers to process in parallel."),
+    jobs: int = typer.Option(1, "--jobs", help="Ore/mineral layers to process in parallel."),
 ) -> None:
     make_ore_tiles_impl(bgs=bgs, rules=rules, manifest_path=manifest, out=out, debug_geotiff_dir=debug_geotiff_dir, jobs=jobs)
 
@@ -160,10 +160,19 @@ def make_vegetation_tiles(
     manifest: Path = typer.Option(..., "--manifest"),
     out: Path = typer.Option(..., "--out"),
     band: int = typer.Option(1, "--band"),
+    cell_metres: float = typer.Option(50.0, "--cell-metres", help="Raster cell size in metres (default 50 m)."),
     debug_geotiff: Path | None = typer.Option(None, "--debug-geotiff"),
-    jobs: int = typer.Option(4, "--jobs", help="Vegetation tile rows to process in parallel."),
+    jobs: int = typer.Option(1, "--jobs", help="Vegetation tile rows to process in parallel."),
 ) -> None:
-    make_vegetation_tiles_impl(landcover=landcover, manifest_path=manifest, out=out, band=band, debug_geotiff=debug_geotiff, jobs=jobs)
+    make_vegetation_tiles_impl(
+        landcover=landcover,
+        manifest_path=manifest,
+        out=out,
+        band=band,
+        cell_metres=cell_metres,
+        debug_geotiff=debug_geotiff,
+        jobs=jobs,
+    )
 
 
 @app.command("mask-height-to-bgs-land")
@@ -317,9 +326,11 @@ def sample(root: Path, x: int = typer.Option(..., "--x"), z: int = typer.Option(
             console.print(f"river: {score}")
     if "vegetation" in manifest:
         vegetation = manifest["vegetation"]
-        path = root / vegetation["path"] / f"{tx:03d}_{tz:03d}.u8.gz"
+        cell_blocks = int(vegetation.get("cell_blocks", 1))
+        vtx, vtz, vlx, vlz = minecraft_to_layer_cell(x, z, bounds, cell_blocks=cell_blocks)
+        path = root / vegetation["path"] / f"{vtx:03d}_{vtz:03d}.u8.gz"
         if path.exists():
-            class_id = int(read_u8_tile(path, manifest["tile_size"])[lz, lx])
+            class_id = int(read_u8_tile(path, manifest["tile_size"])[vlz, vlx])
             meta = vegetation.get("classes", {}).get(str(class_id), {})
             console.print(f"vegetation: {meta.get('name', class_id)} ({class_id})")
     for ore, layer in manifest.get("ore_layers", {}).items():

@@ -45,10 +45,17 @@ def tile_filename(tile_x: int, tile_z: int, extension: str) -> str:
 
 
 def minecraft_to_tile_cell(x: int, z: int, bounds: WorldBounds) -> tuple[int, int, int, int]:
+    return minecraft_to_layer_cell(x, z, bounds, cell_blocks=1)
+
+
+def minecraft_to_layer_cell(x: int, z: int, bounds: WorldBounds, cell_blocks: int = 1) -> tuple[int, int, int, int]:
+    blocks = max(1, cell_blocks)
     data_x = x - bounds.minecraft_min_x
     data_z = z - bounds.minecraft_min_z
     if data_x < 0 or data_z < 0 or data_x >= bounds.padded_width or data_z >= bounds.padded_depth:
         raise ValueError(f"Minecraft coordinate {x},{z} is outside padded data bounds")
+    data_x //= blocks
+    data_z //= blocks
     tile_x = data_x // bounds.tile_size
     tile_z = data_z // bounds.tile_size
     local_x = data_x % bounds.tile_size

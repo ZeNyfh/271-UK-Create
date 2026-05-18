@@ -29,7 +29,10 @@ def validate_tiles(root: Path) -> list[str]:
         errors.extend(_check_layer(root / rivers["path"], rivers["extension"], tiles_x, tiles_z, tile_size * tile_size))
     if "vegetation" in manifest:
         vegetation = manifest["vegetation"]
-        errors.extend(_check_layer(root / vegetation["path"], vegetation["extension"], tiles_x, tiles_z, tile_size * tile_size))
+        cell_blocks = int(vegetation.get("cell_blocks", 1))
+        veg_tiles_x = math.ceil(manifest["world"]["padded_width"] / (tile_size * cell_blocks))
+        veg_tiles_z = math.ceil(manifest["world"]["padded_depth"] / (tile_size * cell_blocks))
+        errors.extend(_check_layer(root / vegetation["path"], vegetation["extension"], veg_tiles_x, veg_tiles_z, tile_size * tile_size))
     for layer in manifest.get("ore_layers", {}).values():
         errors.extend(_check_layer(root / layer["path"], layer["extension"], tiles_x, tiles_z, tile_size * tile_size))
     return errors
@@ -71,7 +74,10 @@ def tile_summary(root: Path) -> dict[str, Any]:
         summary["rivers"] = _u8_summary(root / manifest["rivers"]["path"], tiles_x, tiles_z, tile_size)
     if "vegetation" in manifest:
         vegetation = manifest["vegetation"]
-        summary["vegetation"] = _categorical_summary(root / vegetation["path"], tiles_x, tiles_z, tile_size, vegetation.get("classes", {}))
+        cell_blocks = int(vegetation.get("cell_blocks", 1))
+        veg_tiles_x = math.ceil(manifest["world"]["padded_width"] / (tile_size * cell_blocks))
+        veg_tiles_z = math.ceil(manifest["world"]["padded_depth"] / (tile_size * cell_blocks))
+        summary["vegetation"] = _categorical_summary(root / vegetation["path"], veg_tiles_x, veg_tiles_z, tile_size, vegetation.get("classes", {}))
     for name, layer in manifest.get("ore_layers", {}).items():
         summary["ores"][name] = _u8_summary(root / layer["path"], tiles_x, tiles_z, tile_size)
     return summary

@@ -9,6 +9,49 @@ from PIL import Image, ImageDraw
 from .manifest import read_manifest
 from .tiles import HEIGHT_NODATA, read_r16_tile, read_u8_tile
 
+def u8_layer_grid(manifest: dict, layer: str) -> tuple[int, int, int, int, int]:
+    """Return tiles_x, tiles_z, data_width, data_depth, cell_blocks for a u8 tile layer."""
+    tile_size = int(manifest["tile_size"])
+    padded_width = int(manifest["world"]["padded_width"])
+    padded_depth = int(manifest["world"]["padded_depth"])
+    if layer == "vegetation":
+        vegetation = manifest["vegetation"]
+        cell_blocks = max(1, int(vegetation.get("cell_blocks", 1)))
+        data_width = int(vegetation.get("width_cells", math.ceil(int(manifest["world"]["width"]) / cell_blocks)))
+        data_depth = int(vegetation.get("depth_cells", math.ceil(int(manifest["world"]["depth"]) / cell_blocks)))
+        tiles_x = math.ceil(padded_width / (tile_size * cell_blocks))
+        tiles_z = math.ceil(padded_depth / (tile_size * cell_blocks))
+        return tiles_x, tiles_z, data_width, data_depth, cell_blocks
+    tiles_x = math.ceil(padded_width / tile_size)
+    tiles_z = math.ceil(padded_depth / tile_size)
+    return tiles_x, tiles_z, padded_width, padded_depth, 1
+
+
+def upscale_cells_to_blocks(cells: np.ndarray, cell_blocks: int) -> np.ndarray:
+    if cell_blocks <= 1:
+        return cells
+    return np.repeat(np.repeat(cells, cell_blocks, axis=0), cell_blocks, axis=1)
+
+
+def read_vegetation_preview(root: Path, manifest: dict, scale: int, *, missing_ok: bool = False) -> np.ndarray:
+    vegetation = manifest["vegetation"]
+    tiles_x, tiles_z, width_cells, depth_cells, cell_blocks = u8_layer_grid(manifest, "vegetation")
+    values = _read_u8_preview(
+        root,
+        vegetation["path"],
+        tiles_x,
+        tiles_z,
+        int(manifest["tile_size"]),
+        scale,
+        missing_ok=missing_ok,
+        data_width=width_cells,
+        data_depth=depth_cells,
+    )
+    if cell_blocks > 1:
+        values = upscale_cells_to_blocks(values, cell_blocks)
+    return values
+
+
 ORE_COLORS: dict[str, tuple[int, int, int]] = {
     "coal": (40, 40, 40),
     "iron": (210, 70, 45),
@@ -58,7 +101,7 @@ def make_preview(root: Path, layer: str, out: Path, max_size: int = 4096, style:
     elif layer == "vegetation":
         if "vegetation" not in manifest:
             raise FileNotFoundError("No vegetation layer is present. Run ukgeo make-vegetation-tiles first.")
-        values = _read_u8_preview(root, manifest["vegetation"]["path"], tiles_x, tiles_z, tile_size, scale, missing_ok=False)
+        values = read_vegetation_preview(root, manifest, scale, missing_ok=False)
         output = _surface_image(values, manifest["vegetation"].get("classes", {}), legend_scale)
     elif layer in {"ores", "ore:all"}:
         height = _read_height_preview(root, manifest, tiles_x, tiles_z, tile_size, scale)
@@ -90,13 +133,26 @@ def _read_height_preview(root: Path, manifest: dict, tiles_x: int, tiles_z: int,
     return image
 
 
-def _read_u8_preview(root: Path, layer_path: str, tiles_x: int, tiles_z: int, tile_size: int, scale: int, missing_ok: bool) -> np.ndarray:
+def _read_u8_preview(
+    root: Path,
+    layer_path: str,
+    tiles_x: int,
+    tiles_z: int,
+    tile_size: int,
+    scale: int,
+    missing_ok: bool,
+    *,
+    data_width: int | None = None,
+    data_depth: int | None = None,
+) -> np.ndarray:
     base = root / layer_path
+    width = data_width if data_width is not None else tiles_x * tile_size
+    depth = data_depth if data_depth is not None else tiles_z * tile_size
     if not base.exists():
         if missing_ok:
-            return np.zeros((math.ceil(tiles_z * tile_size / scale), math.ceil(tiles_x * tile_size / scale)), dtype=np.uint8)
+            return np.zeros((math.ceil(depth / scale), math.ceil(width / scale)), dtype=np.uint8)
         raise FileNotFoundError(f"Tile directory is missing: {base}")
-    image = np.zeros((math.ceil(tiles_z * tile_size / scale), math.ceil(tiles_x * tile_size / scale)), dtype=np.uint8)
+    image = np.zeros((math.ceil(depth / scale), math.ceil(width / scale)), dtype=np.uint8)
     for tz in range(tiles_z):
         for tx in range(tiles_x):
             tile_path = base / f"{tx:03d}_{tz:03d}.u8.gz"

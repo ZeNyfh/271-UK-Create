@@ -21,7 +21,7 @@ from .tiles import write_u8_tile
 console = Console()
 
 
-def make_ore_tiles(*, bgs: Path, rules: Path, manifest_path: Path, out: Path, debug_geotiff_dir: Path | None = None, jobs: int = 4) -> None:
+def make_ore_tiles(*, bgs: Path, rules: Path, manifest_path: Path, out: Path, debug_geotiff_dir: Path | None = None, jobs: int = 1) -> None:
     manifest = read_manifest(manifest_path)
     geo = manifest["georeferencing"]
     world = manifest["world"]

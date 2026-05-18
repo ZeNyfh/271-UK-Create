@@ -13,7 +13,7 @@ import numpy as np
 from PIL import Image, ImageTk
 
 from .manifest import read_manifest
-from .preview import ORE_COLORS, _height_image, _hex_color, _read_height_preview, _read_u8_preview
+from .preview import ORE_COLORS, _height_image, _hex_color, _read_height_preview, _read_u8_preview, read_vegetation_preview
 from .tiles import HEIGHT_NODATA, read_r16_tile, read_u8_tile
 
 
@@ -102,12 +102,13 @@ class HeightTileSampler:
 
 
 class U8TileSampler:
-    def __init__(self, root: Path, manifest: dict, layer_path: str, max_tiles: int = 32) -> None:
+    def __init__(self, root: Path, manifest: dict, layer_path: str, max_tiles: int = 32, cell_blocks: int = 1) -> None:
         self.root = root
         self.manifest = manifest
         self.tile_size = int(manifest["tile_size"])
         self.layer_root = root / layer_path
         self.world = manifest["world"]
+        self.cell_blocks = max(1, cell_blocks)
         self.max_tiles = max(1, max_tiles)
         self.cache: OrderedDict[tuple[int, int], object] = OrderedDict()
 
@@ -116,10 +117,12 @@ class U8TileSampler:
         depth = int(self.world["depth"])
         if data_x < 0 or data_z < 0 or data_x >= width or data_z >= depth:
             return None
-        tile_x = data_x // self.tile_size
-        tile_z = data_z // self.tile_size
-        local_x = data_x % self.tile_size
-        local_z = data_z % self.tile_size
+        cell_x = data_x // self.cell_blocks
+        cell_z = data_z // self.cell_blocks
+        tile_x = cell_x // self.tile_size
+        tile_z = cell_z // self.tile_size
+        local_x = cell_x % self.tile_size
+        local_z = cell_z % self.tile_size
         tile = self._tile(tile_x, tile_z)
         return int(tile[local_z, local_x])
 
@@ -466,7 +469,7 @@ def _load_layer_image(name: str, root: Path, manifest: dict, tiles_x: int, tiles
         values = _read_u8_preview(root, manifest["surface_geology"]["path"], tiles_x, tiles_z, tile_size, scale, missing_ok=False)
         return _categorical_overlay_image(values, manifest["surface_geology"].get("classes", {}), alpha=166, transparent_zero=False)
     if name == "vegetation":
-        values = _read_u8_preview(root, manifest["vegetation"]["path"], tiles_x, tiles_z, tile_size, scale, missing_ok=False)
+        values = read_vegetation_preview(root, manifest, scale, missing_ok=False)
         return _categorical_overlay_image(values, manifest["vegetation"].get("classes", {}), alpha=176, transparent_zero=True)
     if name == "rivers":
         values = _read_u8_preview(root, manifest["rivers"]["path"], tiles_x, tiles_z, tile_size, scale, missing_ok=False)
@@ -522,7 +525,8 @@ def _make_u8_samplers(root: Path, manifest: dict) -> dict[str, U8TileSampler]:
     if "surface_geology" in manifest:
         samplers["surface"] = U8TileSampler(root, manifest, manifest["surface_geology"]["path"])
     if "vegetation" in manifest:
-        samplers["vegetation"] = U8TileSampler(root, manifest, manifest["vegetation"]["path"])
+        cell_blocks = int(manifest["vegetation"].get("cell_blocks", 1))
+        samplers["vegetation"] = U8TileSampler(root, manifest, manifest["vegetation"]["path"], cell_blocks=cell_blocks)
     if "rivers" in manifest:
         samplers["river"] = U8TileSampler(root, manifest, manifest["rivers"]["path"])
     for ore, layer in manifest.get("ore_layers", {}).items():
