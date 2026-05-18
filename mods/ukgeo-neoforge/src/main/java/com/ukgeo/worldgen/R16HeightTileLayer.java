@@ -33,6 +33,10 @@ public final class R16HeightTileLayer {
         }).map(OptionalInt::of).orElseGet(OptionalInt::empty);
     }
 
+    short[] readTile(TileCoord coord) throws IOException {
+        return cache.get(coord, this::load);
+    }
+
     private short[] load(TileCoord coord) throws IOException {
         Path path = manifest.root.resolve(manifest.heightPath).resolve(coord.fileStem() + ".r16.gz");
         byte[] data = readGzip(path, manifest.tileSize * manifest.tileSize * 2);
