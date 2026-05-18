@@ -35,6 +35,9 @@ import net.minecraft.world.level.levelgen.blending.Blender;
 import net.minecraft.world.level.material.Fluids;
 
 public final class UkGeoChunkGenerator extends ChunkGenerator {
+    private static final double BACKGROUND_ORE_ATTEMPT_MULTIPLIER = 0.1;
+    private static final double ORE_AREA_ATTEMPT_MULTIPLIER = 3.0;
+
     public static final MapCodec<UkGeoChunkGenerator> CODEC = RecordCodecBuilder.mapCodec(instance -> instance.group(
         BiomeSource.CODEC.fieldOf("biome_source").forGetter(generator -> generator.biomeSource),
         Codec.INT.optionalFieldOf("sea_level_y", 64).forGetter(generator -> generator.seaLevelY),
@@ -398,7 +401,8 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
                 continue;
             }
             int score = scoreLayer.sample(pos.getMinBlockX() + 8, pos.getMinBlockZ() + 8).orElse(0);
-            int attempts = ore.baseAttempts() + Math.round(ore.maxBonusAttempts() * (score / 255.0f));
+            int normalAttempts = ore.baseAttempts() + Math.round(ore.maxBonusAttempts() * (score / 255.0f));
+            int attempts = scaledOreAttempts(normalAttempts, score, random);
             for (int attempt = 0; attempt < attempts; attempt++) {
                 int localX = random.nextInt(16);
                 int localZ = random.nextInt(16);
@@ -419,6 +423,17 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
                 }
             }
         }
+    }
+
+    private static int scaledOreAttempts(int normalAttempts, int score, java.util.Random random) {
+        double multiplier = score > 0 ? ORE_AREA_ATTEMPT_MULTIPLIER : BACKGROUND_ORE_ATTEMPT_MULTIPLIER;
+        double scaled = normalAttempts * multiplier;
+        int wholeAttempts = (int) scaled;
+        double fractionalAttempt = scaled - wholeAttempts;
+        if (fractionalAttempt <= 0.0) {
+            return wholeAttempts;
+        }
+        return wholeAttempts + (random.nextDouble() < fractionalAttempt ? 1 : 0);
     }
 
     private Optional<BlockStatePair> resolveOreBlocks(OreDefinition ore) {
