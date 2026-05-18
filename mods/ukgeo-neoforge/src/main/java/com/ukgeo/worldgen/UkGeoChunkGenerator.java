@@ -32,7 +32,10 @@ import net.minecraft.world.level.biome.BiomeManager;
 import net.minecraft.world.level.biome.BiomeSource;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.DoublePlantBlock;
+import net.minecraft.world.level.block.LeavesBlock;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.DoubleBlockHalf;
 import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.ChunkGenerator;
 import net.minecraft.world.level.levelgen.GenerationStep;
@@ -69,6 +72,10 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     private static final double ORE_AREA_ATTEMPT_MULTIPLIER = 3.0;
     private static volatile boolean createDieselGeneratorsOilLookupAttempted;
     private static volatile Method createDieselGeneratorsSetOilAmount;
+    private static final BlockState PERSISTENT_OAK_LEAVES = Blocks.OAK_LEAVES.defaultBlockState().setValue(LeavesBlock.PERSISTENT, true);
+    private static final BlockState PERSISTENT_BIRCH_LEAVES = Blocks.BIRCH_LEAVES.defaultBlockState().setValue(LeavesBlock.PERSISTENT, true);
+    private static final BlockState PERSISTENT_SPRUCE_LEAVES = Blocks.SPRUCE_LEAVES.defaultBlockState().setValue(LeavesBlock.PERSISTENT, true);
+    private static final BlockState PERSISTENT_DARK_OAK_LEAVES = Blocks.DARK_OAK_LEAVES.defaultBlockState().setValue(LeavesBlock.PERSISTENT, true);
 
     public static final MapCodec<UkGeoChunkGenerator> CODEC = RecordCodecBuilder.mapCodec(instance -> instance.group(
         BiomeSource.CODEC.fieldOf("biome_source").forGetter(generator -> generator.biomeSource),
@@ -740,37 +747,71 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     private void placeVegetationForClass(ChunkAccess chunk, BlockPos.MutableBlockPos cursor, java.util.Random random, int vegetationClass, int localX, int y, int localZ) {
         switch (vegetationClass) {
             case VEGETATION_BROADLEAF_WOODLAND -> {
-                if (localX >= 2 && localX <= 13 && localZ >= 2 && localZ <= 13 && random.nextInt(72) == 0) {
-                    placeSimpleTree(chunk, cursor, random, localX, y, localZ, false);
-                } else if (random.nextInt(5) == 0) {
-                    placePlant(chunk, cursor, localX, y, localZ, Blocks.SHORT_GRASS.defaultBlockState());
+                if (canPlaceTreeAt(localX, localZ) && random.nextInt(88) == 0) {
+                    placeSimpleTree(chunk, cursor, random, localX, y, localZ, random.nextInt(4) == 0 ? VegetationTreeKind.BIRCH : VegetationTreeKind.OAK);
+                } else if (random.nextInt(9) == 0) {
+                    placeShrub(chunk, cursor, random, localX, y, localZ, random.nextBoolean() ? PERSISTENT_OAK_LEAVES : PERSISTENT_BIRCH_LEAVES);
+                } else if (random.nextInt(6) == 0) {
+                    placePlant(chunk, cursor, localX, y, localZ, randomGrassOrFlower(random, vegetationClass));
                 }
             }
             case VEGETATION_CONIFER_WOODLAND -> {
-                if (localX >= 2 && localX <= 13 && localZ >= 2 && localZ <= 13 && random.nextInt(64) == 0) {
-                    placeSimpleTree(chunk, cursor, random, localX, y, localZ, true);
-                } else if (random.nextInt(6) == 0) {
-                    placePlant(chunk, cursor, localX, y, localZ, Blocks.FERN.defaultBlockState());
+                if (canPlaceTreeAt(localX, localZ) && random.nextInt(76) == 0) {
+                    placeSimpleTree(chunk, cursor, random, localX, y, localZ, VegetationTreeKind.SPRUCE);
+                } else if (random.nextInt(10) == 0) {
+                    placeShrub(chunk, cursor, random, localX, y, localZ, PERSISTENT_SPRUCE_LEAVES);
+                } else if (random.nextInt(5) == 0) {
+                    if (random.nextInt(5) == 0) {
+                        placeDoublePlant(chunk, cursor, localX, y, localZ, Blocks.LARGE_FERN.defaultBlockState());
+                    } else {
+                        placePlant(chunk, cursor, localX, y, localZ, Blocks.FERN.defaultBlockState());
+                    }
                 }
             }
             case VEGETATION_WETLAND -> {
-                if (random.nextInt(3) == 0) {
-                    placePlant(chunk, cursor, localX, y, localZ, random.nextBoolean() ? Blocks.FERN.defaultBlockState() : Blocks.SHORT_GRASS.defaultBlockState());
+                if (hasAdjacentWater(chunk, cursor, localX, y - 1, localZ) && random.nextInt(3) == 0) {
+                    placeSugarCane(chunk, cursor, random, localX, y, localZ);
+                } else if (hasAdjacentWater(chunk, cursor, localX, y - 1, localZ) && random.nextInt(8) == 0) {
+                    placeLilyPadNearWater(chunk, cursor, localX, y - 1, localZ);
+                } else if (random.nextInt(4) == 0) {
+                    placePlant(chunk, cursor, localX, y, localZ, randomWetlandPlant(random));
+                } else if (random.nextInt(12) == 0) {
+                    placeDoublePlant(chunk, cursor, localX, y, localZ, Blocks.LARGE_FERN.defaultBlockState());
                 }
             }
             case VEGETATION_HEATH -> {
-                if (random.nextInt(5) == 0) {
-                    placePlant(chunk, cursor, localX, y, localZ, Blocks.FERN.defaultBlockState());
+                if (random.nextInt(11) == 0) {
+                    placeShrub(chunk, cursor, random, localX, y, localZ, random.nextBoolean() ? PERSISTENT_DARK_OAK_LEAVES : PERSISTENT_OAK_LEAVES);
+                } else if (random.nextInt(5) == 0) {
+                    placePlant(chunk, cursor, localX, y, localZ, random.nextInt(3) == 0 ? Blocks.DEAD_BUSH.defaultBlockState() : Blocks.FERN.defaultBlockState());
                 }
             }
             case VEGETATION_ARABLE -> {
-                if (random.nextInt(10) == 0) {
-                    placePlant(chunk, cursor, localX, y, localZ, Blocks.SHORT_GRASS.defaultBlockState());
+                if (random.nextInt(18) == 0) {
+                    placePlant(chunk, cursor, localX, y, localZ, randomGrassOrFlower(random, vegetationClass));
                 }
             }
-            case VEGETATION_IMPROVED_GRASSLAND, VEGETATION_NEUTRAL_GRASSLAND, VEGETATION_CALCAREOUS_GRASSLAND, VEGETATION_ACID_GRASSLAND -> {
+            case VEGETATION_IMPROVED_GRASSLAND -> {
+                if (random.nextInt(5) == 0) {
+                    placePlant(chunk, cursor, localX, y, localZ, randomGrassOrFlower(random, vegetationClass));
+                } else if (random.nextInt(35) == 0) {
+                    placeDoublePlant(chunk, cursor, localX, y, localZ, Blocks.TALL_GRASS.defaultBlockState());
+                }
+            }
+            case VEGETATION_NEUTRAL_GRASSLAND, VEGETATION_CALCAREOUS_GRASSLAND -> {
                 if (random.nextInt(4) == 0) {
-                    placePlant(chunk, cursor, localX, y, localZ, Blocks.SHORT_GRASS.defaultBlockState());
+                    placePlant(chunk, cursor, localX, y, localZ, randomGrassOrFlower(random, vegetationClass));
+                } else if (random.nextInt(30) == 0) {
+                    placeDoublePlant(chunk, cursor, localX, y, localZ, Blocks.TALL_GRASS.defaultBlockState());
+                } else if (random.nextInt(70) == 0) {
+                    placeShrub(chunk, cursor, random, localX, y, localZ, PERSISTENT_OAK_LEAVES);
+                }
+            }
+            case VEGETATION_ACID_GRASSLAND -> {
+                if (random.nextInt(5) == 0) {
+                    placePlant(chunk, cursor, localX, y, localZ, random.nextBoolean() ? Blocks.FERN.defaultBlockState() : Blocks.SHORT_GRASS.defaultBlockState());
+                } else if (random.nextInt(45) == 0) {
+                    placeDoublePlant(chunk, cursor, localX, y, localZ, Blocks.LARGE_FERN.defaultBlockState());
                 }
             }
             default -> {
@@ -784,8 +825,53 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         }
     }
 
-    private static void placeSimpleTree(ChunkAccess chunk, BlockPos.MutableBlockPos cursor, java.util.Random random, int localX, int y, int localZ, boolean conifer) {
-        int height = conifer ? 5 + random.nextInt(3) : 4 + random.nextInt(3);
+    private static void placeDoublePlant(ChunkAccess chunk, BlockPos.MutableBlockPos cursor, int localX, int y, int localZ, BlockState state) {
+        if (y + 1 >= chunk.getMaxBuildHeight()) {
+            return;
+        }
+        if (!chunk.getBlockState(cursor.set(localX, y, localZ)).isAir() || !chunk.getBlockState(cursor.set(localX, y + 1, localZ)).isAir()) {
+            return;
+        }
+        chunk.setBlockState(cursor.set(localX, y, localZ), state.setValue(DoublePlantBlock.HALF, DoubleBlockHalf.LOWER), false);
+        chunk.setBlockState(cursor.set(localX, y + 1, localZ), state.setValue(DoublePlantBlock.HALF, DoubleBlockHalf.UPPER), false);
+    }
+
+    private static void placeSugarCane(ChunkAccess chunk, BlockPos.MutableBlockPos cursor, java.util.Random random, int localX, int y, int localZ) {
+        int height = 1 + random.nextInt(3);
+        for (int dy = 0; dy < height; dy++) {
+            int py = y + dy;
+            if (py >= chunk.getMaxBuildHeight() || !chunk.getBlockState(cursor.set(localX, py, localZ)).isAir()) {
+                return;
+            }
+        }
+        BlockState state = Blocks.SUGAR_CANE.defaultBlockState();
+        for (int dy = 0; dy < height; dy++) {
+            chunk.setBlockState(cursor.set(localX, y + dy, localZ), state, false);
+        }
+    }
+
+    private static void placeLilyPadNearWater(ChunkAccess chunk, BlockPos.MutableBlockPos cursor, int localX, int waterY, int localZ) {
+        int[][] offsets = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+        for (int[] offset : offsets) {
+            int px = localX + offset[0];
+            int pz = localZ + offset[1];
+            int py = waterY + 1;
+            if (px < 0 || px > 15 || pz < 0 || pz > 15 || py >= chunk.getMaxBuildHeight()) {
+                continue;
+            }
+            if (chunk.getBlockState(cursor.set(px, waterY, pz)).is(Blocks.WATER) && chunk.getBlockState(cursor.set(px, py, pz)).isAir()) {
+                chunk.setBlockState(cursor, Blocks.LILY_PAD.defaultBlockState(), false);
+                return;
+            }
+        }
+    }
+
+    private static void placeSimpleTree(ChunkAccess chunk, BlockPos.MutableBlockPos cursor, java.util.Random random, int localX, int y, int localZ, VegetationTreeKind kind) {
+        int height = switch (kind) {
+            case SPRUCE -> 6 + random.nextInt(4);
+            case BIRCH -> 5 + random.nextInt(3);
+            case OAK -> 4 + random.nextInt(3);
+        };
         if (y + height + 2 >= chunk.getMaxBuildHeight()) {
             return;
         }
@@ -794,16 +880,24 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
                 return;
             }
         }
-        BlockState log = conifer ? Blocks.SPRUCE_LOG.defaultBlockState() : Blocks.OAK_LOG.defaultBlockState();
-        BlockState leaves = conifer ? Blocks.SPRUCE_LEAVES.defaultBlockState() : Blocks.OAK_LEAVES.defaultBlockState();
+        BlockState log = switch (kind) {
+            case SPRUCE -> Blocks.SPRUCE_LOG.defaultBlockState();
+            case BIRCH -> Blocks.BIRCH_LOG.defaultBlockState();
+            case OAK -> Blocks.OAK_LOG.defaultBlockState();
+        };
+        BlockState leaves = switch (kind) {
+            case SPRUCE -> PERSISTENT_SPRUCE_LEAVES;
+            case BIRCH -> PERSISTENT_BIRCH_LEAVES;
+            case OAK -> PERSISTENT_OAK_LEAVES;
+        };
         for (int dy = 0; dy < height; dy++) {
             chunk.setBlockState(cursor.set(localX, y + dy, localZ), log, false);
         }
-        int leafBase = y + height - 2;
-        int leafTop = y + height + (conifer ? 1 : 2);
+        int leafBase = y + height - (kind == VegetationTreeKind.SPRUCE ? 3 : 2);
+        int leafTop = y + height + (kind == VegetationTreeKind.SPRUCE ? 1 : 2);
         for (int py = leafBase; py <= leafTop; py++) {
             int layer = py - leafBase;
-            int radius = conifer ? Math.max(1, 2 - layer / 2) : (py == leafTop ? 1 : 2);
+            int radius = kind == VegetationTreeKind.SPRUCE ? spruceLeafRadius(layer, leafTop - leafBase) : (py == leafTop ? 1 : 2);
             for (int dz = -radius; dz <= radius; dz++) {
                 for (int dx = -radius; dx <= radius; dx++) {
                     int px = localX + dx;
@@ -817,6 +911,88 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
                 }
             }
         }
+    }
+
+    private static int spruceLeafRadius(int layer, int topLayer) {
+        if (layer >= topLayer) {
+            return 1;
+        }
+        return layer % 2 == 0 ? 2 : 1;
+    }
+
+    private static void placeShrub(ChunkAccess chunk, BlockPos.MutableBlockPos cursor, java.util.Random random, int localX, int y, int localZ, BlockState leaves) {
+        if (!chunk.getBlockState(cursor.set(localX, y, localZ)).isAir()) {
+            return;
+        }
+        if (random.nextInt(3) == 0) {
+            chunk.setBlockState(cursor.set(localX, y, localZ), Blocks.OAK_LOG.defaultBlockState(), false);
+        }
+        int radius = random.nextBoolean() ? 1 : 2;
+        for (int dz = -radius; dz <= radius; dz++) {
+            for (int dx = -radius; dx <= radius; dx++) {
+                int px = localX + dx;
+                int pz = localZ + dz;
+                if (px < 0 || px > 15 || pz < 0 || pz > 15 || Math.abs(dx) + Math.abs(dz) > radius + 1) {
+                    continue;
+                }
+                int py = y + (Math.abs(dx) + Math.abs(dz) <= 1 && random.nextBoolean() ? 1 : 0);
+                if (py < chunk.getMaxBuildHeight() && chunk.getBlockState(cursor.set(px, py, pz)).isAir()) {
+                    chunk.setBlockState(cursor, leaves, false);
+                }
+            }
+        }
+    }
+
+    private static BlockState randomGrassOrFlower(java.util.Random random, int vegetationClass) {
+        if (random.nextInt(5) != 0) {
+            return Blocks.SHORT_GRASS.defaultBlockState();
+        }
+        return switch (vegetationClass) {
+            case VEGETATION_CALCAREOUS_GRASSLAND -> switch (random.nextInt(4)) {
+                case 0 -> Blocks.OXEYE_DAISY.defaultBlockState();
+                case 1 -> Blocks.AZURE_BLUET.defaultBlockState();
+                case 2 -> Blocks.CORNFLOWER.defaultBlockState();
+                default -> Blocks.DANDELION.defaultBlockState();
+            };
+            case VEGETATION_NEUTRAL_GRASSLAND -> switch (random.nextInt(5)) {
+                case 0 -> Blocks.POPPY.defaultBlockState();
+                case 1 -> Blocks.DANDELION.defaultBlockState();
+                case 2 -> Blocks.ALLIUM.defaultBlockState();
+                case 3 -> Blocks.OXEYE_DAISY.defaultBlockState();
+                default -> Blocks.CORNFLOWER.defaultBlockState();
+            };
+            default -> random.nextBoolean() ? Blocks.DANDELION.defaultBlockState() : Blocks.POPPY.defaultBlockState();
+        };
+    }
+
+    private static BlockState randomWetlandPlant(java.util.Random random) {
+        return switch (random.nextInt(5)) {
+            case 0 -> Blocks.BLUE_ORCHID.defaultBlockState();
+            case 1 -> Blocks.FERN.defaultBlockState();
+            default -> Blocks.SHORT_GRASS.defaultBlockState();
+        };
+    }
+
+    private static boolean canPlaceTreeAt(int localX, int localZ) {
+        return localX >= 2 && localX <= 13 && localZ >= 2 && localZ <= 13;
+    }
+
+    private static boolean hasAdjacentWater(ChunkAccess chunk, BlockPos.MutableBlockPos cursor, int localX, int y, int localZ) {
+        if (y < chunk.getMinBuildHeight() || y >= chunk.getMaxBuildHeight()) {
+            return false;
+        }
+        int[][] offsets = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+        for (int[] offset : offsets) {
+            int px = localX + offset[0];
+            int pz = localZ + offset[1];
+            if (px < 0 || px > 15 || pz < 0 || pz > 15) {
+                continue;
+            }
+            if (chunk.getBlockState(cursor.set(px, y, pz)).is(Blocks.WATER)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void scheduleWaterTicks(WorldGenRegion level, ChunkAccess chunk) {
@@ -1011,6 +1187,12 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     @Override
     public void addDebugScreenInfo(List<String> info, RandomState random, BlockPos pos) {
         info.add("UKGeo surface: " + surfaceY(pos.getX(), pos.getZ()));
+    }
+
+    private enum VegetationTreeKind {
+        OAK,
+        BIRCH,
+        SPRUCE
     }
 
     private record RuntimeData(TileManifest manifest, R16HeightTileLayer height, U8OreTileLayer surfaceLayer, U8OreTileLayer vegetationLayer, U8OreTileLayer riverLayer, Map<String, U8OreTileLayer> oreLayers, List<OreDefinition> ores) {
