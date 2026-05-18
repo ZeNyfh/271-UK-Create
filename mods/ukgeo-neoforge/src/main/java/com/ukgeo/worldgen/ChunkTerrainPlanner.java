@@ -159,9 +159,7 @@ final class ChunkTerrainPlanner {
             return surfaceRock;
         }
         if (y == surfaceY) {
-            if (vegetationClass == 11) {
-                return Blocks.STONE.defaultBlockState();
-            }
+            // Urban/suburban (vegetation class 11) should be grass on the surface, not stone.
             return Blocks.GRASS_BLOCK.defaultBlockState();
         }
         if (y >= surfaceY - 3) {
