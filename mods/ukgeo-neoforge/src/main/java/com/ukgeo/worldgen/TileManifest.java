@@ -26,6 +26,8 @@ public final class TileManifest {
     public final Map<String, String> orePaths;
     public final String surfaceGeologyPath;
     public final Map<Integer, SurfaceGeologyClass> surfaceGeologyClasses;
+    public final String vegetationPath;
+    public final Map<Integer, VegetationClass> vegetationClasses;
     public final String riversPath;
 
     private TileManifest(Path root, JsonObject json) {
@@ -60,6 +62,23 @@ public final class TileManifest {
             }
         } else {
             this.surfaceGeologyPath = null;
+        }
+        this.vegetationClasses = new LinkedHashMap<>();
+        JsonObject vegetation = json.getAsJsonObject("vegetation");
+        if (vegetation != null) {
+            this.vegetationPath = vegetation.get("path").getAsString();
+            JsonObject classes = vegetation.getAsJsonObject("classes");
+            if (classes != null) {
+                for (Map.Entry<String, JsonElement> entry : classes.entrySet()) {
+                    int id = Integer.parseInt(entry.getKey());
+                    JsonObject value = entry.getValue().getAsJsonObject();
+                    String name = value.has("name") ? value.get("name").getAsString() : entry.getKey();
+                    String color = value.has("color") ? value.get("color").getAsString() : "#777777";
+                    this.vegetationClasses.put(id, new VegetationClass(id, name, color));
+                }
+            }
+        } else {
+            this.vegetationPath = null;
         }
         JsonObject rivers = json.getAsJsonObject("rivers");
         this.riversPath = rivers == null ? null : rivers.get("path").getAsString();

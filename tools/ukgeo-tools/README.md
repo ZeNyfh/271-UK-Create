@@ -44,7 +44,8 @@ For the national BGS 625k GeoPackage, use the 625k rules. These include the norm
   --bgs ../../data/BGS_Geology_625k_bedrock_gpkg.zip \
   --rules examples/ore_rules_625k.yml \
   --manifest ./uk_world_data/manifest.json \
-  --out ./uk_world_data
+  --out ./uk_world_data \
+  --jobs 4
 ```
 
 Generate a categorical surface geology skin from the same 625k data:
@@ -77,6 +78,25 @@ Generate GB river mask tiles from OS Open Rivers:
   --width-metres 220
 ```
 
+Generate vegetation class tiles from the LCM 2024 GeoTIFF zip:
+
+```bash
+.venv/bin/ukgeo make-vegetation-tiles \
+  --landcover ../../data/FME_3564346A_1778997494261_5633.zip \
+  --manifest ./uk_world_data/manifest.json \
+  --out ./uk_world_data \
+  --jobs 4
+```
+
+To remake the full checked-out GB dataset into `./uk_world_data_gb`, run:
+
+```bash
+./rebuild_uk_world_data_gb.sh
+```
+
+The rebuild script writes to a temporary sibling directory first, validates the result, then moves the previous dataset to a timestamped backup before replacing it.
+Ore and vegetation generation use 4 worker processes by default; lower them on memory-constrained machines with `ORE_JOBS=2 VEGETATION_JOBS=2 ./rebuild_uk_world_data_gb.sh`.
+
 ## Generate the default 25k x 50k world
 
 Use the same commands without overriding `--world-width` or `--world-depth`.
@@ -89,6 +109,7 @@ The first height implementation uses a guarded in-memory output mosaic; for low-
 .venv/bin/ukgeo stats ./uk_world_data
 .venv/bin/ukgeo preview ./uk_world_data --layer height --out preview.png
 .venv/bin/ukgeo preview ./uk_world_data --layer surface --out surface_geology.png
+.venv/bin/ukgeo preview ./uk_world_data --layer vegetation --out vegetation.png
 .venv/bin/ukgeo preview ./uk_world_data --layer rivers --out rivers.png
 .venv/bin/ukgeo preview ./uk_world_data --layer ore:zinc --out zinc.png
 .venv/bin/ukgeo preview ./uk_world_data --layer ore:coal --style overlay --max-size 12000 --out coal_on_height.png

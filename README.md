@@ -5,7 +5,7 @@ This repository contains two related projects:
 1. `tools/ukgeo-tools`: Python preprocessing tools for OS Terrain 50 ASCII Grid and BGS GeoPackage geology.
 2. `mods/ukgeo-neoforge`: a NeoForge 1.21.1 mod that reads simplified runtime raster tiles on demand.
 
-The Minecraft runtime reads only `.r16.gz` height tiles, `.u8.gz` ore score tiles, and `manifest.json`. It does not parse GeoPackage, Shapefile, GeoTIFF, or OS ASCII Grid files.
+The Minecraft runtime reads only `.r16.gz` height tiles, `.u8.gz` score/class tiles, and `manifest.json`. It does not parse GeoPackage, Shapefile, GeoTIFF, or OS ASCII Grid files.
 
 ## Pipeline
 
@@ -38,7 +38,7 @@ For the full BGS 625k GeoPackage, use:
 
 ```bash
 .venv/bin/ukgeo make-ore-tiles --bgs ../../data/BGS_Geology_625k_bedrock_gpkg.zip \
-  --rules examples/ore_rules_625k.yml --manifest ./uk_world_data/manifest.json --out ./uk_world_data
+  --rules examples/ore_rules_625k.yml --manifest ./uk_world_data/manifest.json --out ./uk_world_data --jobs 4
 
 .venv/bin/ukgeo make-surface-geology-tiles --bgs ../../data/BGS_Geology_625k_bedrock_gpkg.zip \
   --rules examples/surface_geology_625k.yml --manifest ./uk_world_data/manifest.json --out ./uk_world_data
@@ -48,6 +48,9 @@ For the full BGS 625k GeoPackage, use:
 
 .venv/bin/ukgeo make-river-tiles --rivers ../../data/oprvrs_gpkg_gb.zip \
   --manifest ./uk_world_data/manifest.json --out ./uk_world_data --width-metres 220
+
+.venv/bin/ukgeo make-vegetation-tiles --landcover ../../data/FME_3564346A_1778997494261_5633.zip \
+  --manifest ./uk_world_data/manifest.json --out ./uk_world_data --jobs 4
 ```
 
 6. Validate and sample:
@@ -57,6 +60,7 @@ For the full BGS 625k GeoPackage, use:
 .venv/bin/ukgeo stats ./uk_world_data
 .venv/bin/ukgeo preview ./uk_world_data --layer height --out height_preview.png
 .venv/bin/ukgeo preview ./uk_world_data --layer surface --out surface_geology.png
+.venv/bin/ukgeo preview ./uk_world_data --layer vegetation --out vegetation.png
 .venv/bin/ukgeo preview ./uk_world_data --layer rivers --out rivers_preview.png
 .venv/bin/ukgeo preview ./uk_world_data --layer ore:zinc --out zinc_preview.png
 .venv/bin/ukgeo preview ./uk_world_data --layer ore:coal --style overlay --max-size 12000 --out coal_on_height.png

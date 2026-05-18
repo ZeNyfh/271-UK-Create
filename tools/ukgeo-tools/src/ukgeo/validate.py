@@ -27,6 +27,9 @@ def validate_tiles(root: Path) -> list[str]:
     if "rivers" in manifest:
         rivers = manifest["rivers"]
         errors.extend(_check_layer(root / rivers["path"], rivers["extension"], tiles_x, tiles_z, tile_size * tile_size))
+    if "vegetation" in manifest:
+        vegetation = manifest["vegetation"]
+        errors.extend(_check_layer(root / vegetation["path"], vegetation["extension"], tiles_x, tiles_z, tile_size * tile_size))
     for layer in manifest.get("ore_layers", {}).values():
         errors.extend(_check_layer(root / layer["path"], layer["extension"], tiles_x, tiles_z, tile_size * tile_size))
     return errors
@@ -66,6 +69,9 @@ def tile_summary(root: Path) -> dict[str, Any]:
         summary["surface"] = _categorical_summary(root / surface["path"], tiles_x, tiles_z, tile_size, surface.get("classes", {}))
     if "rivers" in manifest:
         summary["rivers"] = _u8_summary(root / manifest["rivers"]["path"], tiles_x, tiles_z, tile_size)
+    if "vegetation" in manifest:
+        vegetation = manifest["vegetation"]
+        summary["vegetation"] = _categorical_summary(root / vegetation["path"], tiles_x, tiles_z, tile_size, vegetation.get("classes", {}))
     for name, layer in manifest.get("ore_layers", {}).items():
         summary["ores"][name] = _u8_summary(root / layer["path"], tiles_x, tiles_z, tile_size)
     return summary

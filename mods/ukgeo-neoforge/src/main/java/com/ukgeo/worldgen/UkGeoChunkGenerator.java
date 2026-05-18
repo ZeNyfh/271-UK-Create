@@ -50,6 +50,17 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     private static final int OIL_DEPOSIT_MIN_MILLIBUCKETS = 4_250_000;
     private static final int OIL_DEPOSIT_MAX_MILLIBUCKETS = 9_500_000;
     private static final int[] OIL_SAMPLE_OFFSETS = {4, 8, 12};
+    private static final int VEGETATION_BROADLEAF_WOODLAND = 1;
+    private static final int VEGETATION_CONIFER_WOODLAND = 2;
+    private static final int VEGETATION_ARABLE = 3;
+    private static final int VEGETATION_IMPROVED_GRASSLAND = 4;
+    private static final int VEGETATION_NEUTRAL_GRASSLAND = 5;
+    private static final int VEGETATION_CALCAREOUS_GRASSLAND = 6;
+    private static final int VEGETATION_ACID_GRASSLAND = 7;
+    private static final int VEGETATION_WETLAND = 8;
+    private static final int VEGETATION_HEATH = 9;
+    private static final int VEGETATION_URBAN = 11;
+    private static final int VEGETATION_ROCK_OR_COASTAL = 12;
     private static final int WATER_EDGE_SMOOTHING_RADIUS = 16;
     private static final int WATER_EDGE_SAMPLE_STEP = 1;
     private static final int WATER_EDGE_MAX_LAND_HEIGHT_ABOVE_SEA = 24;
@@ -172,10 +183,11 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
                 RiverShape river = riverShape(worldX, worldZ, top, minBuildY);
                 int terrainTop = river.terrainSurfaceY();
                 BlockState surfaceRock = surfaceGeologyBlock(worldX, worldZ, top);
+                int vegetationClass = vegetationClass(worldX, worldZ);
                 boolean steep = isSteepSurface(worldX, worldZ, top);
                 int columnTop = Math.max(Math.max(top, seaLevelY), Math.max(terrainTop + 1, river.waterSurfaceY()));
                 for (int y = minBuildY; y <= columnTop; y++) {
-                    BlockState state = stateFor(worldX, worldZ, y, terrainTop, minBuildY, surfaceRock, steep, river, top);
+                    BlockState state = stateFor(worldX, worldZ, y, terrainTop, minBuildY, surfaceRock, steep, river, top, vegetationClass);
                     chunk.setBlockState(cursor.set(localX, y, localZ), state, false);
                     ocean.update(localX, y, localZ, state);
                     surface.update(localX, y, localZ, state);
@@ -184,7 +196,7 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         }
     }
 
-    private BlockState stateFor(int x, int z, int y, int surfaceY, int minBuildY, BlockState surfaceRock, boolean steep, RiverShape river, int originalSurfaceY) {
+    private BlockState stateFor(int x, int z, int y, int surfaceY, int minBuildY, BlockState surfaceRock, boolean steep, RiverShape river, int originalSurfaceY, int vegetationClass) {
         if (y == minBuildY) {
             return Blocks.BEDROCK.defaultBlockState();
         }
@@ -207,6 +219,12 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
             return surfaceRock;
         }
         if (y == surfaceY) {
+            if (vegetationClass == VEGETATION_URBAN) {
+                return Blocks.STONE.defaultBlockState();
+            }
+            if (vegetationClass == VEGETATION_ROCK_OR_COASTAL) {
+                return Blocks.GRAVEL.defaultBlockState();
+            }
             return Blocks.GRASS_BLOCK.defaultBlockState();
         }
         if (y >= surfaceY - 3) {
@@ -587,8 +605,9 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
                     layers.put(entry.getKey(), new U8OreTileLayer(manifest, entry.getKey(), entry.getValue()));
                 }
                 U8OreTileLayer surfaceLayer = manifest.surfaceGeologyPath == null ? null : new U8OreTileLayer(manifest, "surface_geology", manifest.surfaceGeologyPath);
+                U8OreTileLayer vegetationLayer = manifest.vegetationPath == null ? null : new U8OreTileLayer(manifest, "vegetation", manifest.vegetationPath);
                 U8OreTileLayer riverLayer = manifest.riversPath == null ? null : new U8OreTileLayer(manifest, "rivers", manifest.riversPath);
-                runtimeData = new RuntimeData(manifest, new R16HeightTileLayer(manifest), surfaceLayer, riverLayer, layers, OreSettings.defaults());
+                runtimeData = new RuntimeData(manifest, new R16HeightTileLayer(manifest), surfaceLayer, vegetationLayer, riverLayer, layers, OreSettings.defaults());
                 UkGeoMod.LOGGER.info("Loaded ukgeo manifest at {} with {}x{} tiles", root, manifest.tilesX(), manifest.tilesZ());
             } catch (IOException | RuntimeException ex) {
                 UkGeoMod.LOGGER.warn("UK world data is missing or invalid at {}; using fallback terrain: {}", root, ex.getMessage());
@@ -603,7 +622,7 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         if (data == null) {
             return "uk_world_data unavailable; fallback terrain active";
         }
-        return "tiles=%dx%d tileSize=%d heightScale=%.3f lowExtra=%.3f highScale=%.3f nodataY=%d riverRadius=%d riverDepth=%d heightCache=%s".formatted(
+        return "tiles=%dx%d tileSize=%d heightScale=%.3f lowExtra=%.3f highScale=%.3f nodataY=%d riverRadius=%d riverDepth=%d vegetation=%s heightCache=%s".formatted(
             data.manifest.tilesX(),
             data.manifest.tilesZ(),
             data.manifest.tileSize,
@@ -613,6 +632,7 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
             nodataSurfaceY,
             riverWidenRadius,
             riverCarveDepth,
+            data.vegetationLayer == null ? "none" : "loaded",
             data.height.cacheStats()
         );
     }
@@ -639,6 +659,16 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         return surfaceClass == null ? Integer.toString(classId) : surfaceClass.name() + "(" + classId + ")";
     }
 
+    public String sampleVegetation(int x, int z) {
+        RuntimeData data = data();
+        if (data == null || data.vegetationLayer == null) {
+            return "none";
+        }
+        int classId = data.vegetationLayer.sample(x, z).orElse(0);
+        VegetationClass vegetationClass = data.manifest.vegetationClasses.get(classId);
+        return vegetationClass == null ? Integer.toString(classId) : vegetationClass.name() + "(" + classId + ")";
+    }
+
     public int sampleRiver(int x, int z) {
         RuntimeData data = data();
         if (data == null || data.riverLayer == null) {
@@ -655,10 +685,138 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         return oilAmountForChunk(data, seed, new ChunkPos(Math.floorDiv(x, 16), Math.floorDiv(z, 16)));
     }
 
+    private int vegetationClass(int x, int z) {
+        RuntimeData data = data();
+        if (data == null || data.vegetationLayer == null) {
+            return 0;
+        }
+        return data.vegetationLayer.sample(x, z).orElse(0);
+    }
+
     @Override
     public void buildSurface(WorldGenRegion level, StructureManager structureManager, RandomState random, ChunkAccess chunk) {
         scheduleWaterTicks(level, chunk);
+        placeVegetation(chunk);
         populateCreateDieselGeneratorsOil(level.getLevel(), chunk.getPos());
+    }
+
+    private void placeVegetation(ChunkAccess chunk) {
+        RuntimeData data = data();
+        if (data == null || data.vegetationLayer == null) {
+            return;
+        }
+        ChunkPos pos = chunk.getPos();
+        long seed = (((long) pos.x) << 32) ^ (pos.z & 0xffffffffL) ^ 0x564547554b47454fL;
+        java.util.Random random = new java.util.Random(seed);
+        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+        int minBuildY = chunk.getMinBuildHeight();
+        int maxY = chunk.getMaxBuildHeight() - 1;
+        for (int localX = 0; localX < 16; localX++) {
+            int worldX = pos.getMinBlockX() + localX;
+            for (int localZ = 0; localZ < 16; localZ++) {
+                int worldZ = pos.getMinBlockZ() + localZ;
+                int vegetationClass = data.vegetationLayer.sample(worldX, worldZ).orElse(0);
+                if (vegetationClass == 0 || vegetationClass == VEGETATION_URBAN || vegetationClass == VEGETATION_ROCK_OR_COASTAL) {
+                    continue;
+                }
+                int top = Math.clamp(surfaceY(worldX, worldZ), minBuildY + 1, maxY);
+                RiverShape river = riverShape(worldX, worldZ, top, minBuildY);
+                if (river.hasWater() || top <= seaLevelY || river.terrainSurfaceY() != top) {
+                    continue;
+                }
+                BlockState ground = chunk.getBlockState(cursor.set(localX, top, localZ));
+                if (!ground.is(Blocks.GRASS_BLOCK) && !ground.is(Blocks.DIRT)) {
+                    continue;
+                }
+                int y = top + 1;
+                if (y >= maxY || !chunk.getBlockState(cursor.set(localX, y, localZ)).isAir()) {
+                    continue;
+                }
+                placeVegetationForClass(chunk, cursor, random, vegetationClass, localX, y, localZ);
+            }
+        }
+    }
+
+    private void placeVegetationForClass(ChunkAccess chunk, BlockPos.MutableBlockPos cursor, java.util.Random random, int vegetationClass, int localX, int y, int localZ) {
+        switch (vegetationClass) {
+            case VEGETATION_BROADLEAF_WOODLAND -> {
+                if (localX >= 2 && localX <= 13 && localZ >= 2 && localZ <= 13 && random.nextInt(72) == 0) {
+                    placeSimpleTree(chunk, cursor, random, localX, y, localZ, false);
+                } else if (random.nextInt(5) == 0) {
+                    placePlant(chunk, cursor, localX, y, localZ, Blocks.SHORT_GRASS.defaultBlockState());
+                }
+            }
+            case VEGETATION_CONIFER_WOODLAND -> {
+                if (localX >= 2 && localX <= 13 && localZ >= 2 && localZ <= 13 && random.nextInt(64) == 0) {
+                    placeSimpleTree(chunk, cursor, random, localX, y, localZ, true);
+                } else if (random.nextInt(6) == 0) {
+                    placePlant(chunk, cursor, localX, y, localZ, Blocks.FERN.defaultBlockState());
+                }
+            }
+            case VEGETATION_WETLAND -> {
+                if (random.nextInt(3) == 0) {
+                    placePlant(chunk, cursor, localX, y, localZ, random.nextBoolean() ? Blocks.FERN.defaultBlockState() : Blocks.SHORT_GRASS.defaultBlockState());
+                }
+            }
+            case VEGETATION_HEATH -> {
+                if (random.nextInt(5) == 0) {
+                    placePlant(chunk, cursor, localX, y, localZ, Blocks.FERN.defaultBlockState());
+                }
+            }
+            case VEGETATION_ARABLE -> {
+                if (random.nextInt(10) == 0) {
+                    placePlant(chunk, cursor, localX, y, localZ, Blocks.SHORT_GRASS.defaultBlockState());
+                }
+            }
+            case VEGETATION_IMPROVED_GRASSLAND, VEGETATION_NEUTRAL_GRASSLAND, VEGETATION_CALCAREOUS_GRASSLAND, VEGETATION_ACID_GRASSLAND -> {
+                if (random.nextInt(4) == 0) {
+                    placePlant(chunk, cursor, localX, y, localZ, Blocks.SHORT_GRASS.defaultBlockState());
+                }
+            }
+            default -> {
+            }
+        }
+    }
+
+    private static void placePlant(ChunkAccess chunk, BlockPos.MutableBlockPos cursor, int localX, int y, int localZ, BlockState state) {
+        if (y < chunk.getMaxBuildHeight() && chunk.getBlockState(cursor.set(localX, y, localZ)).isAir()) {
+            chunk.setBlockState(cursor, state, false);
+        }
+    }
+
+    private static void placeSimpleTree(ChunkAccess chunk, BlockPos.MutableBlockPos cursor, java.util.Random random, int localX, int y, int localZ, boolean conifer) {
+        int height = conifer ? 5 + random.nextInt(3) : 4 + random.nextInt(3);
+        if (y + height + 2 >= chunk.getMaxBuildHeight()) {
+            return;
+        }
+        for (int dy = 0; dy < height; dy++) {
+            if (!chunk.getBlockState(cursor.set(localX, y + dy, localZ)).isAir()) {
+                return;
+            }
+        }
+        BlockState log = conifer ? Blocks.SPRUCE_LOG.defaultBlockState() : Blocks.OAK_LOG.defaultBlockState();
+        BlockState leaves = conifer ? Blocks.SPRUCE_LEAVES.defaultBlockState() : Blocks.OAK_LEAVES.defaultBlockState();
+        for (int dy = 0; dy < height; dy++) {
+            chunk.setBlockState(cursor.set(localX, y + dy, localZ), log, false);
+        }
+        int leafBase = y + height - 2;
+        int leafTop = y + height + (conifer ? 1 : 2);
+        for (int py = leafBase; py <= leafTop; py++) {
+            int layer = py - leafBase;
+            int radius = conifer ? Math.max(1, 2 - layer / 2) : (py == leafTop ? 1 : 2);
+            for (int dz = -radius; dz <= radius; dz++) {
+                for (int dx = -radius; dx <= radius; dx++) {
+                    int px = localX + dx;
+                    int pz = localZ + dz;
+                    if (px < 0 || px > 15 || pz < 0 || pz > 15 || Math.abs(dx) + Math.abs(dz) > radius + 1) {
+                        continue;
+                    }
+                    if (chunk.getBlockState(cursor.set(px, py, pz)).isAir()) {
+                        chunk.setBlockState(cursor, leaves, false);
+                    }
+                }
+            }
+        }
     }
 
     private void scheduleWaterTicks(WorldGenRegion level, ChunkAccess chunk) {
@@ -839,12 +997,13 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     public NoiseColumn getBaseColumn(int x, int z, LevelHeightAccessor height, RandomState random) {
         int surface = surfaceY(x, z);
         BlockState surfaceRock = surfaceGeologyBlock(x, z, surface);
+        int vegetationClass = vegetationClass(x, z);
         boolean steep = isSteepSurface(x, z, surface);
         RiverShape river = riverShape(x, z, surface, height.getMinBuildHeight());
         BlockState[] states = new BlockState[height.getHeight()];
         for (int i = 0; i < states.length; i++) {
             int y = height.getMinBuildHeight() + i;
-            states[i] = stateFor(x, z, y, river.terrainSurfaceY(), height.getMinBuildHeight(), surfaceRock, steep, river, surface);
+            states[i] = stateFor(x, z, y, river.terrainSurfaceY(), height.getMinBuildHeight(), surfaceRock, steep, river, surface, vegetationClass);
         }
         return new NoiseColumn(height.getMinBuildHeight(), states);
     }
@@ -854,7 +1013,7 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         info.add("UKGeo surface: " + surfaceY(pos.getX(), pos.getZ()));
     }
 
-    private record RuntimeData(TileManifest manifest, R16HeightTileLayer height, U8OreTileLayer surfaceLayer, U8OreTileLayer riverLayer, Map<String, U8OreTileLayer> oreLayers, List<OreDefinition> ores) {
+    private record RuntimeData(TileManifest manifest, R16HeightTileLayer height, U8OreTileLayer surfaceLayer, U8OreTileLayer vegetationLayer, U8OreTileLayer riverLayer, Map<String, U8OreTileLayer> oreLayers, List<OreDefinition> ores) {
     }
 
     private record RiverShape(boolean hasWater, boolean influenced, int terrainSurfaceY, int waterSurfaceY) {
