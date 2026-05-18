@@ -10,9 +10,9 @@
   "bed_works": true,
   "respawn_anchor_works": false,
   "has_raids": true,
-  "min_y": -256,
-  "height": 2288,
-  "logical_height": 2288,
+  "min_y": -128,
+  "height": 1628,
+  "logical_height": 1628,
   "infiniburn": "#minecraft:infiniburn_overworld",
   "effects": "minecraft:overworld",
   "monster_spawn_light_level": {
