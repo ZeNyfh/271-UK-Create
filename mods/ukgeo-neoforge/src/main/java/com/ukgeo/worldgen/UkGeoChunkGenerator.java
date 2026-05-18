@@ -5,6 +5,7 @@ import com.mojang.serialization.MapCodec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -14,6 +15,8 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import net.minecraft.Util;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Holder;
+import net.minecraft.core.HolderSet;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.WorldGenRegion;
@@ -21,6 +24,8 @@ import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.LevelHeightAccessor;
 import net.minecraft.world.level.NoiseColumn;
 import net.minecraft.world.level.StructureManager;
+import net.minecraft.world.level.biome.Biome;
+import net.minecraft.world.level.biome.BiomeGenerationSettings;
 import net.minecraft.world.level.biome.BiomeManager;
 import net.minecraft.world.level.biome.BiomeSource;
 import net.minecraft.world.level.block.Block;
@@ -32,6 +37,7 @@ import net.minecraft.world.level.levelgen.GenerationStep;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.levelgen.RandomState;
 import net.minecraft.world.level.levelgen.blending.Blender;
+import net.minecraft.world.level.levelgen.placement.PlacedFeature;
 import net.minecraft.world.level.material.Fluids;
 
 public final class UkGeoChunkGenerator extends ChunkGenerator {
@@ -99,7 +105,7 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         int fallbackHeight,
         boolean useConfigDataRoot
     ) {
-        super(biomeSource);
+        super(biomeSource, UkGeoChunkGenerator::withoutVanillaOres);
         this.seaLevelY = seaLevelY;
         this.heightScale = heightScale;
         this.lowlandExtraScale = Math.max(0.0, lowlandExtraScale);
@@ -115,6 +121,15 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         this.genDepth = genDepth;
         this.fallbackHeight = fallbackHeight;
         this.useConfigDataRoot = useConfigDataRoot;
+    }
+
+    private static BiomeGenerationSettings withoutVanillaOres(Holder<Biome> biome) {
+        List<HolderSet<PlacedFeature>> features = new ArrayList<>(biome.value().getGenerationSettings().features());
+        int oreStep = GenerationStep.Decoration.UNDERGROUND_ORES.ordinal();
+        if (features.size() > oreStep) {
+            features.set(oreStep, HolderSet.direct(List.<Holder<PlacedFeature>>of()));
+        }
+        return new BiomeGenerationSettings(Map.of(), List.copyOf(features));
     }
 
     @Override
@@ -472,17 +487,14 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         java.util.Random random = new java.util.Random(seed);
         BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
         for (OreDefinition ore : data.ores) {
-            U8OreTileLayer scoreLayer = data.oreLayers.get(ore.scoreLayer());
-            if (scoreLayer == null) {
-                continue;
-            }
+            U8OreTileLayer scoreLayer = ore.hasScoreLayer() ? data.oreLayers.get(ore.scoreLayer()) : null;
             Optional<BlockStatePair> states = resolveOreBlocks(ore);
             if (states.isEmpty()) {
                 continue;
             }
-            int score = scoreLayer.sample(pos.getMinBlockX() + 8, pos.getMinBlockZ() + 8).orElse(0);
-            int normalAttempts = ore.baseAttempts() + Math.round(ore.maxBonusAttempts() * (score / 255.0f));
-            int attempts = scaledOreAttempts(normalAttempts, score, random);
+            int score = scoreLayer == null ? 0 : scoreLayer.sample(pos.getMinBlockX() + 8, pos.getMinBlockZ() + 8).orElse(0);
+            int normalAttempts = normalOreAttempts(ore, score);
+            int attempts = scaledOreAttempts(normalAttempts, score > 0, random);
             for (int attempt = 0; attempt < attempts; attempt++) {
                 int localX = random.nextInt(16);
                 int localZ = random.nextInt(16);
@@ -505,8 +517,15 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         }
     }
 
-    private static int scaledOreAttempts(int normalAttempts, int score, java.util.Random random) {
-        double multiplier = score > 0 ? ORE_AREA_ATTEMPT_MULTIPLIER : BACKGROUND_ORE_ATTEMPT_MULTIPLIER;
+    private static int normalOreAttempts(OreDefinition ore, int score) {
+        if (score <= 0) {
+            return ore.baseAttempts() + ore.maxBonusAttempts();
+        }
+        return ore.baseAttempts() + Math.round(ore.maxBonusAttempts() * (score / 255.0f));
+    }
+
+    private static int scaledOreAttempts(int normalAttempts, boolean inOreArea, java.util.Random random) {
+        double multiplier = inOreArea ? ORE_AREA_ATTEMPT_MULTIPLIER : BACKGROUND_ORE_ATTEMPT_MULTIPLIER;
         double scaled = normalAttempts * multiplier;
         int wholeAttempts = (int) scaled;
         double fractionalAttempt = scaled - wholeAttempts;

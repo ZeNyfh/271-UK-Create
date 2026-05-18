@@ -11,5 +11,7 @@ public record OreDefinition(
     int maxDepthBelowSurface,
     int veinSize
 ) {
+    public boolean hasScoreLayer() {
+        return scoreLayer != null && !scoreLayer.isBlank();
+    }
 }
-
