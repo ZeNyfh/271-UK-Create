@@ -28,14 +28,6 @@ def make_ore_tiles(*, bgs: Path, rules: Path, manifest_path: Path, out: Path, de
     tile_size = manifest["tile_size"]
     width = world["width"]
     depth = world["depth"]
-    transform = from_bounds(
-        geo["bng_min_easting"],
-        geo["bng_min_northing"],
-        geo["bng_max_easting"],
-        geo["bng_max_northing"],
-        width,
-        depth,
-    )
     with rules.open("r", encoding="utf-8") as fh:
         config = yaml.safe_load(fh) or {}
     configured_layers = config.get("ores") or {}
@@ -57,6 +49,7 @@ def make_ore_tiles(*, bgs: Path, rules: Path, manifest_path: Path, out: Path, de
                 tile_size,
                 str(out),
                 str(debug_geotiff_dir) if debug_geotiff_dir else None,
+                jobs == 1,
             )
             for ore in layer_names
         ]
@@ -76,7 +69,7 @@ def make_ore_tiles(*, bgs: Path, rules: Path, manifest_path: Path, out: Path, de
 
 
 def _make_ore_layer(task: tuple) -> tuple[str, list[str]]:
-    ore, layer_config, gpkg, geo, width, depth, tile_size, out, debug_geotiff_dir = task
+    ore, layer_config, gpkg, geo, width, depth, tile_size, out, debug_geotiff_dir, show_tile_progress = task
     messages: list[str] = []
     transform = from_bounds(
         geo["bng_min_easting"],
@@ -115,7 +108,7 @@ def _make_ore_layer(task: tuple) -> tuple[str, list[str]]:
             burned = rasterize(shapes, out_shape=arr.shape, transform=transform, fill=0, dtype=np.uint8, merge_alg=merge_alg)
             arr = np.maximum(arr, burned)
     arr = np.clip(arr, 0, int(layer_config.get("maximum_score", 255))).astype(np.uint8)
-    _write_tiles(arr, Path(out) / "ores" / ore, tile_size)
+    _write_tiles(arr, Path(out) / "ores" / ore, tile_size, show_progress=show_tile_progress)
     if debug_geotiff_dir:
         _write_debug(Path(debug_geotiff_dir) / f"{ore}.tif", arr, transform)
     return ore, messages
@@ -128,8 +121,11 @@ def _print_worker_messages(result: tuple[str, list[str]]) -> None:
     console.print(f"{ore}: wrote ore score tiles")
 
 
-def _write_tiles(arr: np.ndarray, root: Path, tile_size: int) -> None:
-    for tile_z in tqdm(range(math.ceil(arr.shape[0] / tile_size)), desc=f"{root.name} tile rows"):
+def _write_tiles(arr: np.ndarray, root: Path, tile_size: int, *, show_progress: bool = True) -> None:
+    rows = range(math.ceil(arr.shape[0] / tile_size))
+    if show_progress:
+        rows = tqdm(rows, desc=f"{root.name} tile rows")
+    for tile_z in rows:
         for tile_x in range(math.ceil(arr.shape[1] / tile_size)):
             tile = arr[tile_z * tile_size : (tile_z + 1) * tile_size, tile_x * tile_size : (tile_x + 1) * tile_size]
             if tile.shape != (tile_size, tile_size):
