@@ -3,6 +3,7 @@ package com.ukgeo.worldgen;
 import com.mojang.serialization.MapCodec;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.level.biome.BiomeSource;
 import net.minecraft.world.level.chunk.ChunkGenerator;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.ModContainer;
@@ -18,6 +19,7 @@ public final class UkGeoMod {
     public static final String MOD_ID = "ukgeo";
     public static final Logger LOGGER = LoggerFactory.getLogger("ukgeo");
     public static final ResourceLocation HEIGHTMAP_ID = ResourceLocation.fromNamespaceAndPath(MOD_ID, "heightmap");
+    public static final ResourceLocation VEGETATION_BIOME_SOURCE_ID = ResourceLocation.fromNamespaceAndPath(MOD_ID, "vegetation");
 
     public UkGeoMod(IEventBus modBus, ModContainer modContainer) {
         modContainer.registerConfig(ModConfig.Type.COMMON, UkGeoConfig.SPEC);
@@ -27,5 +29,6 @@ public final class UkGeoMod {
 
     private void register(RegisterEvent event) {
         event.register(Registries.CHUNK_GENERATOR, HEIGHTMAP_ID, () -> (MapCodec<? extends ChunkGenerator>) UkGeoChunkGenerator.CODEC);
+        event.register(Registries.BIOME_SOURCE, VEGETATION_BIOME_SOURCE_ID, () -> (MapCodec<? extends BiomeSource>) UkGeoVegetationBiomeSource.CODEC);
     }
 }
