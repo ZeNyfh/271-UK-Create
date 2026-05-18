@@ -19,6 +19,7 @@ from .preview import make_preview
 from .rivers import make_river_tiles as make_river_tiles_impl
 from .surface import make_surface_geology_tiles as make_surface_geology_tiles_impl
 from .ni_height import add_osni_height_tiles as add_osni_height_tiles_impl
+from .vegetation import make_vegetation_tiles as make_vegetation_tiles_impl
 from .tiles import HEIGHT_NODATA, read_r16_tile, read_u8_tile
 from .validate import tile_summary, validate_tiles
 
@@ -106,8 +107,9 @@ def make_ore_tiles(
     manifest: Path = typer.Option(..., "--manifest"),
     out: Path = typer.Option(..., "--out"),
     debug_geotiff_dir: Path | None = typer.Option(None, "--debug-geotiff-dir"),
+    jobs: int = typer.Option(4, "--jobs", help="Ore/mineral layers to process in parallel."),
 ) -> None:
-    make_ore_tiles_impl(bgs=bgs, rules=rules, manifest_path=manifest, out=out, debug_geotiff_dir=debug_geotiff_dir)
+    make_ore_tiles_impl(bgs=bgs, rules=rules, manifest_path=manifest, out=out, debug_geotiff_dir=debug_geotiff_dir, jobs=jobs)
 
 
 @app.command("make-surface-geology-tiles")
@@ -150,6 +152,18 @@ def make_river_tiles(
     debug_geotiff: Path | None = typer.Option(None, "--debug-geotiff"),
 ) -> None:
     make_river_tiles_impl(rivers=rivers, manifest_path=manifest, out=out, layer=layer, width_metres=width_metres, debug_geotiff=debug_geotiff)
+
+
+@app.command("make-vegetation-tiles")
+def make_vegetation_tiles(
+    landcover: Path = typer.Option(..., "--landcover"),
+    manifest: Path = typer.Option(..., "--manifest"),
+    out: Path = typer.Option(..., "--out"),
+    band: int = typer.Option(1, "--band"),
+    debug_geotiff: Path | None = typer.Option(None, "--debug-geotiff"),
+    jobs: int = typer.Option(4, "--jobs", help="Vegetation tile rows to process in parallel."),
+) -> None:
+    make_vegetation_tiles_impl(landcover=landcover, manifest_path=manifest, out=out, band=band, debug_geotiff=debug_geotiff, jobs=jobs)
 
 
 @app.command("mask-height-to-bgs-land")
@@ -209,6 +223,11 @@ def stats_cmd(root: Path) -> None:
     if "rivers" in summary:
         rivers = summary["rivers"]
         console.print(f"rivers: {rivers['nonzero_percent']:.2f}% coverage, max {rivers['max']}")
+    if "vegetation" in summary:
+        vegetation_table = Table("vegetation id", "name", "percent")
+        for item in summary["vegetation"]["classes"]:
+            vegetation_table.add_row(str(item["id"]), item["name"], f"{item['percent']:.2f}%")
+        console.print(vegetation_table)
 
 
 @app.command("preview")
@@ -296,6 +315,13 @@ def sample(root: Path, x: int = typer.Option(..., "--x"), z: int = typer.Option(
         if path.exists():
             score = int(read_u8_tile(path, manifest["tile_size"])[lz, lx])
             console.print(f"river: {score}")
+    if "vegetation" in manifest:
+        vegetation = manifest["vegetation"]
+        path = root / vegetation["path"] / f"{tx:03d}_{tz:03d}.u8.gz"
+        if path.exists():
+            class_id = int(read_u8_tile(path, manifest["tile_size"])[lz, lx])
+            meta = vegetation.get("classes", {}).get(str(class_id), {})
+            console.print(f"vegetation: {meta.get('name', class_id)} ({class_id})")
     for ore, layer in manifest.get("ore_layers", {}).items():
         path = root / layer["path"] / f"{tx:03d}_{tz:03d}.u8.gz"
         if path.exists():

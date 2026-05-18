@@ -55,6 +55,11 @@ def make_preview(root: Path, layer: str, out: Path, max_size: int = 4096, style:
         values = _read_u8_preview(root, manifest["rivers"]["path"], tiles_x, tiles_z, tile_size, scale, missing_ok=False)
         height = _read_height_preview(root, manifest, tiles_x, tiles_z, tile_size, scale)
         output = _single_mask_overlay(height, values, "rivers", (65, 145, 230), legend_scale)
+    elif layer == "vegetation":
+        if "vegetation" not in manifest:
+            raise FileNotFoundError("No vegetation layer is present. Run ukgeo make-vegetation-tiles first.")
+        values = _read_u8_preview(root, manifest["vegetation"]["path"], tiles_x, tiles_z, tile_size, scale, missing_ok=False)
+        output = _surface_image(values, manifest["vegetation"].get("classes", {}), legend_scale)
     elif layer in {"ores", "ore:all"}:
         height = _read_height_preview(root, manifest, tiles_x, tiles_z, tile_size, scale)
         output = _all_ores_image(root, manifest, tiles_x, tiles_z, tile_size, scale, height, legend_scale)
@@ -69,7 +74,7 @@ def make_preview(root: Path, layer: str, out: Path, max_size: int = 4096, style:
         else:
             output = _ore_image(values, style)
     else:
-        raise ValueError("layer must be height, surface, rivers, ores, ore:all, or ore:<name>")
+        raise ValueError("layer must be height, surface, vegetation, rivers, ores, ore:all, or ore:<name>")
     out.parent.mkdir(parents=True, exist_ok=True)
     output.save(out)
 
@@ -90,7 +95,7 @@ def _read_u8_preview(root: Path, layer_path: str, tiles_x: int, tiles_z: int, ti
     if not base.exists():
         if missing_ok:
             return np.zeros((math.ceil(tiles_z * tile_size / scale), math.ceil(tiles_x * tile_size / scale)), dtype=np.uint8)
-        raise FileNotFoundError(f"Ore tile directory is missing: {base}. Run ukgeo make-ore-tiles first.")
+        raise FileNotFoundError(f"Tile directory is missing: {base}")
     image = np.zeros((math.ceil(tiles_z * tile_size / scale), math.ceil(tiles_x * tile_size / scale)), dtype=np.uint8)
     for tz in range(tiles_z):
         for tx in range(tiles_x):
@@ -98,7 +103,7 @@ def _read_u8_preview(root: Path, layer_path: str, tiles_x: int, tiles_z: int, ti
             if not tile_path.exists():
                 if missing_ok:
                     continue
-                raise FileNotFoundError(f"Ore tile is missing: {tile_path}. Run ukgeo make-ore-tiles first.")
+                raise FileNotFoundError(f"Tile is missing: {tile_path}")
             arr = read_u8_tile(tile_path, tile_size)
             if scale > 1:
                 non_zero = np.argwhere(arr > 0)

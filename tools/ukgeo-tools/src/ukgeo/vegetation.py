@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from concurrent.futures import ProcessPoolExecutor
 import math
 import zipfile
 
@@ -49,7 +50,7 @@ LCM_TO_VEGETATION[[20, 21]] = 11
 LCM_TO_VEGETATION[[12, 15, 16, 17, 18]] = 12
 
 
-def make_vegetation_tiles(*, landcover: Path, manifest_path: Path, out: Path, band: int = 1, debug_geotiff: Path | None = None) -> None:
+def make_vegetation_tiles(*, landcover: Path, manifest_path: Path, out: Path, band: int = 1, debug_geotiff: Path | None = None, jobs: int = 4) -> None:
     manifest = read_manifest(manifest_path)
     geo = manifest["georeferencing"]
     world = manifest["world"]
@@ -63,6 +64,7 @@ def make_vegetation_tiles(*, landcover: Path, manifest_path: Path, out: Path, ba
     raster_path = _resolve_raster_path(landcover)
     root = out / "vegetation"
     root.mkdir(parents=True, exist_ok=True)
+    jobs = max(1, int(jobs))
 
     with rasterio.open(raster_path) as src:
         if band < 1 or band > src.count:
@@ -71,29 +73,29 @@ def make_vegetation_tiles(*, landcover: Path, manifest_path: Path, out: Path, ba
             raise ValueError("Land cover raster has no CRS")
         console.print(f"Reading land cover raster {raster_path}")
         console.print(f"source CRS={src.crs}, size={src.width}x{src.height}, band={band}")
+
+    tasks = [
+        (
+            raster_path,
+            band,
+            geo,
+            width,
+            depth,
+            tile_size,
+            tiles_x,
+            str(root),
+            tile_z,
+        )
+        for tile_z in range(tiles_z)
+    ]
+    if jobs == 1 or len(tasks) <= 1:
         for tile_z in tqdm(range(tiles_z), desc="vegetation tile rows"):
-            for tile_x in range(tiles_x):
-                tile = np.zeros((tile_size, tile_size), dtype=np.uint8)
-                x0 = tile_x * tile_size
-                z0 = tile_z * tile_size
-                valid_w = max(0, min(tile_size, width - x0))
-                valid_h = max(0, min(tile_size, depth - z0))
-                if valid_w > 0 and valid_h > 0:
-                    raw = np.zeros((valid_h, valid_w), dtype=np.uint8)
-                    dst_transform = _window_transform(geo, width, depth, x0, z0, valid_w, valid_h)
-                    reproject(
-                        source=rasterio.band(src, band),
-                        destination=raw,
-                        src_transform=src.transform,
-                        src_crs=src.crs,
-                        src_nodata=0,
-                        dst_transform=dst_transform,
-                        dst_crs="EPSG:27700",
-                        dst_nodata=0,
-                        resampling=Resampling.nearest,
-                    )
-                    tile[:valid_h, :valid_w] = LCM_TO_VEGETATION[raw]
-                write_u8_tile(root / f"{tile_x:03d}_{tile_z:03d}.u8.gz", tile)
+            _write_vegetation_tile_row(tasks[tile_z])
+    else:
+        console.print(f"Generating vegetation tile rows with {jobs} worker processes.")
+        with ProcessPoolExecutor(max_workers=jobs) as executor:
+            for _ in tqdm(executor.map(_write_vegetation_tile_row, tasks), total=len(tasks), desc="vegetation tile rows"):
+                pass
 
     manifest["vegetation"] = {
         "path": "vegetation",
@@ -129,6 +131,35 @@ def make_vegetation_tiles(*, landcover: Path, manifest_path: Path, out: Path, ba
     write_manifest(manifest_path, manifest)
     if debug_geotiff:
         _write_debug_geotiff(debug_geotiff, out / "vegetation", manifest, tiles_x, tiles_z, tile_size)
+
+
+def _write_vegetation_tile_row(task: tuple) -> int:
+    raster_path, band, geo, width, depth, tile_size, tiles_x, root, tile_z = task
+    root_path = Path(root)
+    with rasterio.open(raster_path) as src:
+        for tile_x in range(tiles_x):
+            tile = np.zeros((tile_size, tile_size), dtype=np.uint8)
+            x0 = tile_x * tile_size
+            z0 = tile_z * tile_size
+            valid_w = max(0, min(tile_size, width - x0))
+            valid_h = max(0, min(tile_size, depth - z0))
+            if valid_w > 0 and valid_h > 0:
+                raw = np.zeros((valid_h, valid_w), dtype=np.uint8)
+                dst_transform = _window_transform(geo, width, depth, x0, z0, valid_w, valid_h)
+                reproject(
+                    source=rasterio.band(src, band),
+                    destination=raw,
+                    src_transform=src.transform,
+                    src_crs=src.crs,
+                    src_nodata=0,
+                    dst_transform=dst_transform,
+                    dst_crs="EPSG:27700",
+                    dst_nodata=0,
+                    resampling=Resampling.nearest,
+                )
+                tile[:valid_h, :valid_w] = LCM_TO_VEGETATION[raw]
+            write_u8_tile(root_path / f"{tile_x:03d}_{tile_z:03d}.u8.gz", tile)
+    return tile_z
 
 
 def _resolve_raster_path(path: Path) -> str:
