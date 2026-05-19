@@ -19,7 +19,10 @@ import net.minecraft.Util;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
 import net.minecraft.core.HolderSet;
+import net.minecraft.core.QuartPos;
+import net.minecraft.core.Registry;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
@@ -39,12 +42,24 @@ import net.minecraft.world.level.block.DoublePlantBlock;
 import net.minecraft.world.level.block.LeavesBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.DoubleBlockHalf;
+import net.minecraft.world.level.chunk.CarvingMask;
 import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.ChunkGenerator;
+import net.minecraft.world.level.chunk.ProtoChunk;
+import net.minecraft.world.level.levelgen.Aquifer;
+import net.minecraft.world.level.levelgen.Beardifier;
 import net.minecraft.world.level.levelgen.GenerationStep;
 import net.minecraft.world.level.levelgen.Heightmap;
+import net.minecraft.world.level.levelgen.LegacyRandomSource;
+import net.minecraft.world.level.levelgen.NoiseBasedChunkGenerator;
+import net.minecraft.world.level.levelgen.NoiseChunk;
+import net.minecraft.world.level.levelgen.NoiseGeneratorSettings;
 import net.minecraft.world.level.levelgen.RandomState;
+import net.minecraft.world.level.levelgen.RandomSupport;
+import net.minecraft.world.level.levelgen.WorldgenRandom;
 import net.minecraft.world.level.levelgen.blending.Blender;
+import net.minecraft.world.level.levelgen.carver.CarvingContext;
+import net.minecraft.world.level.levelgen.carver.ConfiguredWorldCarver;
 import net.minecraft.world.level.levelgen.placement.PlacedFeature;
 import net.minecraft.world.level.material.Fluids;
 import net.neoforged.fml.ModList;
@@ -1524,6 +1539,65 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
 
     @Override
     public void applyCarvers(WorldGenRegion level, long seed, RandomState random, BiomeManager biomeManager, StructureManager structureManager, ChunkAccess chunk, GenerationStep.Carving carving) {
+        Registry<NoiseGeneratorSettings> settingsRegistry = level.registryAccess().registryOrThrow(Registries.NOISE_SETTINGS);
+        Holder<NoiseGeneratorSettings> settings = settingsRegistry.getHolderOrThrow(NoiseGeneratorSettings.OVERWORLD);
+        NoiseGeneratorSettings generatorSettings = settings.value();
+        NoiseBasedChunkGenerator contextGenerator = new NoiseBasedChunkGenerator(this.biomeSource, settings);
+        BiomeManager carverBiomeManager = biomeManager.withDifferentSource(
+            (quartX, quartY, quartZ) -> this.biomeSource.getNoiseBiome(quartX, quartY, quartZ, random.sampler())
+        );
+        WorldgenRandom worldgenRandom = new WorldgenRandom(new LegacyRandomSource(RandomSupport.generateUniqueSeed()));
+        ChunkPos chunkPos = chunk.getPos();
+        NoiseChunk noiseChunk = chunk.getOrCreateNoiseChunk(ignored -> NoiseChunk.forChunk(
+            chunk,
+            random,
+            Beardifier.forStructuresInChunk(structureManager, chunkPos),
+            generatorSettings,
+            fluidPicker(generatorSettings),
+            Blender.of(level)
+        ));
+        Aquifer aquifer = noiseChunk.aquifer();
+        CarvingContext carvingContext = new CarvingContext(
+            contextGenerator,
+            level.registryAccess(),
+            chunk.getHeightAccessorForGeneration(),
+            noiseChunk,
+            random,
+            generatorSettings.surfaceRule()
+        );
+        CarvingMask carvingMask = ((ProtoChunk) chunk).getOrCreateCarvingMask(carving);
+
+        for (int chunkOffsetX = -8; chunkOffsetX <= 8; chunkOffsetX++) {
+            for (int chunkOffsetZ = -8; chunkOffsetZ <= 8; chunkOffsetZ++) {
+                ChunkPos carverChunkPos = new ChunkPos(chunkPos.x + chunkOffsetX, chunkPos.z + chunkOffsetZ);
+                ChunkAccess carverChunk = level.getChunk(carverChunkPos.x, carverChunkPos.z);
+                BiomeGenerationSettings generationSettings = carverChunk.carverBiome(
+                    () -> getBiomeGenerationSettings(
+                        this.biomeSource.getNoiseBiome(
+                            QuartPos.fromBlock(carverChunkPos.getMinBlockX()),
+                            0,
+                            QuartPos.fromBlock(carverChunkPos.getMinBlockZ()),
+                            random.sampler()
+                        )
+                    )
+                );
+                int carverIndex = 0;
+                for (Holder<ConfiguredWorldCarver<?>> holder : generationSettings.getCarvers(carving)) {
+                    ConfiguredWorldCarver<?> configuredCarver = holder.value();
+                    worldgenRandom.setLargeFeatureSeed(seed + carverIndex, carverChunkPos.x, carverChunkPos.z);
+                    if (configuredCarver.isStartChunk(worldgenRandom)) {
+                        configuredCarver.carve(carvingContext, chunk, carverBiomeManager::getBiome, worldgenRandom, aquifer, carverChunkPos, carvingMask);
+                    }
+                    carverIndex++;
+                }
+            }
+        }
+    }
+
+    private static Aquifer.FluidPicker fluidPicker(NoiseGeneratorSettings settings) {
+        Aquifer.FluidStatus lava = new Aquifer.FluidStatus(-54, Blocks.LAVA.defaultBlockState());
+        Aquifer.FluidStatus water = new Aquifer.FluidStatus(settings.seaLevel(), settings.defaultFluid());
+        return (x, y, z) -> y < Math.min(-54, settings.seaLevel()) ? lava : water;
     }
 
     @Override
