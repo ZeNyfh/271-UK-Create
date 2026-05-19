@@ -993,29 +993,23 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     }
 
     private static void placeSimpleTree(ChunkAccess chunk, BlockPos.MutableBlockPos cursor, java.util.Random random, int localX, int y, int localZ, VegetationTreeKind kind) {
-        // Provide simple variants to better emulate vanilla tree variety.
         int baseHeight = switch (kind) {
             case SPRUCE -> 6 + random.nextInt(4);
             case BIRCH -> 5 + random.nextInt(3);
             case OAK -> 4 + random.nextInt(3);
         };
-        // Select a variant per tree kind
         int variant = random.nextInt(kind == VegetationTreeKind.OAK ? 3 : 2);
         int height = baseHeight;
         if (kind == VegetationTreeKind.SPRUCE && variant == 1) {
-            // tall spruce
             height += 2 + random.nextInt(3);
         }
         if (kind == VegetationTreeKind.BIRCH && variant == 1) {
-            // tall birch
             height += 1 + random.nextInt(2);
         }
         if (kind == VegetationTreeKind.OAK) {
             if (variant == 1) {
-                // taller oak
                 height += 2 + random.nextInt(4);
             } else if (variant == 2) {
-                // bushy/fancy-ish oak
                 height += random.nextInt(2);
             }
         }
@@ -1042,7 +1036,6 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
             chunk.setBlockState(cursor.set(localX, y + dy, localZ), log, false);
         }
 
-        // Canopy generation - different shapes per variant to mimic vanilla variants
         if (kind == VegetationTreeKind.SPRUCE) {
             int leafBase = y + height - 3;
             int leafTop = y + height + 1;
@@ -1053,7 +1046,9 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
                     for (int dx = -radius; dx <= radius; dx++) {
                         int px = localX + dx;
                         int pz = localZ + dz;
-                        if (px < 0 || px > 15 || pz < 0 || pz > 15) continue;
+                        if (px < 0 || px > 15 || pz < 0 || pz > 15) {
+                            continue;
+                        }
                         if (chunk.getBlockState(cursor.set(px, py, pz)).isAir()) {
                             chunk.setBlockState(cursor, leaves, false);
                         }
@@ -1065,91 +1060,101 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
             int leafTop = y + height + 2;
             int topRadius = variant == 1 ? 2 : 1;
             for (int py = leafBase; py <= leafTop; py++) {
-                int radius = (py == leafTop) ? topRadius : 2;
+                int radius = py == leafTop ? topRadius : 2;
                 for (int dz = -radius; dz <= radius; dz++) {
                     for (int dx = -radius; dx <= radius; dx++) {
                         int px = localX + dx;
                         int pz = localZ + dz;
-                        if (px < 0 || px > 15 || pz < 0 || pz > 15) continue;
-                        if (Math.abs(dx) + Math.abs(dz) > radius + 1) continue;
+                        if (px < 0 || px > 15 || pz < 0 || pz > 15) {
+                            continue;
+                        }
+                        if (Math.abs(dx) + Math.abs(dz) > radius + 1) {
+                            continue;
+                        }
                         if (chunk.getBlockState(cursor.set(px, py, pz)).isAir()) {
                             chunk.setBlockState(cursor, leaves, false);
                         }
                     }
                 }
             }
-        } else { // OAK
-            if (variant == 0) {
-                // standard small oak
-                int leafBase = y + height - 2;
-                int leafTop = y + height + 2;
-                for (int py = leafBase; py <= leafTop; py++) {
-                    int radius = (py == leafTop) ? 1 : 2;
-                    for (int dz = -radius; dz <= radius; dz++) {
-                        for (int dx = -radius; dx <= radius; dx++) {
-                            int px = localX + dx;
-                            int pz = localZ + dz;
-                            if (px < 0 || px > 15 || pz < 0 || pz > 15 || Math.abs(dx) + Math.abs(dz) > radius + 1) continue;
-                            if (chunk.getBlockState(cursor.set(px, py, pz)).isAir()) {
-                                chunk.setBlockState(cursor, leaves, false);
-                            }
-                        }
-                    }
-                }
-            } else if (variant == 1) {
-                // taller oak with larger canopy
-                int leafBase = y + height - 3;
-                int leafTop = y + height + 2;
-                for (int py = leafBase; py <= leafTop; py++) {
-                    int radius = (py >= y + height) ? 3 : 2;
-                    for (int dz = -radius; dz <= radius; dz++) {
-                        for (int dx = -radius; dx <= radius; dx++) {
-                            int px = localX + dx;
-                            int pz = localZ + dz;
-                            if (px < 0 || px > 15 || pz < 0 || pz > 15) continue;
-                            if (Math.abs(dx) + Math.abs(dz) > radius + 1) continue;
-                            if (chunk.getBlockState(cursor.set(px, py, pz)).isAir()) {
-                                chunk.setBlockState(cursor, leaves, false);
-                            }
-                        }
-                    }
-                }
-            } else {
-                // fancy/bushy oak: layered canopy with some randomness
-                int leafBase = y + height - 2;
-                int leafTop = y + height + 3;
-                for (int py = leafBase; py <= leafTop; py++) {
-                    int layer = py - leafBase;
-                    int radius = switch (layer) {
-                        case 0 -> 2;
-                        case 1 -> 3;
-                        case 2 -> 2;
-                        default -> 1;
-                    };
-                    for (int dz = -radius; dz <= radius; dz++) {
-                        for (int dx = -radius; dx <= radius; dx++) {
-                            int px = localX + dx;
-                            int pz = localZ + dz;
-                            if (px < 0 || px > 15 || pz < 0 || pz > 15) continue;
-                            if (Math.abs(dx) + Math.abs(dz) > radius + 1) continue;
-                            // add some randomness so trees don't all look identical
-                            if (random.nextInt(6) == 0 && layer > 0) continue;
-                            if (chunk.getBlockState(cursor.set(px, py, pz)).isAir()) {
-                                chunk.setBlockState(cursor, leaves, false);
-                            }
-                        }
-                    }
-                }
-                // sometimes place a few extra leaves around
-                if (random.nextBoolean()) {
-                    for (int i = 0; i < 6; i++) {
-                        int dx = random.nextInt(5) - 2;
-                        int dz = random.nextInt(5) - 2;
-                        int py = y + height - 1 + random.nextInt(4);
+        } else if (variant == 0) {
+            int leafBase = y + height - 2;
+            int leafTop = y + height + 2;
+            for (int py = leafBase; py <= leafTop; py++) {
+                int radius = py == leafTop ? 1 : 2;
+                for (int dz = -radius; dz <= radius; dz++) {
+                    for (int dx = -radius; dx <= radius; dx++) {
                         int px = localX + dx;
                         int pz = localZ + dz;
-                        if (px < 0 || px > 15 || pz < 0 || pz > 15) continue;
-                        if (chunk.getBlockState(cursor.set(px, py, pz)).isAir()) chunk.setBlockState(cursor, leaves, false);
+                        if (px < 0 || px > 15 || pz < 0 || pz > 15 || Math.abs(dx) + Math.abs(dz) > radius + 1) {
+                            continue;
+                        }
+                        if (chunk.getBlockState(cursor.set(px, py, pz)).isAir()) {
+                            chunk.setBlockState(cursor, leaves, false);
+                        }
+                    }
+                }
+            }
+        } else if (variant == 1) {
+            int leafBase = y + height - 3;
+            int leafTop = y + height + 2;
+            for (int py = leafBase; py <= leafTop; py++) {
+                int radius = py >= y + height ? 3 : 2;
+                for (int dz = -radius; dz <= radius; dz++) {
+                    for (int dx = -radius; dx <= radius; dx++) {
+                        int px = localX + dx;
+                        int pz = localZ + dz;
+                        if (px < 0 || px > 15 || pz < 0 || pz > 15) {
+                            continue;
+                        }
+                        if (Math.abs(dx) + Math.abs(dz) > radius + 1) {
+                            continue;
+                        }
+                        if (chunk.getBlockState(cursor.set(px, py, pz)).isAir()) {
+                            chunk.setBlockState(cursor, leaves, false);
+                        }
+                    }
+                }
+            }
+        } else {
+            int leafBase = y + height - 2;
+            int leafTop = y + height + 3;
+            for (int py = leafBase; py <= leafTop; py++) {
+                int layer = py - leafBase;
+                int radius = switch (layer) {
+                    case 0 -> 2;
+                    case 1 -> 3;
+                    case 2 -> 2;
+                    default -> 1;
+                };
+                for (int dz = -radius; dz <= radius; dz++) {
+                    for (int dx = -radius; dx <= radius; dx++) {
+                        int px = localX + dx;
+                        int pz = localZ + dz;
+                        if (px < 0 || px > 15 || pz < 0 || pz > 15) {
+                            continue;
+                        }
+                        if (Math.abs(dx) + Math.abs(dz) > radius + 1 || (random.nextInt(6) == 0 && layer > 0)) {
+                            continue;
+                        }
+                        if (chunk.getBlockState(cursor.set(px, py, pz)).isAir()) {
+                            chunk.setBlockState(cursor, leaves, false);
+                        }
+                    }
+                }
+            }
+            if (random.nextBoolean()) {
+                for (int i = 0; i < 6; i++) {
+                    int dx = random.nextInt(5) - 2;
+                    int dz = random.nextInt(5) - 2;
+                    int py = y + height - 1 + random.nextInt(4);
+                    int px = localX + dx;
+                    int pz = localZ + dz;
+                    if (px < 0 || px > 15 || pz < 0 || pz > 15) {
+                        continue;
+                    }
+                    if (chunk.getBlockState(cursor.set(px, py, pz)).isAir()) {
+                        chunk.setBlockState(cursor, leaves, false);
                     }
                 }
             }

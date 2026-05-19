@@ -21,16 +21,26 @@ public final class TileCache<K, V> {
         };
     }
 
-    public synchronized V get(K key, ThrowingLoader<K, V> loader) throws IOException {
-        V value = cache.get(key);
-        if (value != null) {
-            hits++;
-            return value;
+    public V get(K key, ThrowingLoader<K, V> loader) throws IOException {
+        synchronized (this) {
+            V value = cache.get(key);
+            if (value != null) {
+                hits++;
+                return value;
+            }
+            misses++;
         }
-        misses++;
-        value = loader.load(key);
-        cache.put(key, value);
-        return value;
+
+        V loaded = loader.load(key);
+
+        synchronized (this) {
+            V existing = cache.get(key);
+            if (existing != null) {
+                return existing;
+            }
+            cache.put(key, loaded);
+            return loaded;
+        }
     }
 
     public synchronized String stats() {
@@ -42,4 +52,3 @@ public final class TileCache<K, V> {
         V load(K key) throws IOException;
     }
 }
-
