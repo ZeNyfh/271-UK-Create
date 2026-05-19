@@ -73,6 +73,9 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     private static final int SHALLOW_WATER_DEPTH = 2;
     private static final double BACKGROUND_ORE_ATTEMPT_MULTIPLIER = 0.1;
     private static final double ORE_AREA_ATTEMPT_MULTIPLIER = 3.0;
+    private static final int WOODLAND_TREE_CANDIDATES_PER_CHUNK = 12;
+    private static final int BROADLEAF_TREES_PER_CHUNK = 3;
+    private static final int CONIFER_TREES_PER_CHUNK = 4;
     private static final int SNOW_ICE_MIN_Y = 550;
     private static final int VANILLA_MIN_Y = -64;
     private static final int VANILLA_MAX_Y = 320;
@@ -82,6 +85,9 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     private static final BlockState PERSISTENT_BIRCH_LEAVES = Blocks.BIRCH_LEAVES.defaultBlockState().setValue(LeavesBlock.PERSISTENT, true);
     private static final BlockState PERSISTENT_SPRUCE_LEAVES = Blocks.SPRUCE_LEAVES.defaultBlockState().setValue(LeavesBlock.PERSISTENT, true);
     private static final BlockState PERSISTENT_DARK_OAK_LEAVES = Blocks.DARK_OAK_LEAVES.defaultBlockState().setValue(LeavesBlock.PERSISTENT, true);
+    private static final BlockState NATURAL_OAK_LEAVES = Blocks.OAK_LEAVES.defaultBlockState().setValue(LeavesBlock.PERSISTENT, false).setValue(LeavesBlock.DISTANCE, 1);
+    private static final BlockState NATURAL_BIRCH_LEAVES = Blocks.BIRCH_LEAVES.defaultBlockState().setValue(LeavesBlock.PERSISTENT, false).setValue(LeavesBlock.DISTANCE, 1);
+    private static final BlockState NATURAL_SPRUCE_LEAVES = Blocks.SPRUCE_LEAVES.defaultBlockState().setValue(LeavesBlock.PERSISTENT, false).setValue(LeavesBlock.DISTANCE, 1);
 
     public static final MapCodec<UkGeoChunkGenerator> CODEC = RecordCodecBuilder.mapCodec(instance -> instance.group(
         BiomeSource.CODEC.fieldOf("biome_source").forGetter(generator -> generator.biomeSource),
@@ -747,6 +753,7 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         int maxY = chunk.getMaxBuildHeight() - 1;
         Heightmap surfaceMap = chunk.getOrCreateHeightmapUnprimed(Heightmap.Types.WORLD_SURFACE_WG);
         int cellBlocks = data.manifest.vegetationCellBlocks;
+        placeWoodlandTrees(chunk, plan, surfaceMap, cursor, random, minBuildY, maxY);
         for (int localX = 0; localX < 16; localX++) {
             int worldX = pos.getMinBlockX() + localX;
             for (int localZ = 0; localZ < 16; localZ++) {
@@ -793,6 +800,7 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         int maxY = chunk.getMaxBuildHeight() - 1;
         Heightmap surfaceMap = chunk.getOrCreateHeightmapUnprimed(Heightmap.Types.WORLD_SURFACE_WG);
         int cellBlocks = data.manifest.vegetationCellBlocks;
+        placeWoodlandTrees(chunk, data, surfaceMap, cursor, random, minBuildY, maxY);
         for (int localX = 0; localX < 16; localX++) {
             int worldX = pos.getMinBlockX() + localX;
             for (int localZ = 0; localZ < 16; localZ++) {
@@ -824,6 +832,107 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
                 placeVegetationForClass(chunk, cursor, random, vegetationClass, localX, y, localZ);
             }
         }
+    }
+
+    private void placeWoodlandTrees(
+        ChunkAccess chunk,
+        ChunkTerrainPlanner.Plan plan,
+        Heightmap surfaceMap,
+        BlockPos.MutableBlockPos cursor,
+        java.util.Random random,
+        int minBuildY,
+        int maxY
+    ) {
+        int broadleafPlaced = 0;
+        int coniferPlaced = 0;
+        for (int attempt = 0; attempt < WOODLAND_TREE_CANDIDATES_PER_CHUNK; attempt++) {
+            int localX = 2 + random.nextInt(12);
+            int localZ = 2 + random.nextInt(12);
+            ChunkTerrainPlanner.ColumnPlan column = plan.columns()[localZ * 16 + localX];
+            int vegetationClass = column.vegetationClass();
+            if (vegetationClass == VEGETATION_BROADLEAF_WOODLAND && broadleafPlaced >= BROADLEAF_TREES_PER_CHUNK) {
+                continue;
+            }
+            if (vegetationClass == VEGETATION_CONIFER_WOODLAND && coniferPlaced >= CONIFER_TREES_PER_CHUNK) {
+                continue;
+            }
+            if (tryPlaceWoodlandTree(chunk, surfaceMap, cursor, random, localX, localZ, minBuildY, maxY, vegetationClass, column.river())) {
+                if (vegetationClass == VEGETATION_BROADLEAF_WOODLAND) {
+                    broadleafPlaced++;
+                } else {
+                    coniferPlaced++;
+                }
+            }
+        }
+    }
+
+    private void placeWoodlandTrees(
+        ChunkAccess chunk,
+        RuntimeData data,
+        Heightmap surfaceMap,
+        BlockPos.MutableBlockPos cursor,
+        java.util.Random random,
+        int minBuildY,
+        int maxY
+    ) {
+        ChunkPos pos = chunk.getPos();
+        int broadleafPlaced = 0;
+        int coniferPlaced = 0;
+        for (int attempt = 0; attempt < WOODLAND_TREE_CANDIDATES_PER_CHUNK; attempt++) {
+            int localX = 2 + random.nextInt(12);
+            int localZ = 2 + random.nextInt(12);
+            int worldX = pos.getMinBlockX() + localX;
+            int worldZ = pos.getMinBlockZ() + localZ;
+            int vegetationClass = data.vegetationLayer.sample(worldX, worldZ).orElse(0);
+            if (vegetationClass == VEGETATION_BROADLEAF_WOODLAND && broadleafPlaced >= BROADLEAF_TREES_PER_CHUNK) {
+                continue;
+            }
+            if (vegetationClass == VEGETATION_CONIFER_WOODLAND && coniferPlaced >= CONIFER_TREES_PER_CHUNK) {
+                continue;
+            }
+            int top = surfaceMap.getHighestTaken(localX, localZ);
+            RiverShape river = computeRiverShape(data, null, worldX, worldZ, top, minBuildY);
+            if (tryPlaceWoodlandTree(chunk, surfaceMap, cursor, random, localX, localZ, minBuildY, maxY, vegetationClass, river)) {
+                if (vegetationClass == VEGETATION_BROADLEAF_WOODLAND) {
+                    broadleafPlaced++;
+                } else {
+                    coniferPlaced++;
+                }
+            }
+        }
+    }
+
+    private boolean tryPlaceWoodlandTree(
+        ChunkAccess chunk,
+        Heightmap surfaceMap,
+        BlockPos.MutableBlockPos cursor,
+        java.util.Random random,
+        int localX,
+        int localZ,
+        int minBuildY,
+        int maxY,
+        int vegetationClass,
+        RiverShape river
+    ) {
+        if (!isWoodland(vegetationClass)) {
+            return false;
+        }
+        int top = surfaceMap.getHighestTaken(localX, localZ);
+        if (top < minBuildY + 1 || top >= maxY || river.hasWater() || top <= seaLevelY || river.terrainSurfaceY() != top) {
+            return false;
+        }
+        BlockState ground = chunk.getBlockState(cursor.set(localX, top, localZ));
+        if (!ground.is(Blocks.GRASS_BLOCK) && !ground.is(Blocks.DIRT)) {
+            return false;
+        }
+        int y = top + 1;
+        if (y >= maxY || !chunk.getBlockState(cursor.set(localX, y, localZ)).isAir()) {
+            return false;
+        }
+        VegetationTreeKind kind = vegetationClass == VEGETATION_CONIFER_WOODLAND
+            ? VegetationTreeKind.SPRUCE
+            : random.nextInt(4) == 0 ? VegetationTreeKind.BIRCH : VegetationTreeKind.OAK;
+        return placeSimpleTree(chunk, cursor, random, localX, y, localZ, kind);
     }
 
     private void placeHighAltitudeSnowAndIce(ChunkAccess chunk) {
@@ -945,6 +1054,10 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         }
     }
 
+    private static boolean isWoodland(int vegetationClass) {
+        return vegetationClass == VEGETATION_BROADLEAF_WOODLAND || vegetationClass == VEGETATION_CONIFER_WOODLAND;
+    }
+
     private static void placePlant(ChunkAccess chunk, BlockPos.MutableBlockPos cursor, int localX, int y, int localZ, BlockState state) {
         if (y < chunk.getMaxBuildHeight() && chunk.getBlockState(cursor.set(localX, y, localZ)).isAir()) {
             chunk.setBlockState(cursor, state, false);
@@ -992,7 +1105,7 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         }
     }
 
-    private static void placeSimpleTree(ChunkAccess chunk, BlockPos.MutableBlockPos cursor, java.util.Random random, int localX, int y, int localZ, VegetationTreeKind kind) {
+    private static boolean placeSimpleTree(ChunkAccess chunk, BlockPos.MutableBlockPos cursor, java.util.Random random, int localX, int y, int localZ, VegetationTreeKind kind) {
         int baseHeight = switch (kind) {
             case SPRUCE -> 6 + random.nextInt(4);
             case BIRCH -> 5 + random.nextInt(3);
@@ -1015,11 +1128,11 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         }
 
         if (y + height + 3 >= chunk.getMaxBuildHeight()) {
-            return;
+            return false;
         }
         for (int dy = 0; dy < height; dy++) {
             if (!chunk.getBlockState(cursor.set(localX, y + dy, localZ)).isAir()) {
-                return;
+                return false;
             }
         }
         BlockState log = switch (kind) {
@@ -1028,9 +1141,9 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
             case OAK -> Blocks.OAK_LOG.defaultBlockState();
         };
         BlockState leaves = switch (kind) {
-            case SPRUCE -> PERSISTENT_SPRUCE_LEAVES;
-            case BIRCH -> PERSISTENT_BIRCH_LEAVES;
-            case OAK -> PERSISTENT_OAK_LEAVES;
+            case SPRUCE -> NATURAL_SPRUCE_LEAVES;
+            case BIRCH -> NATURAL_BIRCH_LEAVES;
+            case OAK -> NATURAL_OAK_LEAVES;
         };
         for (int dy = 0; dy < height; dy++) {
             chunk.setBlockState(cursor.set(localX, y + dy, localZ), log, false);
@@ -1159,6 +1272,7 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
                 }
             }
         }
+        return true;
     }
 
     private static int spruceLeafRadius(int layer, int topLayer) {
