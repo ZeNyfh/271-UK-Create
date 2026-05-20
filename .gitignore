@@ -14,6 +14,7 @@ replay_pid*
 *.class
 *.jar
 !mods/ukgeo/gradle/wrapper/gradle-wrapper.jar
+!mods/foodspoilage/gradle/wrapper/gradle-wrapper.jar
 **/.gradle/
 **/build/
 **/run/

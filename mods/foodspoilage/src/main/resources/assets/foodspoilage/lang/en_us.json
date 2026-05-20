@@ -1,0 +1,13 @@
+{
+  "item.foodspoilage.spoiled_raw_food": "Spoiled Raw Food",
+  "item.foodspoilage.spoiled_cooked_food": "Spoiled Food",
+  "tooltip.foodspoilage.state": "Freshness: %s",
+  "tooltip.foodspoilage.freshness": "Spoil percentage: %s%% fresh",
+  "tooltip.foodspoilage.remaining": "Remaining: %s",
+  "tooltip.foodspoilage.complexity": "Recipe complexity: %s",
+  "tooltip.foodspoilage.classification": "Spoilage modifiers: %s",
+  "tooltip.foodspoilage.stage.fresh": "Fresh",
+  "tooltip.foodspoilage.stage.stale": "Stale",
+  "tooltip.foodspoilage.stage.spoiled": "Spoiled",
+  "tooltip.foodspoilage.stage.rotten": "Rotten"
+}
