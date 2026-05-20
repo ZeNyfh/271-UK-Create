@@ -1,9 +1,9 @@
-# UK Geological Create Worldgen
+# 271 UK Create
 
 This repository contains two related projects:
 
 1. `tools/ukgeo-tools`: Python preprocessing tools for OS Terrain 50 ASCII Grid and BGS GeoPackage geology.
-2. `mods/ukgeo-neoforge`: a NeoForge 1.21.1 mod that reads simplified runtime raster tiles on demand.
+2. `mods/ukgeo`: a NeoForge 1.21.1 mod that reads simplified runtime raster tiles on demand.
 
 The Minecraft runtime reads only `.r16.gz` height tiles, `.u8.gz` score/class tiles, and `manifest.json`. It does not parse GeoPackage, Shapefile, GeoTIFF, or OS ASCII Grid files.
 
@@ -83,6 +83,6 @@ For the full BGS 625k GeoPackage, use:
 cd tools/ukgeo-tools
 .venv/bin/pytest
 
-cd ../../mods/ukgeo-neoforge
+cd ../../mods/ukgeo
 ./gradlew build
 ```

@@ -13,7 +13,7 @@ replay_pid*
 # Java / Gradle output
 *.class
 *.jar
-!mods/ukgeo-neoforge/gradle/wrapper/gradle-wrapper.jar
+!mods/ukgeo/gradle/wrapper/gradle-wrapper.jar
 **/.gradle/
 **/build/
 **/run/

@@ -1,11 +1,11 @@
-# UK Geological Create Worldgen NeoForge Mod
+# 271 UK Create
 
 This is a NeoForge 1.21.1 / Java 21 mod with mod id `ukgeo`.
 
 ## Build
 
 ```bash
-cd mods/ukgeo-neoforge
+cd mods/ukgeo
 ./gradlew build
 ```
 

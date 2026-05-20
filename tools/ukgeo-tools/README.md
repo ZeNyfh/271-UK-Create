@@ -1,6 +1,6 @@
 # ukgeo-tools
 
-Python 3.11+ preprocessing tools for UK Geological Create Worldgen.
+Python 3.11+ preprocessing tools for 271 UK Create.
 
 ## Install
 
