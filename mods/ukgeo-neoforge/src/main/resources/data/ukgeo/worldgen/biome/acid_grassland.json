@@ -29,7 +29,9 @@
     [],
     [],
     [],
-    [],
+    [
+      "minecraft:trees_windswept_hills"
+    ],
     []
   ],
   "has_precipitation": true,

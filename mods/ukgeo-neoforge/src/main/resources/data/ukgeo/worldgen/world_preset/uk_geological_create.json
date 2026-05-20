@@ -22,6 +22,7 @@
           "urban": "minecraft:plains",
           "rocky": "minecraft:stony_peaks"
         },
+        "cave_settings": "minecraft:overworld",
         "sea_level_y": 64,
         "height_scale": 0.18,
         "lowland_extra_scale": 0.03,
@@ -35,8 +36,7 @@
         "river_carve_depth": 2,
         "min_y": -128,
         "gen_depth": 1632,
-        "fallback_height": 72,
-        "use_config_data_root": true
+        "fallback_height": 72
       }
     },
     "minecraft:the_end": {
@@ -50,7 +50,7 @@
       }
     },
     "minecraft:the_nether": {
-      "type": "minecraft:the_nether",
+      "type": "ukgeo:nether_1_to_1",
       "generator": {
         "type": "minecraft:noise",
         "biome_source": {
