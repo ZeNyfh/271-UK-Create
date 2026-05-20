@@ -7,22 +7,25 @@ import java.io.IOException;
 import java.lang.reflect.Method;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.EnumSet;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import net.minecraft.Util;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
 import net.minecraft.core.HolderSet;
-import net.minecraft.core.QuartPos;
 import net.minecraft.core.Registry;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
+import net.minecraft.data.worldgen.placement.VegetationPlacements;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
@@ -39,28 +42,23 @@ import net.minecraft.world.level.biome.BiomeSource;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.DoublePlantBlock;
-import net.minecraft.world.level.block.LeavesBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.DoubleBlockHalf;
-import net.minecraft.world.level.chunk.CarvingMask;
 import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.ChunkGenerator;
-import net.minecraft.world.level.chunk.ProtoChunk;
-import net.minecraft.world.level.levelgen.Aquifer;
-import net.minecraft.world.level.levelgen.Beardifier;
 import net.minecraft.world.level.levelgen.GenerationStep;
 import net.minecraft.world.level.levelgen.Heightmap;
-import net.minecraft.world.level.levelgen.LegacyRandomSource;
+import net.minecraft.world.level.levelgen.Noises;
 import net.minecraft.world.level.levelgen.NoiseBasedChunkGenerator;
-import net.minecraft.world.level.levelgen.NoiseChunk;
 import net.minecraft.world.level.levelgen.NoiseGeneratorSettings;
 import net.minecraft.world.level.levelgen.RandomState;
 import net.minecraft.world.level.levelgen.RandomSupport;
 import net.minecraft.world.level.levelgen.WorldgenRandom;
+import net.minecraft.world.level.levelgen.XoroshiroRandomSource;
 import net.minecraft.world.level.levelgen.blending.Blender;
-import net.minecraft.world.level.levelgen.carver.CarvingContext;
 import net.minecraft.world.level.levelgen.carver.ConfiguredWorldCarver;
 import net.minecraft.world.level.levelgen.placement.PlacedFeature;
+import net.minecraft.world.level.levelgen.synth.NormalNoise;
 import net.minecraft.world.level.material.Fluids;
 import net.neoforged.fml.ModList;
 
@@ -88,24 +86,29 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     private static final int SHALLOW_WATER_DEPTH = 2;
     private static final double BACKGROUND_ORE_ATTEMPT_MULTIPLIER = 0.1;
     private static final double ORE_AREA_ATTEMPT_MULTIPLIER = 3.0;
-    private static final int WOODLAND_TREE_CANDIDATES_PER_CHUNK = 12;
-    private static final int BROADLEAF_TREES_PER_CHUNK = 3;
-    private static final int CONIFER_TREES_PER_CHUNK = 4;
-    private static final int SNOW_ICE_MIN_Y = 550;
+    private static final int SNOW_ICE_MIN_Y = 501;
     private static final int VANILLA_MIN_Y = -64;
     private static final int VANILLA_MAX_Y = 320;
+    private static final int BOTTOM_BEDROCK_THICKNESS = 1;
+    private static final int CAVE_TRANSITION_BELOW_DELEGATE = 12;
+    private static final int CAVE_TRANSITION_ABOVE_DELEGATE = 16;
     private static volatile boolean createDieselGeneratorsOilLookupAttempted;
     private static volatile Method createDieselGeneratorsSetOilAmount;
-    private static final BlockState PERSISTENT_OAK_LEAVES = Blocks.OAK_LEAVES.defaultBlockState().setValue(LeavesBlock.PERSISTENT, true);
-    private static final BlockState PERSISTENT_BIRCH_LEAVES = Blocks.BIRCH_LEAVES.defaultBlockState().setValue(LeavesBlock.PERSISTENT, true);
-    private static final BlockState PERSISTENT_SPRUCE_LEAVES = Blocks.SPRUCE_LEAVES.defaultBlockState().setValue(LeavesBlock.PERSISTENT, true);
-    private static final BlockState PERSISTENT_DARK_OAK_LEAVES = Blocks.DARK_OAK_LEAVES.defaultBlockState().setValue(LeavesBlock.PERSISTENT, true);
-    private static final BlockState NATURAL_OAK_LEAVES = Blocks.OAK_LEAVES.defaultBlockState().setValue(LeavesBlock.PERSISTENT, false).setValue(LeavesBlock.DISTANCE, 1);
-    private static final BlockState NATURAL_BIRCH_LEAVES = Blocks.BIRCH_LEAVES.defaultBlockState().setValue(LeavesBlock.PERSISTENT, false).setValue(LeavesBlock.DISTANCE, 1);
-    private static final BlockState NATURAL_SPRUCE_LEAVES = Blocks.SPRUCE_LEAVES.defaultBlockState().setValue(LeavesBlock.PERSISTENT, false).setValue(LeavesBlock.DISTANCE, 1);
+    private static volatile boolean caveModeLogged;
+    private static final List<ResourceKey<PlacedFeature>> VANILLA_TREE_FEATURES = List.of(
+        VegetationPlacements.TREES_PLAINS,
+        VegetationPlacements.TREES_BIRCH_AND_OAK,
+        VegetationPlacements.TREES_TAIGA,
+        VegetationPlacements.TREES_MEADOW,
+        VegetationPlacements.TREES_FLOWER_FOREST,
+        VegetationPlacements.TREES_WINDSWEPT_HILLS,
+        VegetationPlacements.TREES_SWAMP,
+        VegetationPlacements.TREES_WINDSWEPT_SAVANNA
+    );
 
     public static final MapCodec<UkGeoChunkGenerator> CODEC = RecordCodecBuilder.mapCodec(instance -> instance.group(
         BiomeSource.CODEC.fieldOf("biome_source").forGetter(generator -> generator.biomeSource),
+        NoiseGeneratorSettings.CODEC.optionalFieldOf("cave_settings").forGetter(generator -> generator.caveSettings),
         Codec.INT.optionalFieldOf("sea_level_y", 64).forGetter(generator -> generator.seaLevelY),
         Codec.DOUBLE.optionalFieldOf("height_scale", 1.0).forGetter(generator -> generator.heightScale),
         Codec.DOUBLE.optionalFieldOf("lowland_extra_scale", 0.0).forGetter(generator -> generator.lowlandExtraScale),
@@ -119,8 +122,7 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         Codec.INT.optionalFieldOf("river_carve_depth", 2).forGetter(generator -> generator.riverCarveDepth),
         Codec.INT.optionalFieldOf("min_y", -128).forGetter(generator -> generator.minY),
         Codec.INT.optionalFieldOf("gen_depth", 1632).forGetter(generator -> generator.genDepth),
-        Codec.INT.optionalFieldOf("fallback_height", 72).forGetter(generator -> generator.fallbackHeight),
-        Codec.BOOL.optionalFieldOf("use_config_data_root", true).forGetter(generator -> generator.useConfigDataRoot)
+        Codec.INT.optionalFieldOf("fallback_height", 72).forGetter(generator -> generator.fallbackHeight)
     ).apply(instance, UkGeoChunkGenerator::new));
 
     private final int seaLevelY;
@@ -138,6 +140,8 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     private final int genDepth;
     private final int fallbackHeight;
     private final boolean useConfigDataRoot;
+    private final Optional<Holder<NoiseGeneratorSettings>> caveSettings;
+    private final Optional<NoiseBasedChunkGenerator> caveDelegate;
     private volatile RuntimeData runtimeData;
     private volatile boolean attemptedDataLoad;
     private final Map<String, Optional<BlockStatePair>> blockStateCache = new ConcurrentHashMap<>();
@@ -146,6 +150,7 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
 
     public UkGeoChunkGenerator(
         BiomeSource biomeSource,
+        Optional<Holder<NoiseGeneratorSettings>> caveSettings,
         int seaLevelY,
         double heightScale,
         double lowlandExtraScale,
@@ -159,10 +164,11 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         int riverCarveDepth,
         int minY,
         int genDepth,
-        int fallbackHeight,
-        boolean useConfigDataRoot
+        int fallbackHeight
     ) {
         super(biomeSource, UkGeoChunkGenerator::sanitizeBiomeSettings);
+        this.caveSettings = caveSettings;
+        this.caveDelegate = caveSettings.map(settings -> new NoiseBasedChunkGenerator(biomeSource, settings));
         this.seaLevelY = seaLevelY;
         this.heightScale = heightScale;
         this.lowlandExtraScale = Math.max(0.0, lowlandExtraScale);
@@ -177,12 +183,21 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         this.minY = minY;
         this.genDepth = genDepth;
         this.fallbackHeight = fallbackHeight;
-        this.useConfigDataRoot = useConfigDataRoot;
+        this.useConfigDataRoot = true;
     }
 
     private static BiomeGenerationSettings sanitizeBiomeSettings(Holder<Biome> biome) {
+        Map<GenerationStep.Carving, HolderSet<ConfiguredWorldCarver<?>>> carvers = new HashMap<>();
+        BiomeGenerationSettings original = biome.value().getGenerationSettings();
+        for (GenerationStep.Carving stage : original.getCarvingStages()) {
+            List<Holder<ConfiguredWorldCarver<?>>> stageCarvers = new ArrayList<>();
+            for (Holder<ConfiguredWorldCarver<?>> carver : original.getCarvers(stage)) {
+                stageCarvers.add(carver);
+            }
+            carvers.put(stage, HolderSet.direct(stageCarvers));
+        }
         List<HolderSet<PlacedFeature>> sanitized = new ArrayList<>();
-        for (HolderSet<PlacedFeature> step : biome.value().getGenerationSettings().features()) {
+        for (HolderSet<PlacedFeature> step : original.features()) {
             List<Holder<PlacedFeature>> kept = new ArrayList<>();
             for (Holder<PlacedFeature> feature : step) {
                 if (!isExcludedBiomeFeature(feature)) {
@@ -195,7 +210,35 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         if (sanitized.size() > oreStep) {
             sanitized.set(oreStep, HolderSet.direct(List.<Holder<PlacedFeature>>of()));
         }
-        return new BiomeGenerationSettings(Map.of(), List.copyOf(sanitized));
+        return new BiomeGenerationSettings(carvers, List.copyOf(sanitized));
+    }
+
+    private static void logCaveMode(ChunkTerrainPlanner.CaveMask caveMask, int worldMinY, int maxY, int seaLevel) {
+        if (!caveModeLogged) {
+            caveModeLogged = true;
+            if (caveMask.usesDelegate()) {
+                UkGeoMod.LOGGER.info(
+                    "Using split UK cave mask; worldMinY={}, maxY={}, delegateMinY={}, transition={}..{}, deepCaveRange={}..{}, deepLavaRange={}..{}, seaLevel={}, delegateFluidsIgnored=true, unconditionalAirBand=false, unconditionalSolidSlab=false",
+                    worldMinY,
+                    maxY,
+                    caveMask.delegateMinY(),
+                    caveMask.transitionStartY(),
+                    caveMask.transitionEndY(),
+                    caveMask.deepCaveMinY(),
+                    caveMask.deepCaveMaxY(),
+                    caveMask.deepCaveMinY() + 1,
+                    caveMask.deepLavaMaxY(),
+                    seaLevel
+                );
+            } else {
+                UkGeoMod.LOGGER.warn(
+                    "Using legacy carvers only; modern noise caves unavailable because cave_settings was not configured; worldMinY={}, maxY={}, deepCaveRange=none, deepLavaRange=none, seaLevel={}, delegateFluidsIgnored=true",
+                    worldMinY,
+                    maxY,
+                    seaLevel
+                );
+            }
+        }
     }
 
     private static boolean isExcludedBiomeFeature(Holder<PlacedFeature> feature) {
@@ -220,24 +263,83 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     public CompletableFuture<ChunkAccess> fillFromNoise(Blender blender, RandomState randomState, StructureManager structureManager, ChunkAccess chunk) {
         RuntimeData data = data();
         if (data == null) {
-            return CompletableFuture.completedFuture(chunk);
+            return caveDelegate
+                .map(delegate -> delegate.fillFromNoise(blender, randomState, structureManager, chunk))
+                .orElseGet(() -> CompletableFuture.completedFuture(chunk));
         }
-        return CompletableFuture
-            .supplyAsync(
-                Util.wrapThreadWithTaskName("ukgeo_plan", () -> {
-                    try {
-                        return ChunkTerrainPlanner.compute(this, data, chunk);
-                    } catch (IOException ex) {
-                        throw new RuntimeException("Failed to plan UKGeo chunk " + chunk.getPos(), ex);
-                    }
-                }),
-                Util.backgroundExecutor()
-            )
+        /*
+         * Pipeline: compute UK height/biome data, run vanilla noise only to obtain cave air shapes,
+         * overlay UK terrain/surface/water, prime heightmaps, then place ores/decorations later.
+         * Delegate aquifer water/lava is deliberately ignored; final fluids come from UK ocean/river
+         * rules, avoiding vanilla sea-level water sheets and hardcoded lava aquifers in this -128 minY world.
+         */
+        CompletableFuture<ChunkAccess> baseNoise = caveDelegate
+            .map(delegate -> delegate.fillFromNoise(blender, randomState, structureManager, chunk))
+            .orElseGet(() -> CompletableFuture.completedFuture(chunk));
+        boolean preserveVanillaCaves = caveDelegate.isPresent();
+        int delegateMinY = caveDelegate.map(NoiseBasedChunkGenerator::getMinY).orElse(chunk.getMinBuildHeight());
+        ChunkTerrainPlanner.CaveMask caveMask = caveMask(
+            randomState,
+            chunk.getMinBuildHeight(),
+            chunk.getMaxBuildHeight() - 1,
+            delegateMinY,
+            preserveVanillaCaves
+        );
+        logCaveMode(caveMask, chunk.getMinBuildHeight(), chunk.getMaxBuildHeight() - 1, this.seaLevelY);
+        return baseNoise.thenCompose(noiseChunk -> CompletableFuture
+                .supplyAsync(
+                    Util.wrapThreadWithTaskName("ukgeo_plan", () -> {
+                        try {
+                            return ChunkTerrainPlanner.compute(this, data, noiseChunk);
+                        } catch (IOException ex) {
+                            throw new RuntimeException("Failed to plan UKGeo chunk " + noiseChunk.getPos(), ex);
+                        }
+                    }),
+                    Util.backgroundExecutor()
+                )
             .thenApply(plan -> {
-                chunkPlans.put(chunk.getPos().toLong(), plan);
-                ChunkTerrainPlanner.apply(plan, chunk);
-                return chunk;
-            });
+                chunkPlans.put(noiseChunk.getPos().toLong(), plan);
+                ChunkTerrainPlanner.apply(plan, noiseChunk, caveMask);
+                return noiseChunk;
+            }));
+    }
+
+    private static ChunkTerrainPlanner.CaveMask caveMask(RandomState randomState, int worldMinY, int worldMaxY, int delegateMinY, boolean usingDelegate) {
+        int deepCaveMinY = deepCaveMinY(worldMinY);
+        int transitionStartY = usingDelegate ? Math.max(deepCaveMinY, delegateMinY - CAVE_TRANSITION_BELOW_DELEGATE) : worldMinY - 1;
+        int transitionEndY = usingDelegate ? Math.min(worldMaxY, delegateMinY + CAVE_TRANSITION_ABOVE_DELEGATE) : worldMinY - 1;
+        int deepCaveMaxY = usingDelegate ? transitionEndY : worldMinY - 1;
+        int deepLavaMaxY = usingDelegate ? deepLavaMaxY(worldMinY, delegateMinY) : worldMinY - 1;
+        NormalNoise caveCheese = randomState.getOrCreateNoise(Noises.CAVE_CHEESE);
+        NormalNoise caveLayer = randomState.getOrCreateNoise(Noises.CAVE_LAYER);
+        NormalNoise tunnelA = randomState.getOrCreateNoise(Noises.SPAGHETTI_3D_1);
+        NormalNoise tunnelB = randomState.getOrCreateNoise(Noises.SPAGHETTI_3D_2);
+        NormalNoise rarity = randomState.getOrCreateNoise(Noises.SPAGHETTI_3D_RARITY);
+        NormalNoise lavaNoise = randomState.getOrCreateNoise(Noises.SPAGHETTI_ROUGHNESS_MODULATOR);
+        return new ChunkTerrainPlanner.CaveMask(
+            usingDelegate,
+            delegateMinY,
+            transitionStartY,
+            transitionEndY,
+            deepCaveMinY,
+            deepCaveMaxY,
+            deepLavaMaxY,
+            caveCheese,
+            caveLayer,
+            tunnelA,
+            tunnelB,
+            rarity,
+            lavaNoise
+        );
+    }
+
+    private static int deepCaveMinY(int worldMinY) {
+        return worldMinY + BOTTOM_BEDROCK_THICKNESS;
+    }
+
+    private static int deepLavaMaxY(int worldMinY, int delegateMinY) {
+        int deepSpan = Math.max(1, delegateMinY - worldMinY);
+        return worldMinY + Math.max(1, Math.round(deepSpan / 3.0f));
     }
 
     int sampleMargin() {
@@ -734,18 +836,81 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     public void buildSurface(WorldGenRegion level, StructureManager structureManager, RandomState random, ChunkAccess chunk) {
         ChunkTerrainPlanner.Plan plan = chunkPlans.remove(chunk.getPos().toLong());
         if (plan != null) {
+            removeDelegateCaveFluids(chunk, plan, false);
+            primeGenerationHeightmaps(chunk);
+            ChunkTerrainPlanner.applyOres(plan, chunk);
             scheduleWaterTicks(level, chunk, plan);
             placeVegetation(chunk, plan);
         } else {
+            removeDelegateCaveFluids(chunk);
+            primeGenerationHeightmaps(chunk);
             scheduleWaterTicks(level, chunk);
             placeVegetation(chunk);
         }
         placeHighAltitudeSnowAndIce(chunk);
+        removeSnowAndIceBelowMinY(chunk);
+        primeGenerationHeightmaps(chunk);
         populateCreateDieselGeneratorsOil(level.getLevel(), chunk.getPos());
     }
 
     @Override
     public void applyBiomeDecoration(WorldGenLevel level, ChunkAccess chunk, StructureManager structureManager) {
+        ChunkPos chunkPos = chunk.getPos();
+        BlockPos origin = new BlockPos(chunkPos.getMinBlockX(), level.getMinBuildHeight(), chunkPos.getMinBlockZ());
+        Registry<PlacedFeature> placedFeatures = level.registryAccess().registryOrThrow(Registries.PLACED_FEATURE);
+        WorldgenRandom random = new WorldgenRandom(new XoroshiroRandomSource(RandomSupport.generateUniqueSeed()));
+        long decorationSeed = random.setDecorationSeed(level.getSeed(), origin.getX(), origin.getZ());
+        int step = GenerationStep.Decoration.VEGETAL_DECORATION.ordinal();
+        int featureIndex = 0;
+
+        /*
+         * Direct configured features such as TreeFeatures.OAK are useful for debug commands that spawn one tree.
+         * Natural worldgen should run vanilla tree placed features instead: those contain the biome-style counts,
+         * rarity filters, biome checks, and configured-feature mixtures that make forests/taiga/swamps vary like vanilla.
+         */
+        for (ResourceKey<PlacedFeature> key : vanillaTreeFeaturesForChunk(level, chunkPos)) {
+            PlacedFeature placedFeature = placedFeatures.getOrThrow(key);
+            random.setFeatureSeed(decorationSeed, featureIndex, step);
+            placedFeature.placeWithBiomeCheck(level, this, random, origin);
+            featureIndex++;
+        }
+        removeSnowAndIceBelowMinY(chunk);
+    }
+
+    private Set<ResourceKey<PlacedFeature>> vanillaTreeFeaturesForChunk(WorldGenLevel level, ChunkPos center) {
+        Set<ResourceKey<PlacedFeature>> discovered = new LinkedHashSet<>();
+        ChunkPos.rangeClosed(center, 1).forEach(chunkPos -> {
+            ChunkAccess chunk = level.getChunk(chunkPos.x, chunkPos.z);
+            for (var section : chunk.getSections()) {
+                section.getBiomes().getAll(biome -> addVanillaTreeFeaturesForBiome(discovered, biome));
+            }
+        });
+        Set<ResourceKey<PlacedFeature>> ordered = new LinkedHashSet<>();
+        for (ResourceKey<PlacedFeature> key : VANILLA_TREE_FEATURES) {
+            if (discovered.contains(key)) {
+                ordered.add(key);
+            }
+        }
+        return ordered;
+    }
+
+    private static void addVanillaTreeFeaturesForBiome(Set<ResourceKey<PlacedFeature>> features, Holder<Biome> biome) {
+        biome.unwrapKey().ifPresent(key -> {
+            ResourceLocation id = key.location();
+            String path = id.getPath();
+            switch (path) {
+                case "plains", "arable", "improved_grassland", "urban" -> features.add(VegetationPlacements.TREES_PLAINS);
+                case "forest", "broadleaf_woodland" -> features.add(VegetationPlacements.TREES_BIRCH_AND_OAK);
+                case "taiga", "conifer_woodland" -> features.add(VegetationPlacements.TREES_TAIGA);
+                case "meadow", "neutral_grassland" -> features.add(VegetationPlacements.TREES_MEADOW);
+                case "flower_forest", "calcareous_grassland" -> features.add(VegetationPlacements.TREES_FLOWER_FOREST);
+                case "windswept_hills", "acid_grassland" -> features.add(VegetationPlacements.TREES_WINDSWEPT_HILLS);
+                case "swamp", "wetland" -> features.add(VegetationPlacements.TREES_SWAMP);
+                case "windswept_savanna", "heath" -> features.add(VegetationPlacements.TREES_WINDSWEPT_SAVANNA);
+                default -> {
+                }
+            }
+        });
     }
 
     private static int scaleVanillaY(int vanillaY, LevelHeightAccessor level) {
@@ -768,7 +933,6 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         int maxY = chunk.getMaxBuildHeight() - 1;
         Heightmap surfaceMap = chunk.getOrCreateHeightmapUnprimed(Heightmap.Types.WORLD_SURFACE_WG);
         int cellBlocks = data.manifest.vegetationCellBlocks;
-        placeWoodlandTrees(chunk, plan, surfaceMap, cursor, random, minBuildY, maxY);
         for (int localX = 0; localX < 16; localX++) {
             int worldX = pos.getMinBlockX() + localX;
             for (int localZ = 0; localZ < 16; localZ++) {
@@ -815,7 +979,6 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         int maxY = chunk.getMaxBuildHeight() - 1;
         Heightmap surfaceMap = chunk.getOrCreateHeightmapUnprimed(Heightmap.Types.WORLD_SURFACE_WG);
         int cellBlocks = data.manifest.vegetationCellBlocks;
-        placeWoodlandTrees(chunk, data, surfaceMap, cursor, random, minBuildY, maxY);
         for (int localX = 0; localX < 16; localX++) {
             int worldX = pos.getMinBlockX() + localX;
             for (int localZ = 0; localZ < 16; localZ++) {
@@ -847,107 +1010,6 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
                 placeVegetationForClass(chunk, cursor, random, vegetationClass, localX, y, localZ);
             }
         }
-    }
-
-    private void placeWoodlandTrees(
-        ChunkAccess chunk,
-        ChunkTerrainPlanner.Plan plan,
-        Heightmap surfaceMap,
-        BlockPos.MutableBlockPos cursor,
-        java.util.Random random,
-        int minBuildY,
-        int maxY
-    ) {
-        int broadleafPlaced = 0;
-        int coniferPlaced = 0;
-        for (int attempt = 0; attempt < WOODLAND_TREE_CANDIDATES_PER_CHUNK; attempt++) {
-            int localX = 2 + random.nextInt(12);
-            int localZ = 2 + random.nextInt(12);
-            ChunkTerrainPlanner.ColumnPlan column = plan.columns()[localZ * 16 + localX];
-            int vegetationClass = column.vegetationClass();
-            if (vegetationClass == VEGETATION_BROADLEAF_WOODLAND && broadleafPlaced >= BROADLEAF_TREES_PER_CHUNK) {
-                continue;
-            }
-            if (vegetationClass == VEGETATION_CONIFER_WOODLAND && coniferPlaced >= CONIFER_TREES_PER_CHUNK) {
-                continue;
-            }
-            if (tryPlaceWoodlandTree(chunk, surfaceMap, cursor, random, localX, localZ, minBuildY, maxY, vegetationClass, column.river())) {
-                if (vegetationClass == VEGETATION_BROADLEAF_WOODLAND) {
-                    broadleafPlaced++;
-                } else {
-                    coniferPlaced++;
-                }
-            }
-        }
-    }
-
-    private void placeWoodlandTrees(
-        ChunkAccess chunk,
-        RuntimeData data,
-        Heightmap surfaceMap,
-        BlockPos.MutableBlockPos cursor,
-        java.util.Random random,
-        int minBuildY,
-        int maxY
-    ) {
-        ChunkPos pos = chunk.getPos();
-        int broadleafPlaced = 0;
-        int coniferPlaced = 0;
-        for (int attempt = 0; attempt < WOODLAND_TREE_CANDIDATES_PER_CHUNK; attempt++) {
-            int localX = 2 + random.nextInt(12);
-            int localZ = 2 + random.nextInt(12);
-            int worldX = pos.getMinBlockX() + localX;
-            int worldZ = pos.getMinBlockZ() + localZ;
-            int vegetationClass = data.vegetationLayer.sample(worldX, worldZ).orElse(0);
-            if (vegetationClass == VEGETATION_BROADLEAF_WOODLAND && broadleafPlaced >= BROADLEAF_TREES_PER_CHUNK) {
-                continue;
-            }
-            if (vegetationClass == VEGETATION_CONIFER_WOODLAND && coniferPlaced >= CONIFER_TREES_PER_CHUNK) {
-                continue;
-            }
-            int top = surfaceMap.getHighestTaken(localX, localZ);
-            RiverShape river = computeRiverShape(data, null, worldX, worldZ, top, minBuildY);
-            if (tryPlaceWoodlandTree(chunk, surfaceMap, cursor, random, localX, localZ, minBuildY, maxY, vegetationClass, river)) {
-                if (vegetationClass == VEGETATION_BROADLEAF_WOODLAND) {
-                    broadleafPlaced++;
-                } else {
-                    coniferPlaced++;
-                }
-            }
-        }
-    }
-
-    private boolean tryPlaceWoodlandTree(
-        ChunkAccess chunk,
-        Heightmap surfaceMap,
-        BlockPos.MutableBlockPos cursor,
-        java.util.Random random,
-        int localX,
-        int localZ,
-        int minBuildY,
-        int maxY,
-        int vegetationClass,
-        RiverShape river
-    ) {
-        if (!isWoodland(vegetationClass)) {
-            return false;
-        }
-        int top = surfaceMap.getHighestTaken(localX, localZ);
-        if (top < minBuildY + 1 || top >= maxY || river.hasWater() || top <= seaLevelY || river.terrainSurfaceY() != top) {
-            return false;
-        }
-        BlockState ground = chunk.getBlockState(cursor.set(localX, top, localZ));
-        if (!ground.is(Blocks.GRASS_BLOCK) && !ground.is(Blocks.DIRT)) {
-            return false;
-        }
-        int y = top + 1;
-        if (y >= maxY || !chunk.getBlockState(cursor.set(localX, y, localZ)).isAir()) {
-            return false;
-        }
-        VegetationTreeKind kind = vegetationClass == VEGETATION_CONIFER_WOODLAND
-            ? VegetationTreeKind.SPRUCE
-            : random.nextInt(4) == 0 ? VegetationTreeKind.BIRCH : VegetationTreeKind.OAK;
-        return placeSimpleTree(chunk, cursor, random, localX, y, localZ, kind);
     }
 
     private void placeHighAltitudeSnowAndIce(ChunkAccess chunk) {
@@ -989,23 +1051,74 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         }
     }
 
+    private static void primeGenerationHeightmaps(ChunkAccess chunk) {
+        Heightmap.primeHeightmaps(
+            chunk,
+            EnumSet.of(
+                Heightmap.Types.WORLD_SURFACE_WG,
+                Heightmap.Types.OCEAN_FLOOR_WG,
+                Heightmap.Types.MOTION_BLOCKING,
+                Heightmap.Types.MOTION_BLOCKING_NO_LEAVES
+            )
+        );
+    }
+
+    private static void removeDelegateCaveFluids(ChunkAccess chunk, ChunkTerrainPlanner.Plan plan, boolean removeLava) {
+        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+        for (int localZ = 0; localZ < 16; localZ++) {
+            for (int localX = 0; localX < 16; localX++) {
+                ChunkTerrainPlanner.ColumnPlan column = plan.columns()[localZ * 16 + localX];
+                removeDelegateCaveFluids(chunk, cursor, localX, localZ, column.terrainTop(), removeLava);
+            }
+        }
+    }
+
+    private void removeDelegateCaveFluids(ChunkAccess chunk) {
+        RuntimeData runtime = data();
+        if (runtime == null) {
+            return;
+        }
+        ChunkPos pos = chunk.getPos();
+        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+        int minBuildY = chunk.getMinBuildHeight();
+        for (int localZ = 0; localZ < 16; localZ++) {
+            int worldZ = pos.getMinBlockZ() + localZ;
+            for (int localX = 0; localX < 16; localX++) {
+                int worldX = pos.getMinBlockX() + localX;
+                int surface = surfaceY(worldX, worldZ);
+                RiverShape river = computeRiverShape(runtime, null, worldX, worldZ, surface, minBuildY);
+                removeDelegateCaveFluids(chunk, cursor, localX, localZ, river.terrainSurfaceY(), true);
+            }
+        }
+    }
+
+    private static void removeDelegateCaveFluids(
+        ChunkAccess chunk,
+        BlockPos.MutableBlockPos cursor,
+        int localX,
+        int localZ,
+        int terrainTop,
+        boolean removeLava
+    ) {
+        // Delegate/carver fluids below the custom terrain surface are not final world fluids.
+        // Surface oceans and rivers are placed by columnStateFor above terrainTop.
+        for (int y = chunk.getMinBuildHeight(); y <= terrainTop; y++) {
+            BlockState state = chunk.getBlockState(cursor.set(localX, y, localZ));
+            if (state.is(Blocks.WATER) || (removeLava && state.is(Blocks.LAVA))) {
+                chunk.setBlockState(cursor, Blocks.AIR.defaultBlockState(), false);
+            }
+        }
+    }
+
     private void placeVegetationForClass(ChunkAccess chunk, BlockPos.MutableBlockPos cursor, java.util.Random random, int vegetationClass, int localX, int y, int localZ) {
         switch (vegetationClass) {
             case VEGETATION_BROADLEAF_WOODLAND -> {
-                if (canPlaceTreeAt(localX, localZ) && random.nextInt(88) == 0) {
-                    placeSimpleTree(chunk, cursor, random, localX, y, localZ, random.nextInt(4) == 0 ? VegetationTreeKind.BIRCH : VegetationTreeKind.OAK);
-                } else if (random.nextInt(9) == 0) {
-                    placeShrub(chunk, cursor, random, localX, y, localZ, random.nextBoolean() ? PERSISTENT_OAK_LEAVES : PERSISTENT_BIRCH_LEAVES);
-                } else if (random.nextInt(6) == 0) {
+                if (random.nextInt(6) == 0) {
                     placePlant(chunk, cursor, localX, y, localZ, randomGrassOrFlower(random, vegetationClass));
                 }
             }
             case VEGETATION_CONIFER_WOODLAND -> {
-                if (canPlaceTreeAt(localX, localZ) && random.nextInt(76) == 0) {
-                    placeSimpleTree(chunk, cursor, random, localX, y, localZ, VegetationTreeKind.SPRUCE);
-                } else if (random.nextInt(10) == 0) {
-                    placeShrub(chunk, cursor, random, localX, y, localZ, PERSISTENT_SPRUCE_LEAVES);
-                } else if (random.nextInt(5) == 0) {
+                if (random.nextInt(5) == 0) {
                     if (random.nextInt(5) == 0) {
                         placeDoublePlant(chunk, cursor, localX, y, localZ, Blocks.LARGE_FERN.defaultBlockState());
                     } else {
@@ -1025,9 +1138,7 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
                 }
             }
             case VEGETATION_HEATH -> {
-                if (random.nextInt(11) == 0) {
-                    placeShrub(chunk, cursor, random, localX, y, localZ, random.nextBoolean() ? PERSISTENT_DARK_OAK_LEAVES : PERSISTENT_OAK_LEAVES);
-                } else if (random.nextInt(5) == 0) {
+                if (random.nextInt(5) == 0) {
                     placePlant(chunk, cursor, localX, y, localZ, random.nextInt(3) == 0 ? Blocks.DEAD_BUSH.defaultBlockState() : Blocks.FERN.defaultBlockState());
                 }
             }
@@ -1048,8 +1159,6 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
                     placePlant(chunk, cursor, localX, y, localZ, randomGrassOrFlower(random, vegetationClass));
                 } else if (random.nextInt(30) == 0) {
                     placeDoublePlant(chunk, cursor, localX, y, localZ, Blocks.TALL_GRASS.defaultBlockState());
-                } else if (random.nextInt(70) == 0) {
-                    placeShrub(chunk, cursor, random, localX, y, localZ, PERSISTENT_OAK_LEAVES);
                 }
             }
             case VEGETATION_ACID_GRASSLAND -> {
@@ -1067,10 +1176,6 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
             default -> {
             }
         }
-    }
-
-    private static boolean isWoodland(int vegetationClass) {
-        return vegetationClass == VEGETATION_BROADLEAF_WOODLAND || vegetationClass == VEGETATION_CONIFER_WOODLAND;
     }
 
     private static void placePlant(ChunkAccess chunk, BlockPos.MutableBlockPos cursor, int localX, int y, int localZ, BlockState state) {
@@ -1120,206 +1225,6 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         }
     }
 
-    private static boolean placeSimpleTree(ChunkAccess chunk, BlockPos.MutableBlockPos cursor, java.util.Random random, int localX, int y, int localZ, VegetationTreeKind kind) {
-        int baseHeight = switch (kind) {
-            case SPRUCE -> 6 + random.nextInt(4);
-            case BIRCH -> 5 + random.nextInt(3);
-            case OAK -> 4 + random.nextInt(3);
-        };
-        int variant = random.nextInt(kind == VegetationTreeKind.OAK ? 3 : 2);
-        int height = baseHeight;
-        if (kind == VegetationTreeKind.SPRUCE && variant == 1) {
-            height += 2 + random.nextInt(3);
-        }
-        if (kind == VegetationTreeKind.BIRCH && variant == 1) {
-            height += 1 + random.nextInt(2);
-        }
-        if (kind == VegetationTreeKind.OAK) {
-            if (variant == 1) {
-                height += 2 + random.nextInt(4);
-            } else if (variant == 2) {
-                height += random.nextInt(2);
-            }
-        }
-
-        if (y + height + 3 >= chunk.getMaxBuildHeight()) {
-            return false;
-        }
-        for (int dy = 0; dy < height; dy++) {
-            if (!chunk.getBlockState(cursor.set(localX, y + dy, localZ)).isAir()) {
-                return false;
-            }
-        }
-        BlockState log = switch (kind) {
-            case SPRUCE -> Blocks.SPRUCE_LOG.defaultBlockState();
-            case BIRCH -> Blocks.BIRCH_LOG.defaultBlockState();
-            case OAK -> Blocks.OAK_LOG.defaultBlockState();
-        };
-        BlockState leaves = switch (kind) {
-            case SPRUCE -> NATURAL_SPRUCE_LEAVES;
-            case BIRCH -> NATURAL_BIRCH_LEAVES;
-            case OAK -> NATURAL_OAK_LEAVES;
-        };
-        for (int dy = 0; dy < height; dy++) {
-            chunk.setBlockState(cursor.set(localX, y + dy, localZ), log, false);
-        }
-
-        if (kind == VegetationTreeKind.SPRUCE) {
-            int leafBase = y + height - 3;
-            int leafTop = y + height + 1;
-            for (int py = leafBase; py <= leafTop; py++) {
-                int layer = py - leafBase;
-                int radius = spruceLeafRadius(layer, leafTop - leafBase);
-                for (int dz = -radius; dz <= radius; dz++) {
-                    for (int dx = -radius; dx <= radius; dx++) {
-                        int px = localX + dx;
-                        int pz = localZ + dz;
-                        if (px < 0 || px > 15 || pz < 0 || pz > 15) {
-                            continue;
-                        }
-                        if (chunk.getBlockState(cursor.set(px, py, pz)).isAir()) {
-                            chunk.setBlockState(cursor, leaves, false);
-                        }
-                    }
-                }
-            }
-        } else if (kind == VegetationTreeKind.BIRCH) {
-            int leafBase = y + height - 2;
-            int leafTop = y + height + 2;
-            int topRadius = variant == 1 ? 2 : 1;
-            for (int py = leafBase; py <= leafTop; py++) {
-                int radius = py == leafTop ? topRadius : 2;
-                for (int dz = -radius; dz <= radius; dz++) {
-                    for (int dx = -radius; dx <= radius; dx++) {
-                        int px = localX + dx;
-                        int pz = localZ + dz;
-                        if (px < 0 || px > 15 || pz < 0 || pz > 15) {
-                            continue;
-                        }
-                        if (Math.abs(dx) + Math.abs(dz) > radius + 1) {
-                            continue;
-                        }
-                        if (chunk.getBlockState(cursor.set(px, py, pz)).isAir()) {
-                            chunk.setBlockState(cursor, leaves, false);
-                        }
-                    }
-                }
-            }
-        } else if (variant == 0) {
-            int leafBase = y + height - 2;
-            int leafTop = y + height + 2;
-            for (int py = leafBase; py <= leafTop; py++) {
-                int radius = py == leafTop ? 1 : 2;
-                for (int dz = -radius; dz <= radius; dz++) {
-                    for (int dx = -radius; dx <= radius; dx++) {
-                        int px = localX + dx;
-                        int pz = localZ + dz;
-                        if (px < 0 || px > 15 || pz < 0 || pz > 15 || Math.abs(dx) + Math.abs(dz) > radius + 1) {
-                            continue;
-                        }
-                        if (chunk.getBlockState(cursor.set(px, py, pz)).isAir()) {
-                            chunk.setBlockState(cursor, leaves, false);
-                        }
-                    }
-                }
-            }
-        } else if (variant == 1) {
-            int leafBase = y + height - 3;
-            int leafTop = y + height + 2;
-            for (int py = leafBase; py <= leafTop; py++) {
-                int radius = py >= y + height ? 3 : 2;
-                for (int dz = -radius; dz <= radius; dz++) {
-                    for (int dx = -radius; dx <= radius; dx++) {
-                        int px = localX + dx;
-                        int pz = localZ + dz;
-                        if (px < 0 || px > 15 || pz < 0 || pz > 15) {
-                            continue;
-                        }
-                        if (Math.abs(dx) + Math.abs(dz) > radius + 1) {
-                            continue;
-                        }
-                        if (chunk.getBlockState(cursor.set(px, py, pz)).isAir()) {
-                            chunk.setBlockState(cursor, leaves, false);
-                        }
-                    }
-                }
-            }
-        } else {
-            int leafBase = y + height - 2;
-            int leafTop = y + height + 3;
-            for (int py = leafBase; py <= leafTop; py++) {
-                int layer = py - leafBase;
-                int radius = switch (layer) {
-                    case 0 -> 2;
-                    case 1 -> 3;
-                    case 2 -> 2;
-                    default -> 1;
-                };
-                for (int dz = -radius; dz <= radius; dz++) {
-                    for (int dx = -radius; dx <= radius; dx++) {
-                        int px = localX + dx;
-                        int pz = localZ + dz;
-                        if (px < 0 || px > 15 || pz < 0 || pz > 15) {
-                            continue;
-                        }
-                        if (Math.abs(dx) + Math.abs(dz) > radius + 1 || (random.nextInt(6) == 0 && layer > 0)) {
-                            continue;
-                        }
-                        if (chunk.getBlockState(cursor.set(px, py, pz)).isAir()) {
-                            chunk.setBlockState(cursor, leaves, false);
-                        }
-                    }
-                }
-            }
-            if (random.nextBoolean()) {
-                for (int i = 0; i < 6; i++) {
-                    int dx = random.nextInt(5) - 2;
-                    int dz = random.nextInt(5) - 2;
-                    int py = y + height - 1 + random.nextInt(4);
-                    int px = localX + dx;
-                    int pz = localZ + dz;
-                    if (px < 0 || px > 15 || pz < 0 || pz > 15) {
-                        continue;
-                    }
-                    if (chunk.getBlockState(cursor.set(px, py, pz)).isAir()) {
-                        chunk.setBlockState(cursor, leaves, false);
-                    }
-                }
-            }
-        }
-        return true;
-    }
-
-    private static int spruceLeafRadius(int layer, int topLayer) {
-        if (layer >= topLayer) {
-            return 1;
-        }
-        return layer % 2 == 0 ? 2 : 1;
-    }
-
-    private static void placeShrub(ChunkAccess chunk, BlockPos.MutableBlockPos cursor, java.util.Random random, int localX, int y, int localZ, BlockState leaves) {
-        if (!chunk.getBlockState(cursor.set(localX, y, localZ)).isAir()) {
-            return;
-        }
-        if (random.nextInt(3) == 0) {
-            chunk.setBlockState(cursor.set(localX, y, localZ), Blocks.OAK_LOG.defaultBlockState(), false);
-        }
-        int radius = random.nextBoolean() ? 1 : 2;
-        for (int dz = -radius; dz <= radius; dz++) {
-            for (int dx = -radius; dx <= radius; dx++) {
-                int px = localX + dx;
-                int pz = localZ + dz;
-                if (px < 0 || px > 15 || pz < 0 || pz > 15 || Math.abs(dx) + Math.abs(dz) > radius + 1) {
-                    continue;
-                }
-                int py = y + (Math.abs(dx) + Math.abs(dz) <= 1 && random.nextBoolean() ? 1 : 0);
-                if (py < chunk.getMaxBuildHeight() && chunk.getBlockState(cursor.set(px, py, pz)).isAir()) {
-                    chunk.setBlockState(cursor, leaves, false);
-                }
-            }
-        }
-    }
-
     private static BlockState randomGrassOrFlower(java.util.Random random, int vegetationClass) {
         if (random.nextInt(5) != 0) {
             return Blocks.SHORT_GRASS.defaultBlockState();
@@ -1348,10 +1253,6 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
             case 1 -> Blocks.FERN.defaultBlockState();
             default -> Blocks.SHORT_GRASS.defaultBlockState();
         };
-    }
-
-    private static boolean canPlaceTreeAt(int localX, int localZ) {
-        return localX >= 2 && localX <= 13 && localZ >= 2 && localZ <= 13;
     }
 
     private static boolean hasAdjacentWater(ChunkAccess chunk, BlockPos.MutableBlockPos cursor, int localX, int y, int localZ) {
@@ -1538,66 +1439,18 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     }
 
     @Override
-    public void applyCarvers(WorldGenRegion level, long seed, RandomState random, BiomeManager biomeManager, StructureManager structureManager, ChunkAccess chunk, GenerationStep.Carving carving) {
-        Registry<NoiseGeneratorSettings> settingsRegistry = level.registryAccess().registryOrThrow(Registries.NOISE_SETTINGS);
-        Holder<NoiseGeneratorSettings> settings = settingsRegistry.getHolderOrThrow(NoiseGeneratorSettings.OVERWORLD);
-        NoiseGeneratorSettings generatorSettings = settings.value();
-        NoiseBasedChunkGenerator contextGenerator = new NoiseBasedChunkGenerator(this.biomeSource, settings);
-        BiomeManager carverBiomeManager = biomeManager.withDifferentSource(
-            (quartX, quartY, quartZ) -> this.biomeSource.getNoiseBiome(quartX, quartY, quartZ, random.sampler())
-        );
-        WorldgenRandom worldgenRandom = new WorldgenRandom(new LegacyRandomSource(RandomSupport.generateUniqueSeed()));
-        ChunkPos chunkPos = chunk.getPos();
-        NoiseChunk noiseChunk = chunk.getOrCreateNoiseChunk(ignored -> NoiseChunk.forChunk(
-            chunk,
-            random,
-            Beardifier.forStructuresInChunk(structureManager, chunkPos),
-            generatorSettings,
-            fluidPicker(generatorSettings),
-            Blender.of(level)
-        ));
-        Aquifer aquifer = noiseChunk.aquifer();
-        CarvingContext carvingContext = new CarvingContext(
-            contextGenerator,
-            level.registryAccess(),
-            chunk.getHeightAccessorForGeneration(),
-            noiseChunk,
-            random,
-            generatorSettings.surfaceRule()
-        );
-        CarvingMask carvingMask = ((ProtoChunk) chunk).getOrCreateCarvingMask(carving);
-
-        for (int chunkOffsetX = -8; chunkOffsetX <= 8; chunkOffsetX++) {
-            for (int chunkOffsetZ = -8; chunkOffsetZ <= 8; chunkOffsetZ++) {
-                ChunkPos carverChunkPos = new ChunkPos(chunkPos.x + chunkOffsetX, chunkPos.z + chunkOffsetZ);
-                ChunkAccess carverChunk = level.getChunk(carverChunkPos.x, carverChunkPos.z);
-                BiomeGenerationSettings generationSettings = carverChunk.carverBiome(
-                    () -> getBiomeGenerationSettings(
-                        this.biomeSource.getNoiseBiome(
-                            QuartPos.fromBlock(carverChunkPos.getMinBlockX()),
-                            0,
-                            QuartPos.fromBlock(carverChunkPos.getMinBlockZ()),
-                            random.sampler()
-                        )
-                    )
-                );
-                int carverIndex = 0;
-                for (Holder<ConfiguredWorldCarver<?>> holder : generationSettings.getCarvers(carving)) {
-                    ConfiguredWorldCarver<?> configuredCarver = holder.value();
-                    worldgenRandom.setLargeFeatureSeed(seed + carverIndex, carverChunkPos.x, carverChunkPos.z);
-                    if (configuredCarver.isStartChunk(worldgenRandom)) {
-                        configuredCarver.carve(carvingContext, chunk, carverBiomeManager::getBiome, worldgenRandom, aquifer, carverChunkPos, carvingMask);
-                    }
-                    carverIndex++;
-                }
-            }
-        }
-    }
-
-    private static Aquifer.FluidPicker fluidPicker(NoiseGeneratorSettings settings) {
-        Aquifer.FluidStatus lava = new Aquifer.FluidStatus(-54, Blocks.LAVA.defaultBlockState());
-        Aquifer.FluidStatus water = new Aquifer.FluidStatus(settings.seaLevel(), settings.defaultFluid());
-        return (x, y, z) -> y < Math.min(-54, settings.seaLevel()) ? lava : water;
+    public void applyCarvers(
+        WorldGenRegion level,
+        long seed,
+        RandomState random,
+        BiomeManager biomeManager,
+        StructureManager structureManager,
+        ChunkAccess chunk,
+        GenerationStep.Carving carving
+    ) {
+        // Per-biome carvers are the legacy cave/ravine pass. Delegate to vanilla's implementation so
+        // biome JSON carvers run without duplicating its low-level carving loop in this generator.
+        caveDelegate.ifPresent(delegate -> delegate.applyCarvers(level, seed, random, biomeManager, structureManager, chunk, carving));
     }
 
     @Override
@@ -1647,12 +1500,6 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     @Override
     public void addDebugScreenInfo(List<String> info, RandomState random, BlockPos pos) {
         info.add("UKGeo surface: " + surfaceY(pos.getX(), pos.getZ()));
-    }
-
-    private enum VegetationTreeKind {
-        OAK,
-        BIRCH,
-        SPRUCE
     }
 
     record RuntimeData(TileManifest manifest, R16HeightTileLayer height, U8OreTileLayer surfaceLayer, U8OreTileLayer vegetationLayer, U8OreTileLayer riverLayer, Map<String, U8OreTileLayer> oreLayers, List<OreDefinition> ores) {

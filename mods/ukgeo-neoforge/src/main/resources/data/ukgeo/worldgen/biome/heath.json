@@ -29,7 +29,9 @@
     [],
     [],
     [],
-    [],
+    [
+      "minecraft:trees_windswept_savanna"
+    ],
     []
   ],
   "has_precipitation": true,

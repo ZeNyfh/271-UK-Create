@@ -37,7 +37,9 @@
     [],
     [],
     [],
-    [],
+    [
+      "minecraft:trees_swamp"
+    ],
     []
   ],
   "has_precipitation": true,
