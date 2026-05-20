@@ -4,7 +4,8 @@
   "package": "git.zenyfh.vanilla_adjustments.mixin",
   "compatibilityLevel": "JAVA_21",
   "mixins": [
-    "ServerGamePacketListenerImplMixin"
+    "ServerGamePacketListenerImplMixin",
+    "WolfMixin"
   ],
   "injectors": {
     "defaultRequire": 1
