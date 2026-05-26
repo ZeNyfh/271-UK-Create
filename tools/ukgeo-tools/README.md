@@ -46,6 +46,11 @@ For the national BGS 625k GeoPackage, use the 625k rules. These include the norm
   --manifest ./uk_world_data/manifest.json \
   --out ./uk_world_data \
   --jobs 4
+
+.venv/bin/ukgeo make-coal-resource-tiles \
+  --coal-resources ../../data/OGC_CoalResourcesForNewTechnologies.zip \
+  --manifest ./uk_world_data/manifest.json \
+  --out ./uk_world_data
 ```
 
 Generate a categorical surface geology skin from the same 625k data:
@@ -117,12 +122,21 @@ The first height implementation uses a guarded in-memory output mosaic; for low-
 .venv/bin/ukgeo preview ./uk_world_data --layer ore:granite --out granite.png
 .venv/bin/ukgeo preview ./uk_world_data --layer height --style gray --out height_gray.png
 .venv/bin/ukgeo preview ./uk_world_data --layer height --max-size 12000 --out height_large.png
-.venv/bin/ukgeo hover-map ./uk_world_data --max-size 12000
+.venv/bin/ukgeo export-hover-previews ./uk_world_data --max-size 12000 --out ./hoverpreviews --clean
+.venv/bin/ukgeo hover-map ./uk_world_data --previews ./hoverpreviews
 .venv/bin/ukgeo sample ./uk_world_data --x 0 --z 0
 ```
 
 The preview PNGs show the whole generated map extent, downscaled so the longest side is `--max-size` pixels. Use a larger `--max-size` for a more detailed whole-map image. `--max-size 0` writes native tile resolution, but the default 25k x 50k world is a very large image and can require several GB of RAM.
 
-`hover-map` opens an interactive GUI heightmap. Mouse wheel zooms around the cursor, middle/right drag pans, and hovering shows Minecraft `x/z`, height, tile/cell, and British National Grid easting/northing. Left click copies the Minecraft `x z` pair to the clipboard.
+`export-hover-previews` writes a `hoverpreviews` folder containing stackable PNG layers (`layers/height.png`, `layers/surface.png`, `layers/vegetation.png`, `layers/rivers.png`, and one PNG per ore under `layers/ores/`) plus downsampled `mips/` versions and sample PNGs for hover text. `hover-map` reads those pre-rendered images instead of processing raw tile layers in the GUI, starts at a fit-to-window zoom, and dynamically picks lower-resolution mips when zoomed out. Mouse wheel zooms around the cursor, middle/right drag pans, and hovering shows Minecraft `x/z`, height, tile/cell, and British National Grid easting/northing. Left click copies the Minecraft `x z` pair to the clipboard.
+
+To build the standalone hover app:
+
+```bash
+./build_hover_binaries.sh
+```
+
+The generated executable/binary expects a `hoverpreviews` folder in the same directory when launched. It bundles Python and the Python packages it needs, so the target machine does not need Python, NumPy, Pillow, or PyInstaller installed. On Linux the script builds `dist-hover/ukgeo-hover-linux`; it also builds `dist-hover/ukgeo-hover.exe` when run on Windows, or from Linux if Docker is available for the Windows PyInstaller image.
 
 Copy the finished `uk_world_data` directory to the Minecraft client/server root, or point the mod config at another directory.
