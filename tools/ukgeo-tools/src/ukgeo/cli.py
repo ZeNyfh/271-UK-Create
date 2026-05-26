@@ -10,8 +10,11 @@ from rich.table import Table
 
 from .asc import iter_nested_asc_headers
 from .bgs import likely_geology_fields, resolve_gpkg
+from .coal import make_coal_resource_tiles as make_coal_resource_tiles_impl
 from .coords import WorldBounds, minecraft_to_layer_cell, minecraft_to_tile_cell
 from .height import make_height_tiles as make_height_tiles_impl
+from .gold import harvest_gold_occurrences as harvest_gold_occurrences_impl
+from .gold import make_gold_occurrence_tiles as make_gold_occurrence_tiles_impl
 from .landmask import mask_height_to_bgs_land as mask_height_to_bgs_land_impl
 from .manifest import read_manifest
 from .ores import make_ore_tiles as make_ore_tiles_impl
@@ -110,6 +113,52 @@ def make_ore_tiles(
     jobs: int = typer.Option(1, "--jobs", help="Ore/mineral layers to process in parallel."),
 ) -> None:
     make_ore_tiles_impl(bgs=bgs, rules=rules, manifest_path=manifest, out=out, debug_geotiff_dir=debug_geotiff_dir, jobs=jobs)
+
+
+@app.command("make-coal-resource-tiles")
+def make_coal_resource_tiles(
+    coal_resources: Path = typer.Option(..., "--coal-resources"),
+    manifest: Path = typer.Option(..., "--manifest"),
+    out: Path = typer.Option(..., "--out"),
+    debug_geotiff: Path | None = typer.Option(None, "--debug-geotiff"),
+) -> None:
+    make_coal_resource_tiles_impl(coal_resources=coal_resources, manifest_path=manifest, out=out, debug_geotiff=debug_geotiff)
+
+
+@app.command("harvest-gold-occurrences")
+def harvest_gold_occurrences(
+    out: Path = typer.Option(..., "--out"),
+    tile_metres: float = typer.Option(50_000.0, "--tile-metres"),
+    pixel_metres: float = typer.Option(100.0, "--pixel-metres"),
+    request_pause: float = typer.Option(0.02, "--request-pause"),
+    limit_tiles: int | None = typer.Option(None, "--limit-tiles"),
+) -> None:
+    harvest_gold_occurrences_impl(
+        out=out,
+        tile_metres=tile_metres,
+        pixel_metres=pixel_metres,
+        request_pause=request_pause,
+        limit_tiles=limit_tiles,
+    )
+
+
+@app.command("make-gold-occurrence-tiles")
+def make_gold_occurrence_tiles(
+    gold_occurrences: Path = typer.Option(..., "--gold-occurrences"),
+    manifest: Path = typer.Option(..., "--manifest"),
+    out: Path = typer.Option(..., "--out"),
+    radius_metres: float = typer.Option(4500.0, "--radius-metres"),
+    core_metres: float = typer.Option(900.0, "--core-metres"),
+    merge_existing: bool = typer.Option(True, "--merge-existing/--replace", help="Max-merge occurrence scores with existing gold tiles."),
+) -> None:
+    make_gold_occurrence_tiles_impl(
+        gold_occurrences=gold_occurrences,
+        manifest_path=manifest,
+        out=out,
+        radius_metres=radius_metres,
+        core_metres=core_metres,
+        merge_existing=merge_existing,
+    )
 
 
 @app.command("make-surface-geology-tiles")
@@ -256,29 +305,6 @@ def preview_cmd(
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1) from exc
     console.print(f"Wrote {out}")
-
-
-@app.command("hover-map")
-def hover_map_cmd(
-    root: Path,
-    max_size: int = typer.Option(4096, "--max-size", help="Longest side of the displayed image in pixels. Use 0 for native tile resolution."),
-    style: str = typer.Option("auto", "--style", help="auto or gray"),
-) -> None:
-    """Open an interactive heightmap and show Minecraft coordinates under the cursor."""
-    if max_size == 0:
-        console.print("[yellow]Native resolution can require several GB of RAM for the default 25k x 50k world.[/yellow]")
-    try:
-        from tkinter import TclError
-
-        from .hover import open_height_hover_map
-
-        open_height_hover_map(root, max_size=max_size, style=style)
-    except ImportError as exc:
-        console.print(f"[red]Could not import tkinter/Pillow GUI support: {exc}[/red]")
-        raise typer.Exit(1) from exc
-    except TclError as exc:
-        console.print(f"[red]Could not open a GUI window: {exc}[/red]")
-        raise typer.Exit(1) from exc
 
 
 @app.command("sample")
