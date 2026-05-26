@@ -70,12 +70,12 @@ For the full BGS 625k GeoPackage, use:
 .venv/bin/ukgeo preview ./uk_world_data --layer ores --max-size 12000 --out ores_all.png
 .venv/bin/ukgeo preview ./uk_world_data --layer ore:granite --out granite_preview.png
 .venv/bin/ukgeo preview ./uk_world_data --layer height --max-size 12000 --out height_large.png
-.venv/bin/ukgeo export-hover-previews ./uk_world_data --max-size 12000 --out ./hoverpreviews --clean
-.venv/bin/ukgeo hover-map ./uk_world_data --previews ./hoverpreviews
+../hoverpreview-tools/generate_hover_previews.sh ./uk_world_data ./hoverpreviews
+PREVIEWS=./hoverpreviews ../hoverpreview-tools/open_hover_map.sh ./uk_world_data
 .venv/bin/ukgeo sample ./uk_world_data --x 0 --z 0
 ```
 
-`export-hover-previews` writes stackable PNG layers and downsampled `mips/` into `hoverpreviews`, and `hover-map` opens those pre-rendered images instead of processing raw tile layers in the GUI. It starts fit-to-window and dynamically picks lower-resolution mips when zoomed out. Mouse wheel zooms around the cursor, middle/right drag pans, and moving the mouse over the map shows Minecraft `x/z`, height, tile/cell, and British National Grid easting/northing. Left click copies the Minecraft `x z` pair to the clipboard.
+`hoverpreview-tools/generate_hover_previews.sh` writes stackable PNG layers and downsampled `mips/` into `hoverpreviews`, and `hoverpreview-tools/open_hover_map.sh` opens those pre-rendered images instead of processing raw tile layers in the GUI. It starts fit-to-window and dynamically picks lower-resolution mips when zoomed out. Mouse wheel zooms around the cursor, middle/right drag pans, and moving the mouse over the map shows Minecraft `x/z`, height, tile/cell, and British National Grid easting/northing. Left click copies the Minecraft `x z` pair to the clipboard.
 
 7. Copy `uk_world_data` to the Minecraft client/server root, or configure the mod to point at that directory.
 8. Launch NeoForge 1.21.1 with the `ukgeo` mod and create/select the `ukgeo:uk_geological_create` world preset.
