@@ -51,3 +51,4 @@ tools/ukgeo-tools/**/*.gpkg
 *.tif
 *.tiff
 /tools/ukgeo-tools/.venv-hover-build
+/data
