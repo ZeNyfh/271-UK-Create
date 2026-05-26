@@ -33,15 +33,6 @@ ores:
         keywords: [zinc, lead-zinc, lead, sphalerite, mineral vein]
       - score: 130
         keywords: [limestone, carboniferous limestone, fault]
-  tin:
-    layers: [625k_V5_BEDROCK_Geology, 625k_V5_DYKES_Geology]
-    fields: [LEX_D, LEX_RCS_D, RCS_D, GP_EQ_D, PREV_NAME]
-    maximum_score: 255
-    keyword_groups:
-      - score: 230
-        keywords: [tin, cassiterite, granite]
-      - score: 160
-        keywords: [granitic-rock, felsic-rock, granite]
   gold:
     layers: [625k_V5_BEDROCK_Geology, 625k_V5_FAULTS]
     fields: [LEX_D, LEX_RCS_D, RCS_D, GP_EQ_D, PREV_NAME, FLTNAME_D]
