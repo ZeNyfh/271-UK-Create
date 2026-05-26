@@ -57,7 +57,6 @@ ORE_COLORS: dict[str, tuple[int, int, int]] = {
     "iron": (210, 70, 45),
     "copper": (230, 130, 45),
     "zinc": (70, 145, 230),
-    "tin": (170, 95, 220),
     "gold": (245, 205, 65),
     "andesite": (122, 126, 123),
     "diorite": (205, 205, 198),

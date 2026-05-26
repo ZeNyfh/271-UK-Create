@@ -10,7 +10,6 @@ ORE_NAMES = (
     "iron",
     "copper",
     "zinc",
-    "tin",
     "gold",
 )
 
