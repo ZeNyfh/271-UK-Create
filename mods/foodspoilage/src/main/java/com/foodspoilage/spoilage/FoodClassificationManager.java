@@ -33,7 +33,7 @@ public final class FoodClassificationManager {
     public static FoodProfile profile(ItemStack stack) {
         FoodProperties food = stack.get(DataComponents.FOOD);
         if (food == null) {
-            return new FoodProfile(FoodClassification.SIMPLE, 0.0D, DAY_MILLIS);
+            return new FoodProfile(FoodClassification.SIMPLE, 0.0D, 15L * DAY_MILLIS);
         }
         Item item = stack.getItem();
         double complexity = RecipeComplexityManager.get().complexity(item, FoodSpoilageConfig.RECURSIVE_ANALYSIS_DEPTH.get());
