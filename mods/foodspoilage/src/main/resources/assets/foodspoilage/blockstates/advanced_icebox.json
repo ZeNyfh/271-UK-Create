@@ -1,0 +1,8 @@
+{
+  "variants": {
+    "facing=north": { "model": "foodspoilage:block/advanced_icebox" },
+    "facing=east": { "model": "foodspoilage:block/advanced_icebox", "y": 90 },
+    "facing=south": { "model": "foodspoilage:block/advanced_icebox", "y": 180 },
+    "facing=west": { "model": "foodspoilage:block/advanced_icebox", "y": 270 }
+  }
+}
