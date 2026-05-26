@@ -53,3 +53,5 @@ tools/ukgeo-tools/**/*.gpkg
 /tools/ukgeo-tools/.venv-hover-build
 /data
 /tools/ukgeo-tools/dist-hover
+tools/ukgeo-tools/ukgeo-hover.exe
+tools/ukgeo-tools/ukgeo-hover-linux
