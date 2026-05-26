@@ -50,3 +50,4 @@ tools/ukgeo-tools/**/*.gpkg
 *.asc
 *.tif
 *.tiff
+/tools/ukgeo-tools/.venv-hover-build
