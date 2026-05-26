@@ -40,6 +40,9 @@ For the full BGS 625k GeoPackage, use:
 .venv/bin/ukgeo make-ore-tiles --bgs ../../data/BGS_Geology_625k_bedrock_gpkg.zip \
   --rules examples/ore_rules_625k.yml --manifest ./uk_world_data/manifest.json --out ./uk_world_data --jobs 4
 
+.venv/bin/ukgeo make-coal-resource-tiles --coal-resources ../../data/OGC_CoalResourcesForNewTechnologies.zip \
+  --manifest ./uk_world_data/manifest.json --out ./uk_world_data
+
 .venv/bin/ukgeo make-surface-geology-tiles --bgs ../../data/BGS_Geology_625k_bedrock_gpkg.zip \
   --rules examples/surface_geology_625k.yml --manifest ./uk_world_data/manifest.json --out ./uk_world_data
 
@@ -67,11 +70,12 @@ For the full BGS 625k GeoPackage, use:
 .venv/bin/ukgeo preview ./uk_world_data --layer ores --max-size 12000 --out ores_all.png
 .venv/bin/ukgeo preview ./uk_world_data --layer ore:granite --out granite_preview.png
 .venv/bin/ukgeo preview ./uk_world_data --layer height --max-size 12000 --out height_large.png
-.venv/bin/ukgeo hover-map ./uk_world_data --max-size 12000
+.venv/bin/ukgeo export-hover-previews ./uk_world_data --max-size 12000 --out ./hoverpreviews --clean
+.venv/bin/ukgeo hover-map ./uk_world_data --previews ./hoverpreviews
 .venv/bin/ukgeo sample ./uk_world_data --x 0 --z 0
 ```
 
-`hover-map` opens an interactive heightmap window. Mouse wheel zooms around the cursor, middle/right drag pans, and moving the mouse over the map shows Minecraft `x/z`, height, tile/cell, and British National Grid easting/northing. Left click copies the Minecraft `x z` pair to the clipboard.
+`export-hover-previews` writes stackable PNG layers and downsampled `mips/` into `hoverpreviews`, and `hover-map` opens those pre-rendered images instead of processing raw tile layers in the GUI. It starts fit-to-window and dynamically picks lower-resolution mips when zoomed out. Mouse wheel zooms around the cursor, middle/right drag pans, and moving the mouse over the map shows Minecraft `x/z`, height, tile/cell, and British National Grid easting/northing. Left click copies the Minecraft `x z` pair to the clipboard.
 
 7. Copy `uk_world_data` to the Minecraft client/server root, or configure the mod to point at that directory.
 8. Launch NeoForge 1.21.1 with the `ukgeo` mod and create/select the `ukgeo:uk_geological_create` world preset.
