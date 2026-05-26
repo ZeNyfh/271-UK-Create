@@ -10,16 +10,16 @@ STYLE="${STYLE:-auto}"
 CLEAN="${CLEAN:-1}"
 
 if [[ -x "$UKGEO_TOOLS_DIR/.venv/bin/ukgeo" ]]; then
-  UKGEO="$UKGEO_TOOLS_DIR/.venv/bin/ukgeo"
+  PYTHON="$UKGEO_TOOLS_DIR/.venv/bin/python"
 else
-  UKGEO="ukgeo"
+  PYTHON="${PYTHON:-python3}"
 fi
 
-ARGS=("$UKGEO" export-hover-previews "$ROOT" --out "$OUT_DIR" --max-size "$MAX_SIZE" --style "$STYLE")
+ARGS=("$PYTHON" -m hoverpreview_tools.cli export "$ROOT" --out "$OUT_DIR" --max-size "$MAX_SIZE" --style "$STYLE")
 if [[ "$CLEAN" == "1" ]]; then
   ARGS+=(--clean)
 fi
 
-"${ARGS[@]}"
+PYTHONPATH="$SCRIPT_DIR/src:$UKGEO_TOOLS_DIR/src${PYTHONPATH:+:$PYTHONPATH}" "${ARGS[@]}"
 
 echo "Wrote hover preview stack to $OUT_DIR"

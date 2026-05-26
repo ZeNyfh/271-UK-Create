@@ -28,7 +28,6 @@ test = ["pytest"]
 
 [project.scripts]
 ukgeo = "ukgeo.cli:app"
-ukgeo-hover = "ukgeo.hover_launcher:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/ukgeo"]

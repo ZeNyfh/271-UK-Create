@@ -7,9 +7,9 @@ ROOT="${1:-$UKGEO_TOOLS_DIR/uk_world_data_gb}"
 PREVIEWS="${PREVIEWS:-$ROOT/hoverpreviews}"
 
 if [[ -x "$UKGEO_TOOLS_DIR/.venv/bin/ukgeo" ]]; then
-  UKGEO="$UKGEO_TOOLS_DIR/.venv/bin/ukgeo"
+  PYTHON="$UKGEO_TOOLS_DIR/.venv/bin/python"
 else
-  UKGEO="ukgeo"
+  PYTHON="${PYTHON:-python3}"
 fi
 
-"$UKGEO" hover-map "$ROOT" --previews "$PREVIEWS"
+PYTHONPATH="$SCRIPT_DIR/src:$UKGEO_TOOLS_DIR/src${PYTHONPATH:+:$PYTHONPATH}" "$PYTHON" -m hoverpreview_tools.cli open "$ROOT" --previews "$PREVIEWS"
