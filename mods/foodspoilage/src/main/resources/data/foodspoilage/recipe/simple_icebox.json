@@ -1,0 +1,24 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "SIS",
+    "IBI",
+    "SIS"
+  ],
+  "key": {
+    "S": {
+      "item": "minecraft:snowball"
+    },
+    "I": {
+      "item": "minecraft:iron_ingot"
+    },
+    "B": {
+      "item": "minecraft:barrel"
+    }
+  },
+  "result": {
+    "id": "foodspoilage:simple_icebox",
+    "count": 1
+  }
+}
