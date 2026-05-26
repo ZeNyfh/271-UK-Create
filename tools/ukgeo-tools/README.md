@@ -134,9 +134,9 @@ The preview PNGs show the whole generated map extent, downscaled so the longest 
 To build the standalone hover app:
 
 ```bash
-../givethisapropername/build_hover_binaries.sh
+../hoverpreview-tools/build_hover_binaries.sh
 ```
 
-The generated executable/binary expects a `hoverpreviews` folder in the same directory when launched. It bundles Python and the Python packages it needs, so the target machine does not need Python, NumPy, Pillow, or PyInstaller installed. On Linux the script builds `../givethisapropername/dist-hover/ukgeo-hover-linux`; it also builds `../givethisapropername/dist-hover/ukgeo-hover.exe` when run on Windows, or from Linux if Docker is available for the Windows PyInstaller image.
+The generated executable/binary expects a `hoverpreviews` folder in the same directory when launched. It bundles Python and the Python packages it needs, so the target machine does not need Python, NumPy, Pillow, or PyInstaller installed. On Linux the script builds `../hoverpreview-tools/dist-hover/ukgeo-hover-linux`; it also builds `../hoverpreview-tools/dist-hover/ukgeo-hover.exe` when run on Windows, or from Linux if Docker is available for the Windows PyInstaller image.
 
 Copy the finished `uk_world_data` directory to the Minecraft client/server root, or point the mod config at another directory.
