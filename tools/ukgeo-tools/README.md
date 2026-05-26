@@ -122,14 +122,14 @@ The first height implementation uses a guarded in-memory output mosaic; for low-
 .venv/bin/ukgeo preview ./uk_world_data --layer ore:granite --out granite.png
 .venv/bin/ukgeo preview ./uk_world_data --layer height --style gray --out height_gray.png
 .venv/bin/ukgeo preview ./uk_world_data --layer height --max-size 12000 --out height_large.png
-.venv/bin/ukgeo export-hover-previews ./uk_world_data --max-size 12000 --out ./hoverpreviews --clean
-.venv/bin/ukgeo hover-map ./uk_world_data --previews ./hoverpreviews
+../hoverpreview-tools/generate_hover_previews.sh ./uk_world_data ./hoverpreviews
+PREVIEWS=./hoverpreviews ../hoverpreview-tools/open_hover_map.sh ./uk_world_data
 .venv/bin/ukgeo sample ./uk_world_data --x 0 --z 0
 ```
 
 The preview PNGs show the whole generated map extent, downscaled so the longest side is `--max-size` pixels. Use a larger `--max-size` for a more detailed whole-map image. `--max-size 0` writes native tile resolution, but the default 25k x 50k world is a very large image and can require several GB of RAM.
 
-`export-hover-previews` writes a `hoverpreviews` folder containing stackable PNG layers (`layers/height.png`, `layers/surface.png`, `layers/vegetation.png`, `layers/rivers.png`, and one PNG per ore under `layers/ores/`) plus downsampled `mips/` versions and sample PNGs for hover text. `hover-map` reads those pre-rendered images instead of processing raw tile layers in the GUI, starts at a fit-to-window zoom, and dynamically picks lower-resolution mips when zoomed out. Mouse wheel zooms around the cursor, middle/right drag pans, and hovering shows Minecraft `x/z`, height, tile/cell, and British National Grid easting/northing. Left click copies the Minecraft `x z` pair to the clipboard.
+`../hoverpreview-tools/generate_hover_previews.sh` writes a `hoverpreviews` folder containing stackable PNG layers (`layers/height.png`, `layers/surface.png`, `layers/vegetation.png`, `layers/rivers.png`, and one PNG per ore under `layers/ores/`) plus downsampled `mips/` versions and sample PNGs for hover text. `../hoverpreview-tools/open_hover_map.sh` reads those pre-rendered images instead of processing raw tile layers in the GUI, starts at a fit-to-window zoom, and dynamically picks lower-resolution mips when zoomed out. Mouse wheel zooms around the cursor, middle/right drag pans, and hovering shows Minecraft `x/z`, height, tile/cell, and British National Grid easting/northing. Left click copies the Minecraft `x z` pair to the clipboard.
 
 To build the standalone hover app:
 

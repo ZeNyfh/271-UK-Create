@@ -5,14 +5,15 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 SOURCE_DIR="${SOURCE_DIR:-$SCRIPT_DIR/../ukgeo-tools}"
+HOVER_SOURCE_DIR="${HOVER_SOURCE_DIR:-$SCRIPT_DIR}"
 DIST_DIR="${DIST_DIR:-$SCRIPT_DIR/dist-hover}"
 BUILD_WINDOWS="${BUILD_WINDOWS:-auto}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 HOST_UID="$(id -u)"
 HOST_GID="$(id -g)"
 
-if [[ ! -f "$SOURCE_DIR/src/ukgeo/hover_launcher.py" ]]; then
-  echo "Could not find ukgeo hover launcher at: $SOURCE_DIR/src/ukgeo/hover_launcher.py" >&2
+if [[ ! -f "$HOVER_SOURCE_DIR/src/hoverpreview_tools/launcher.py" ]]; then
+  echo "Could not find hover preview launcher at: $HOVER_SOURCE_DIR/src/hoverpreview_tools/launcher.py" >&2
   exit 1
 fi
 
@@ -59,8 +60,9 @@ build_native() {
     --windowed \
     --hidden-import PIL._tkinter_finder \
     --name "$name" \
+    --paths "$HOVER_SOURCE_DIR/src" \
     --paths "$SOURCE_DIR/src" \
-    "$SOURCE_DIR/src/ukgeo/hover_launcher.py"
+    "$HOVER_SOURCE_DIR/src/hoverpreview_tools/launcher.py"
   cp "dist/$name" "$DIST_DIR/$name"
   if [[ "$name" == *.exe ]]; then
     verify_windows_exe "$DIST_DIR/$name"
@@ -90,7 +92,7 @@ if [[ "$(uname -s)" == Linux* && ( "$BUILD_WINDOWS" == "1" || "$BUILD_WINDOWS" =
       -v "$SCRIPT_DIR/../..:/src" \
       -w /src/tools/hoverpreview-tools \
       cdrx/pyinstaller-windows:python3 \
-      -lc "pip install --upgrade 'numpy==1.21.6' 'Pillow==9.5.0' 'pyinstaller==5.13.2' && pyinstaller --clean --onefile --windowed --hidden-import PIL._tkinter_finder --name ukgeo-hover --paths ../ukgeo-tools/src ../ukgeo-tools/src/ukgeo/hover_launcher.py"
+      -lc "pip install --upgrade 'numpy==1.21.6' 'Pillow==9.5.0' 'pyinstaller==5.13.2' && pyinstaller --clean --onefile --windowed --hidden-import PIL._tkinter_finder --name ukgeo-hover --paths src --paths ../ukgeo-tools/src src/hoverpreview_tools/launcher.py"
     docker run --rm \
       --entrypoint /bin/sh \
       -v "$SCRIPT_DIR/../..:/src" \

@@ -5,11 +5,12 @@ from pathlib import Path
 
 ROOT = Path(SPECPATH).parent
 UKGEO_TOOLS = ROOT / "ukgeo-tools"
-SOURCE = UKGEO_TOOLS / "src" / "ukgeo" / "hover_launcher.py"
+HOVER_TOOLS = ROOT / "hoverpreview-tools"
+SOURCE = HOVER_TOOLS / "src" / "hoverpreview_tools" / "launcher.py"
 
 a = Analysis(
     [str(SOURCE)],
-    pathex=[str(UKGEO_TOOLS / "src")],
+    pathex=[str(HOVER_TOOLS / "src"), str(UKGEO_TOOLS / "src")],
     binaries=[],
     datas=[],
     hiddenimports=["PIL._tkinter_finder"],
