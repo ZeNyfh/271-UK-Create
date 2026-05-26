@@ -14,6 +14,8 @@ VEGETATION_JOBS="${VEGETATION_JOBS:-1}"
 
 OS_TERRAIN_ZIP="${OS_TERRAIN_ZIP:-$DATA_DIR/terr50_gagg_gb.zip}"
 BGS_GEOLOGY_ZIP="${BGS_GEOLOGY_ZIP:-$DATA_DIR/BGS_Geology_625k_bedrock_gpkg.zip}"
+COAL_RESOURCES_ZIP="${COAL_RESOURCES_ZIP:-$DATA_DIR/OGC_CoalResourcesForNewTechnologies.zip}"
+GOLD_OCCURRENCES="${GOLD_OCCURRENCES:-$DATA_DIR/bgs_gold_occurrences.geojson}"
 OSNI_DTM_ZIP="${OSNI_DTM_ZIP:-$DATA_DIR/osni_opendata_50m_dtm.zip}"
 RIVERS_ZIP="${RIVERS_ZIP:-$DATA_DIR/oprvrs_gpkg_gb.zip}"
 LANDCOVER_ZIP="${LANDCOVER_ZIP:-$DATA_DIR/FME_3564346A_1778997494261_5633.zip}"
@@ -31,6 +33,7 @@ require_file() {
 
 require_file "$OS_TERRAIN_ZIP"
 require_file "$BGS_GEOLOGY_ZIP"
+require_file "$COAL_RESOURCES_ZIP"
 require_file "$OSNI_DTM_ZIP"
 require_file "$RIVERS_ZIP"
 require_file "$LANDCOVER_ZIP"
@@ -95,6 +98,18 @@ echo "Rebuilding GB runtime tiles into: $TMP_ROOT"
   --manifest "$TMP_ROOT/manifest.json" \
   --out "$TMP_ROOT" \
   --jobs "$ORE_JOBS"
+
+"$UKGEO" make-coal-resource-tiles \
+  --coal-resources "$COAL_RESOURCES_ZIP" \
+  --manifest "$TMP_ROOT/manifest.json" \
+  --out "$TMP_ROOT"
+
+if [[ -f "$GOLD_OCCURRENCES" ]]; then
+  "$UKGEO" make-gold-occurrence-tiles \
+    --gold-occurrences "$GOLD_OCCURRENCES" \
+    --manifest "$TMP_ROOT/manifest.json" \
+    --out "$TMP_ROOT"
+fi
 
 "$UKGEO" make-surface-geology-tiles \
   --bgs "$BGS_GEOLOGY_ZIP" \
