@@ -1,0 +1,27 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "SDS",
+    "ICI",
+    "SDS"
+  ],
+  "key": {
+    "S": {
+      "item": "minecraft:snowball"
+    },
+    "D": {
+      "item": "minecraft:diamond"
+    },
+    "I": {
+      "item": "minecraft:iron_block"
+    },
+    "C": {
+      "item": "foodspoilage:simple_icebox"
+    }
+  },
+  "result": {
+    "id": "foodspoilage:advanced_icebox",
+    "count": 1
+  }
+}
