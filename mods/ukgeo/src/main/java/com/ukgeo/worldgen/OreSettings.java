@@ -14,7 +14,6 @@ public final class OreSettings {
             new OreDefinition("iron", "iron", "minecraft:iron_ore", "minecraft:deepslate_iron_ore", 1, 10, -64, 72, 9),
             new OreDefinition("copper", "copper", "minecraft:copper_ore", "minecraft:deepslate_copper_ore", 1, 10, -16, 112, 10),
             new OreDefinition("zinc", "zinc", "create:zinc_ore", "create:deepslate_zinc_ore", 1, 14, -64, 200, 12),
-            new OreDefinition("tin", "tin", "minecraft:copper_ore", "minecraft:deepslate_copper_ore", 0, 6, -64, 32, 6),
             new OreDefinition("gold", "gold", "minecraft:gold_ore", "minecraft:deepslate_gold_ore", 0, 5, -64, 32, 5),
             new OreDefinition("redstone", BACKGROUND_ONLY, "minecraft:redstone_ore", "minecraft:deepslate_redstone_ore", 8, 0, -96, 64, 8),
             new OreDefinition("lapis", BACKGROUND_ONLY, "minecraft:lapis_ore", "minecraft:deepslate_lapis_ore", 2, 0, -64, 64, 7),
