@@ -7,12 +7,29 @@ ores:
       - score: 220
         keywords: [coal, coal measures, coal-bearing]
   iron:
+    # The 625k map is a national overview and cannot always retain the named
+    # ironstone formations/members present in BGS 50k. Use ore_rules.yml with
+    # the full DiGMapGB-50 package for whole-region ironstone belts.
     layers: [625k_V5_BEDROCK_Geology, 625k_V5_DYKES_Geology]
     fields: [LEX_D, LEX_RCS_D, RCS_D, GP_EQ_D, PREV_NAME]
     maximum_score: 255
     keyword_groups:
+      - score: 245
+        keywords:
+          - claxby ironstone
+          - cleveland ironstone
+          - frodingham ironstone
+          - northampton sand formation
+          - marlstone rock formation
+          - wadhurst clay formation
+          - raasay ironstone
+          - main ironstone seam
+          - pecten ironstone member
+          - ooid-ironstone
+          - ferruginous sandstone and ironstone
+          - ferruginous limestone and ironstone
       - score: 220
-        keywords: [ironstone, ferruginous, haematite, hematite, magnetite]
+        keywords: [ironstone, ferruginous, haematite, hematite, magnetite, siderite, sideritic]
       - score: 100
         keywords: [mafic igneous, basalt, dolerite]
   copper:

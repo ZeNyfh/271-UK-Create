@@ -21,7 +21,15 @@ from .tiles import write_u8_tile
 console = Console()
 
 
-def make_ore_tiles(*, bgs: Path, rules: Path, manifest_path: Path, out: Path, debug_geotiff_dir: Path | None = None, jobs: int = 1) -> None:
+def make_ore_tiles(
+    *,
+    bgs: Path,
+    rules: Path,
+    manifest_path: Path,
+    out: Path,
+    debug_geotiff_dir: Path | None = None,
+    jobs: int = 1,
+) -> None:
     manifest = read_manifest(manifest_path)
     geo = manifest["georeferencing"]
     world = manifest["world"]
@@ -82,7 +90,16 @@ def _make_ore_layer(task: tuple) -> tuple[str, list[str]]:
     arr = np.zeros((depth, width), dtype=np.uint8)
     for layer_name in layer_config.get("layers", []):
         try:
-            frame = gpd.read_file(gpkg, layer=layer_name, bbox=(geo["bng_min_easting"], geo["bng_min_northing"], geo["bng_max_easting"], geo["bng_max_northing"]))
+            frame = gpd.read_file(
+                gpkg,
+                layer=layer_name,
+                bbox=(
+                    geo["bng_min_easting"],
+                    geo["bng_min_northing"],
+                    geo["bng_max_easting"],
+                    geo["bng_max_northing"],
+                ),
+            )
         except Exception as exc:
             messages.append(f"[yellow]Skipping {layer_name}: {exc}[/yellow]")
             continue
@@ -105,7 +122,14 @@ def _make_ore_layer(task: tuple) -> tuple[str, list[str]]:
             shapes.extend((geom, score) for geom in frame.loc[mask, frame.geometry.name] if geom is not None and not geom.is_empty)
         if shapes:
             merge_alg = MergeAlg.add if str(layer_config.get("merge_alg", "replace")).lower() == "add" else MergeAlg.replace
-            burned = rasterize(shapes, out_shape=arr.shape, transform=transform, fill=0, dtype=np.uint8, merge_alg=merge_alg)
+            burned = rasterize(
+                shapes,
+                out_shape=arr.shape,
+                transform=transform,
+                fill=0,
+                dtype=np.uint8,
+                merge_alg=merge_alg,
+            )
             arr = np.maximum(arr, burned)
     arr = np.clip(arr, 0, int(layer_config.get("maximum_score", 255))).astype(np.uint8)
     _write_tiles(arr, Path(out) / "ores" / ore, tile_size, show_progress=show_tile_progress)
