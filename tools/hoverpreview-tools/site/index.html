@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>UKGeo Hover Map</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body data-default-manifest="../../ukgeo-tools/uk_world_data_gb/hoverpreviews/hover_manifest.json">
+  <div class="app-shell">
+    <header class="controls" aria-label="Map controls">
+      <strong class="app-title">UKGeo hover map</strong>
+      <span id="load-state" class="load-state">Loading preview data…</span>
+      <span class="control-separator" aria-hidden="true"></span>
+      <button id="zoom-out" type="button" aria-label="Zoom out">−</button>
+      <button id="zoom-fit" type="button">Fit</button>
+      <button id="zoom-in" type="button" aria-label="Zoom in">+</button>
+      <span id="zoom-label" class="zoom-label">100%</span>
+      <span class="control-separator" aria-hidden="true"></span>
+      <div id="layer-controls" class="control-list" aria-label="Layer toggles"></div>
+      <details class="ore-menu">
+        <summary>Ores ▾</summary>
+        <div id="ore-controls" class="control-list ore-list" aria-label="Ore toggles"></div>
+      </details>
+    </header>
+
+    <main class="map-frame">
+      <div id="viewer" class="viewer" tabindex="0" role="application" aria-label="Interactive UKGeo hover preview map">
+        <div id="map-stack" class="map-stack"></div>
+        <div id="empty-state" class="empty-state">
+          <h1>UKGeo hover map</h1>
+          <p>This page loads preview data from <code>../../ukgeo-tools/uk_world_data_gb/hoverpreviews/</code> relative to this directory.</p>
+          <p>Generate or copy that directory before publishing the repository root to GitHub Pages.</p>
+        </div>
+      </div>
+      <div class="scrollbar scrollbar-y" aria-hidden="true"><span></span></div>
+      <div class="scrollbar scrollbar-x" aria-hidden="true"><span></span></div>
+      <output id="status" class="status" aria-live="polite">Mouse wheel zooms. Middle/right drag pans. Left click copies the current Minecraft coordinates.</output>
+    </main>
+  </div>
+
+  <script src="app.js" defer></script>
+</body>
+</html>
