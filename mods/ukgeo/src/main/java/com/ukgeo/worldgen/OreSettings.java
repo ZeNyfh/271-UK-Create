@@ -17,7 +17,8 @@ public final class OreSettings {
             new OreDefinition("gold", "gold", "minecraft:gold_ore", "minecraft:deepslate_gold_ore", 0, 5, -64, 32, 5),
             new OreDefinition("redstone", BACKGROUND_ONLY, "minecraft:redstone_ore", "minecraft:deepslate_redstone_ore", 8, 0, -96, 64, 8),
             new OreDefinition("lapis", BACKGROUND_ONLY, "minecraft:lapis_ore", "minecraft:deepslate_lapis_ore", 2, 0, -64, 64, 7),
-            new OreDefinition("diamond", BACKGROUND_ONLY, "minecraft:diamond_ore", "minecraft:deepslate_diamond_ore", 4, 0, -64, 16, 6),
+            // 1% diamond spawns
+            new OreDefinition("diamond", BACKGROUND_ONLY, "minecraft:diamond_ore", "minecraft:deepslate_diamond_ore", 1, 0, -64, 16, 6),
             new OreDefinition("emerald", BACKGROUND_ONLY, "minecraft:emerald_ore", "minecraft:deepslate_emerald_ore", 2, 0, -16, 320, 3),
             new OreDefinition("andesite", "andesite", "minecraft:andesite", "minecraft:andesite", 0, 18, -64, 320, 28),
             new OreDefinition("diorite", "diorite", "minecraft:diorite", "minecraft:diorite", 0, 14, -64, 320, 24),
