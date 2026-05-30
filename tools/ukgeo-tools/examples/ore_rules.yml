@@ -7,12 +7,35 @@ ores:
       - score: 220
         keywords: [coal, coal measures]
   iron:
-    layers: [gb_50k_bedrock_V9, gb_50k_superficial_V9]
-    fields: [LEX_D, RCS_D, RANK, LITH_D, NAME]
+    # Prefer real BGS 1:50k regional geology over hand-drawn occurrence
+    # pockets. The main historic iron districts appear in gb_50k_bedrock_V9
+    # as named formations/members and iron-rich lithologies; ironstone beds
+    # may also appear in the linear theme. Superficial deposits are retained
+    # only for ferruginous/haematite surface expressions.
+    layers: [gb_50k_bedrock_V9, gb_50k_linear_V9, gb_50k_superficial_V9]
+    fields: [LEX_D, LEX_RCS_D, RCS_D, RANK, LITH_D, NAME]
     maximum_score: 255
     keyword_groups:
+      - score: 245
+        keywords:
+          - claxby ironstone
+          - cleveland ironstone
+          - frodingham ironstone
+          - northampton sand formation
+          - marlstone rock formation
+          - wadhurst clay formation
+          - raasay ironstone
+          - main ironstone seam
+          - pecten ironstone member
+          - ironstone formation
+          - ironstone member
+          - ooid-ironstone
+          - ooid ironstone
+          - ferruginous sandstone and ironstone
+          - ferruginous limestone and ironstone
+          - mudstone and ironstone
       - score: 220
-        keywords: [ironstone, ferruginous, haematite, hematite, magnetite]
+        keywords: [ironstone, ferruginous, haematite, hematite, magnetite, siderite, sideritic]
   copper:
     layers: [gb_50k_bedrock_V9, gb_50k_linear_V9]
     fields: [LEX_D, RCS_D, RANK, LITH_D, NAME]

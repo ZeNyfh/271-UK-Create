@@ -39,7 +39,18 @@ Choose a British National Grid extent, then run with a smaller Minecraft grid:
 
 The full GB rebuild script uses the repository defaults, where Minecraft `(0,0)` is aligned with the Nottingham area for the `0..650000` by `0..1300000` British National Grid extent.
 
-For the national BGS 625k GeoPackage, use the 625k rules. These include the normal ore layers plus geology block layers such as granite, limestone, calcite, tuff, and optional Create stone types:
+For the national BGS 625k GeoPackage, use the 625k rules. These include the normal ore layers plus geology block layers such as granite, limestone, calcite, tuff, and optional Create stone types. For detailed whole-region ironstone belts, prefer the full BGS Geology 50k package with `examples/ore_rules.yml`: the 50k bedrock and linear layers contain named ironstone formations/members and iron-rich lithologies that the more general 625k overview may not retain.
+
+```bash
+.venv/bin/ukgeo make-ore-tiles \
+  --bgs ../../data/BGS_Geology_50k_GeoPackage.zip \
+  --rules examples/ore_rules.yml \
+  --manifest ./uk_world_data/manifest.json \
+  --out ./uk_world_data \
+  --jobs 4
+```
+
+For the 625k overview workflow:
 
 ```bash
 .venv/bin/ukgeo make-ore-tiles \
