@@ -44,11 +44,20 @@ def export_hover_previews(root: Path, out: Path, max_size: int = 4096, style: st
     base_size = (height_values.shape[1], height_values.shape[0])
     height_mips = _save_visual_layer(out, _height_image(height_values, style).convert("RGB"), "layers/height.png")
     _height_sample_image(height_values).save(out / "samples" / "height_u16.png")
+    _height_browser_sample_image(height_values).save(out / "samples" / "height_rgb.png")
     del height_values
     gc.collect()
 
     layers: list[dict[str, Any]] = [
-        {"name": "height", "kind": "base", "file": "layers/height.png", "mips": height_mips, "sample_file": "samples/height_u16.png"},
+        {
+            "name": "height",
+            "kind": "base",
+            "file": "layers/height.png",
+            "mips": height_mips,
+            "sample_file": "samples/height_u16.png",
+            "browser_sample_file": "samples/height_rgb.png",
+            "browser_sample_encoding": "signed-decimetres-rg-le-offset-32768",
+        },
     ]
 
     if "surface_geology" in manifest and (root / manifest["surface_geology"]["path"]).exists():
@@ -136,6 +145,16 @@ def _height_sample_image(values: np.ndarray) -> Image.Image:
     encoded = values.astype(np.int32) + 32768
     encoded[values == HEIGHT_NODATA] = 0
     return Image.fromarray(np.clip(encoded, 0, 65535).astype(np.uint16), mode="I;16")
+
+
+def _height_browser_sample_image(values: np.ndarray) -> Image.Image:
+    encoded = values.astype(np.int32) + 32768
+    encoded[values == HEIGHT_NODATA] = 0
+    clipped = np.clip(encoded, 0, 65535).astype(np.uint16)
+    rgb = np.zeros((*clipped.shape, 3), dtype=np.uint8)
+    rgb[:, :, 0] = (clipped & 0xFF).astype(np.uint8)
+    rgb[:, :, 1] = (clipped >> 8).astype(np.uint8)
+    return Image.fromarray(rgb, mode="RGB")
 
 
 def _minecraft_origin(manifest: dict[str, Any]) -> dict[str, Any]:
