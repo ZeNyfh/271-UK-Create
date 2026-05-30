@@ -61,3 +61,9 @@ tools/ukgeo-tools/ukgeo-hover-linux
 /tools/hoverpreview-tools/dist-hover
 /.aiassistant
 /.ai
+
+# Keep the generated hover preview website data publishable on GitHub Pages.
+!tools/ukgeo-tools/uk_world_data_gb/
+tools/ukgeo-tools/uk_world_data_gb/*
+!tools/ukgeo-tools/uk_world_data_gb/hoverpreviews/
+!tools/ukgeo-tools/uk_world_data_gb/hoverpreviews/**
