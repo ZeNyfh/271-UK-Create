@@ -761,10 +761,15 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         if (data == null) {
             return "uk_world_data unavailable; fallback terrain active";
         }
-        return "tiles=%dx%d tileSize=%d heightScale=%.3f lowExtra=%.3f highScale=%.3f nodataY=%d riverRadius=%d riverDepth=%d vegetation=%s heightCache=%s".formatted(
+        return "tiles=%dx%d tileSize=%d bounds=x %d..%d z %d..%d origin=%s heightScale=%.3f lowExtra=%.3f highScale=%.3f nodataY=%d riverRadius=%d riverDepth=%d vegetation=%s heightCache=%s".formatted(
             data.manifest.tilesX(),
             data.manifest.tilesZ(),
             data.manifest.tileSize,
+            data.manifest.minecraftMinX,
+            data.manifest.minecraftMaxX,
+            data.manifest.minecraftMinZ,
+            data.manifest.minecraftMaxZ,
+            data.manifest.originSummary(),
             heightScale,
             lowlandExtraScale,
             highlandScale,

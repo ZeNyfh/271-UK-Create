@@ -37,6 +37,8 @@ Choose a British National Grid extent, then run with a smaller Minecraft grid:
   --out ./uk_world_data
 ```
 
+The full GB rebuild script uses the repository defaults, where Minecraft `(0,0)` is aligned with the Nottingham area for the `0..650000` by `0..1300000` British National Grid extent.
+
 For the national BGS 625k GeoPackage, use the 625k rules. These include the normal ore layers plus geology block layers such as granite, limestone, calcite, tuff, and optional Create stone types:
 
 ```bash

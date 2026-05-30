@@ -4,6 +4,41 @@ from dataclasses import dataclass
 import math
 
 
+NOTTINGHAM_ORIGIN_BNG_EASTING = 457_306.0
+NOTTINGHAM_ORIGIN_BNG_NORTHING = 339_945.0
+DEFAULT_BNG_MIN_EASTING = 0.0
+DEFAULT_BNG_MIN_NORTHING = 0.0
+DEFAULT_BNG_MAX_EASTING = 650_000.0
+DEFAULT_BNG_MAX_NORTHING = 1_300_000.0
+DEFAULT_WORLD_WIDTH = 25_000
+DEFAULT_WORLD_DEPTH = 50_000
+DEFAULT_TILE_SIZE = 512
+
+
+def minecraft_min_for_bng_origin(
+    *,
+    bng_easting: float,
+    bng_northing: float,
+    bng_min_easting: float = DEFAULT_BNG_MIN_EASTING,
+    bng_min_northing: float = DEFAULT_BNG_MIN_NORTHING,
+    bng_max_easting: float = DEFAULT_BNG_MAX_EASTING,
+    bng_max_northing: float = DEFAULT_BNG_MAX_NORTHING,
+    world_width: int = DEFAULT_WORLD_WIDTH,
+    world_depth: int = DEFAULT_WORLD_DEPTH,
+) -> tuple[int, int]:
+    x_scale = (bng_max_easting - bng_min_easting) / world_width
+    z_scale = (bng_max_northing - bng_min_northing) / world_depth
+    data_x = round((bng_easting - bng_min_easting) / x_scale - 0.5)
+    data_z = round((bng_max_northing - bng_northing) / z_scale - 0.5)
+    return -data_x, -data_z
+
+
+DEFAULT_MINECRAFT_MIN_X, DEFAULT_MINECRAFT_MIN_Z = minecraft_min_for_bng_origin(
+    bng_easting=NOTTINGHAM_ORIGIN_BNG_EASTING,
+    bng_northing=NOTTINGHAM_ORIGIN_BNG_NORTHING,
+)
+
+
 @dataclass(frozen=True)
 class WorldBounds:
     width: int
@@ -19,11 +54,11 @@ class WorldBounds:
     @classmethod
     def from_dimensions(
         cls,
-        width: int = 25_000,
-        depth: int = 50_000,
-        tile_size: int = 512,
-        minecraft_min_x: int = -12_500,
-        minecraft_min_z: int = -25_000,
+        width: int = DEFAULT_WORLD_WIDTH,
+        depth: int = DEFAULT_WORLD_DEPTH,
+        tile_size: int = DEFAULT_TILE_SIZE,
+        minecraft_min_x: int = DEFAULT_MINECRAFT_MIN_X,
+        minecraft_min_z: int = DEFAULT_MINECRAFT_MIN_Z,
     ) -> "WorldBounds":
         padded_width = math.ceil(width / tile_size) * tile_size
         padded_depth = math.ceil(depth / tile_size) * tile_size
@@ -61,4 +96,3 @@ def minecraft_to_layer_cell(x: int, z: int, bounds: WorldBounds, cell_blocks: in
     local_x = data_x % bounds.tile_size
     local_z = data_z % bounds.tile_size
     return tile_x, tile_z, local_x, local_z
-

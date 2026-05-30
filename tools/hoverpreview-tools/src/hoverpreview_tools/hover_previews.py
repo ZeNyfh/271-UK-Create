@@ -121,6 +121,7 @@ def export_hover_previews(root: Path, out: Path, max_size: int = 4096, style: st
         "image_height": base_size[1],
         "world": manifest["world"],
         "georeferencing": manifest.get("georeferencing", {}),
+        "minecraft_origin": _minecraft_origin(manifest),
         "surface_geology": manifest.get("surface_geology", {}),
         "vegetation": manifest.get("vegetation", {}),
         "layers": layers,
@@ -135,6 +136,29 @@ def _height_sample_image(values: np.ndarray) -> Image.Image:
     encoded = values.astype(np.int32) + 32768
     encoded[values == HEIGHT_NODATA] = 0
     return Image.fromarray(np.clip(encoded, 0, 65535).astype(np.uint16), mode="I;16")
+
+
+def _minecraft_origin(manifest: dict[str, Any]) -> dict[str, Any]:
+    world = manifest["world"]
+    geo = manifest.get("georeferencing", {})
+    origin: dict[str, Any] = {
+        "minecraft_x": 0,
+        "minecraft_z": 0,
+        "data_x": 0 - int(world["minecraft_min_x"]),
+        "data_z": 0 - int(world["minecraft_min_z"]),
+    }
+    min_e = geo.get("bng_min_easting")
+    max_e = geo.get("bng_max_easting")
+    min_n = geo.get("bng_min_northing")
+    max_n = geo.get("bng_max_northing")
+    if min_e is not None and max_e is not None and min_n is not None and max_n is not None:
+        origin["bng_easting"] = float(min_e) + (origin["data_x"] + 0.5) * (float(max_e) - float(min_e)) / int(
+            world["width"]
+        )
+        origin["bng_northing"] = float(max_n) - (origin["data_z"] + 0.5) * (float(max_n) - float(min_n)) / int(
+            world["depth"]
+        )
+    return origin
 
 
 def _save_visual_layer(root: Path, image: Image.Image, relative_path: str) -> list[dict[str, Any]]:
