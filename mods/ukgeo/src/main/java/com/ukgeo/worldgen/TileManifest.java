@@ -21,6 +21,10 @@ public final class TileManifest {
     public final int minecraftMinZ;
     public final int minecraftMaxX;
     public final int minecraftMaxZ;
+    public final double bngMinEasting;
+    public final double bngMinNorthing;
+    public final double bngMaxEasting;
+    public final double bngMaxNorthing;
     public final int seaLevelY;
     public final String heightPath;
     public final Map<String, String> orePaths;
@@ -43,6 +47,11 @@ public final class TileManifest {
         this.minecraftMinZ = world.get("minecraft_min_z").getAsInt();
         this.minecraftMaxX = world.get("minecraft_max_x").getAsInt();
         this.minecraftMaxZ = world.get("minecraft_max_z").getAsInt();
+        JsonObject georeferencing = json.getAsJsonObject("georeferencing");
+        this.bngMinEasting = optionalDouble(georeferencing, "bng_min_easting");
+        this.bngMinNorthing = optionalDouble(georeferencing, "bng_min_northing");
+        this.bngMaxEasting = optionalDouble(georeferencing, "bng_max_easting");
+        this.bngMaxNorthing = optionalDouble(georeferencing, "bng_max_northing");
         JsonObject height = json.getAsJsonObject("height");
         this.seaLevelY = height.get("sea_level_y").getAsInt();
         this.heightPath = height.get("path").getAsString();
@@ -111,5 +120,23 @@ public final class TileManifest {
 
     public int tilesZ() {
         return paddedDepth / tileSize;
+    }
+
+    public String originSummary() {
+        if (Double.isNaN(bngMinEasting) || Double.isNaN(bngMinNorthing) || Double.isNaN(bngMaxEasting) || Double.isNaN(bngMaxNorthing)) {
+            return "BNG unavailable";
+        }
+        double dataX = 0 - minecraftMinX;
+        double dataZ = 0 - minecraftMinZ;
+        double easting = bngMinEasting + (dataX + 0.5D) * (bngMaxEasting - bngMinEasting) / width;
+        double northing = bngMaxNorthing - (dataZ + 0.5D) * (bngMaxNorthing - bngMinNorthing) / depth;
+        return "BNG E %.0f N %.0f".formatted(easting, northing);
+    }
+
+    private static double optionalDouble(JsonObject object, String key) {
+        if (object == null || !object.has(key) || object.get(key).isJsonNull()) {
+            return Double.NaN;
+        }
+        return object.get(key).getAsDouble();
     }
 }

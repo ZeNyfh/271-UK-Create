@@ -34,6 +34,8 @@ python3 -m venv .venv
   --rules examples/ore_rules.yml --manifest ./uk_world_data/manifest.json --out ./uk_world_data
 ```
 
+For the full GB rebuild path, the default Minecraft origin is centred on the Nottingham area, so a new UKGeo world spawns around Nottingham instead of Scotland.
+
 For the full BGS 625k GeoPackage, use:
 
 ```bash

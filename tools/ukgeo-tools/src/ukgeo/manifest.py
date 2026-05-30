@@ -5,6 +5,8 @@ from typing import Any
 import json
 import math
 
+from .coords import DEFAULT_MINECRAFT_MIN_X, DEFAULT_MINECRAFT_MIN_Z
+
 ORE_NAMES = (
     "coal",
     "iron",
@@ -29,8 +31,8 @@ def default_manifest(
     width: int = 25_000,
     depth: int = 50_000,
     tile_size: int = 512,
-    minecraft_min_x: int = -12_500,
-    minecraft_min_z: int = -25_000,
+    minecraft_min_x: int = DEFAULT_MINECRAFT_MIN_X,
+    minecraft_min_z: int = DEFAULT_MINECRAFT_MIN_Z,
     sea_level_y: int = 64,
     bng_min_easting: float | None = None,
     bng_min_northing: float | None = None,

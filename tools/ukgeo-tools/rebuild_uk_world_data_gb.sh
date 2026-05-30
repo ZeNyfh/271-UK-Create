@@ -73,8 +73,8 @@ echo "Rebuilding GB runtime tiles into: $TMP_ROOT"
   --bng-max-northing 1300000 \
   --world-width 25000 \
   --world-depth 50000 \
-  --minecraft-min-x -12500 \
-  --minecraft-min-z -25000 \
+  --minecraft-min-x -17588 \
+  --minecraft-min-z -36925 \
   --sea-level-y 64
 
 "$UKGEO" add-osni-height-tiles \

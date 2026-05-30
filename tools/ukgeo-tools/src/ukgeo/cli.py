@@ -11,7 +11,13 @@ from rich.table import Table
 from .asc import iter_nested_asc_headers
 from .bgs import likely_geology_fields, resolve_gpkg
 from .coal import make_coal_resource_tiles as make_coal_resource_tiles_impl
-from .coords import WorldBounds, minecraft_to_layer_cell, minecraft_to_tile_cell
+from .coords import (
+    DEFAULT_MINECRAFT_MIN_X,
+    DEFAULT_MINECRAFT_MIN_Z,
+    WorldBounds,
+    minecraft_to_layer_cell,
+    minecraft_to_tile_cell,
+)
 from .height import make_height_tiles as make_height_tiles_impl
 from .gold import harvest_gold_occurrences as harvest_gold_occurrences_impl
 from .gold import make_gold_occurrence_tiles as make_gold_occurrence_tiles_impl
@@ -81,8 +87,8 @@ def make_height_tiles(
     world_width: int = typer.Option(25000, "--world-width"),
     world_depth: int = typer.Option(50000, "--world-depth"),
     tile_size: int = typer.Option(512, "--tile-size"),
-    minecraft_min_x: int = typer.Option(-12500, "--minecraft-min-x"),
-    minecraft_min_z: int = typer.Option(-25000, "--minecraft-min-z"),
+    minecraft_min_x: int = typer.Option(DEFAULT_MINECRAFT_MIN_X, "--minecraft-min-x"),
+    minecraft_min_z: int = typer.Option(DEFAULT_MINECRAFT_MIN_Z, "--minecraft-min-z"),
     sea_level_y: int = typer.Option(64, "--sea-level-y"),
     debug_geotiff: Path | None = typer.Option(None, "--debug-geotiff"),
 ) -> None:
