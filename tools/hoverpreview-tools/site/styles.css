@@ -48,8 +48,10 @@ button:active { background: var(--button-active); }
   min-height: 40px;
   padding: 6px 8px;
   border-bottom: 1px solid var(--panel-border);
+  position: relative;
+  z-index: 100;
   background: var(--panel);
-  overflow-x: auto;
+  overflow: visible;
   white-space: nowrap;
 }
 
@@ -77,7 +79,7 @@ button:active { background: var(--button-active); }
 .layer-toggle input { margin: 0; }
 .layer-toggle input:disabled + span { color: #666666; }
 
-.ore-menu { position: relative; }
+.ore-menu { position: relative; z-index: 110; }
 .ore-menu summary {
   display: inline-flex;
   align-items: center;
@@ -92,7 +94,7 @@ button:active { background: var(--button-active); }
 .ore-menu summary::-webkit-details-marker { display: none; }
 .ore-list {
   position: absolute;
-  z-index: 20;
+  z-index: 120;
   top: calc(100% + 2px);
   left: 0;
   display: grid;
