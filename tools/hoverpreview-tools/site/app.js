@@ -177,7 +177,6 @@ function toggleFor(layer, checked) {
   const input = document.createElement("input");
   input.type = "checkbox";
   input.checked = checked;
-  input.disabled = layer.kind === "base";
   input.addEventListener("change", () => {
     const entry = state.layers.get(layer.name);
     entry.enabled = input.checked;
