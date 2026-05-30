@@ -1,6 +1,8 @@
 const FORMAT = "ukgeo-hoverpreviews-v1";
 const DEFAULT_MANIFEST = "hoverpreviews/hover_manifest.json";
 const START_STATUS = "Mouse wheel zooms. Middle/right drag pans. Left click copies the current Minecraft coordinates.";
+const DEFAULT_VISIBLE_OVERLAYS = new Set(["surface", "vegetation", "rivers"]);
+const DEFAULT_VISIBLE_ORES = new Set(["coal", "iron", "copper", "zinc", "gold"]);
 
 const elements = {
   loadState: document.querySelector("#load-state"),
@@ -163,12 +165,18 @@ function addLayer(layer) {
   img.height = state.imageHeight;
   img.dataset.name = layer.name;
   img.src = layerUrl(layer, chooseMip(layer));
-  img.hidden = layer.kind !== "base" && !["surface", "vegetation", "rivers"].includes(layer.name);
+  img.hidden = !isLayerVisibleByDefault(layer);
   elements.stack.append(img);
 
   state.layers.set(layer.name, { layer, img, enabled: !img.hidden });
   const controls = layer.kind === "ore" ? elements.oreControls : elements.layerControls;
   controls.append(toggleFor(layer, !img.hidden));
+}
+
+function isLayerVisibleByDefault(layer) {
+  if (layer.kind === "base") return true;
+  if (layer.kind === "ore") return DEFAULT_VISIBLE_ORES.has(layer.ore || labelFor(layer.name));
+  return DEFAULT_VISIBLE_OVERLAYS.has(layer.name);
 }
 
 function toggleFor(layer, checked) {
