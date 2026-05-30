@@ -45,8 +45,23 @@ Before publishing, generate or copy the preview export to:
 tools/ukgeo-tools/uk_world_data_gb/hoverpreviews/
 ```
 
-No GitHub Pages deployment workflow is required for this branch/root setup; Pages
-will serve the checked-in root `index.html` and the relative preview data path.
+The included `.github/workflows/pages.yml` workflow stages these root files for
+GitHub Pages. Use the workflow when Pages is configured for **GitHub Actions**;
+if Pages is configured for **Deploy from a branch**, choose the `main` branch and
+repository root so GitHub serves the checked-in root `index.html`.
+
+## If GitHub Pages shows the README
+
+GitHub Pages falls back to rendering `README.md` when the published artifact does
+not contain a root `index.html`. This repo includes `.github/workflows/pages.yml`
+to publish a staged root site containing `index.html`, the viewer assets, and the
+`tools/ukgeo-tools/uk_world_data_gb/hoverpreviews/` data folder when it exists.
+
+In the repository settings, set **Pages → Build and deployment → Source** to
+**GitHub Actions**, then run the **Deploy GitHub Pages site** workflow or push to
+`main`. If the page loads but shows the empty-state text, commit the generated
+`tools/ukgeo-tools/uk_world_data_gb/hoverpreviews/` directory; the ignore rules
+allow that folder while keeping the rest of `uk_world_data_gb` ignored.
 
 ## Run locally
 
