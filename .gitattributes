@@ -10,5 +10,10 @@
 /tools/ukgeo-tools/uk_world_data_gb/hoverpreviews/mips/4/layers/height.png filter=lfs diff=lfs merge=lfs -text
 /tools/ukgeo-tools/uk_world_data_gb/hoverpreviews/mips/4/layers/vegetation.png filter=lfs diff=lfs merge=lfs -text
 /tools/ukgeo-tools/uk_world_data_gb/hoverpreviews/samples/vegetation_u8.png filter=lfs diff=lfs merge=lfs -text
+/tools/ukgeo-tools/uk_world_data_gb/hoverpreviews/layers/rivers.png filter=lfs diff=lfs merge=lfs -text
+/tools/ukgeo-tools/uk_world_data_gb/hoverpreviews/mips/2/layers/ores/ochrum.png filter=lfs diff=lfs merge=lfs -text
+/tools/ukgeo-tools/uk_world_data_gb/hoverpreviews/mips/2/layers/rivers.png filter=lfs diff=lfs merge=lfs -text
+/tools/ukgeo-tools/uk_world_data_gb/hoverpreviews/mips/4/layers/rivers.png filter=lfs diff=lfs merge=lfs -text
+/tools/ukgeo-tools/uk_world_data_gb/hoverpreviews/samples/rivers_u8.png filter=lfs diff=lfs merge=lfs -text
 **/uk_world_data_gb/hoverpreviews/** filter=lfs diff=lfs merge=lfs -text
 **/uk_world_data/hoverpreviews/** filter=lfs diff=lfs merge=lfs -text

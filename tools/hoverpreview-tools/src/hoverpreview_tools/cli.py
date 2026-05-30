@@ -4,12 +4,28 @@ from pathlib import Path
 
 import typer
 from rich.console import Console
+from rich.progress import BarColumn, Progress, TaskProgressColumn, TextColumn, TimeElapsedColumn
+
+from ukgeo.manifest import read_manifest
 
 from .hover import open_height_hover_map
-from .hover_previews import export_hover_previews
+from .hover_previews import export_hover_previews, hover_preview_steps
 
 app = typer.Typer(no_args_is_help=True)
 console = Console()
+
+
+def _progress_label(step: str) -> str:
+    if step.startswith("ore:"):
+        return f"Generating ore layer: {step.removeprefix('ore:')}"
+    labels = {
+        "height": "Generating height layer",
+        "surface": "Generating surface layer",
+        "vegetation": "Generating vegetation layer",
+        "rivers": "Generating river layer",
+        "manifest": "Writing hover manifest",
+    }
+    return labels.get(step, f"Generating {step}")
 
 
 @app.command("export")
@@ -24,7 +40,21 @@ def export_cmd(
     if max_size == 0:
         console.print("[yellow]Native resolution can require several GB of RAM for the default 25k x 50k world.[/yellow]")
     try:
-        written = export_hover_previews(root, out, max_size=max_size, style=style, clean=clean)
+        manifest = read_manifest(root / "manifest.json")
+        total_steps = len(hover_preview_steps(root, manifest))
+        with Progress(
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TaskProgressColumn(),
+            TimeElapsedColumn(),
+            console=console,
+        ) as progress:
+            task_id = progress.add_task("Generating hover previews", total=total_steps)
+
+            def advance(step: str) -> None:
+                progress.update(task_id, description=_progress_label(step), advance=1)
+
+            written = export_hover_previews(root, out, max_size=max_size, style=style, clean=clean, progress=advance)
     except (FileNotFoundError, ValueError) as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1) from exc
