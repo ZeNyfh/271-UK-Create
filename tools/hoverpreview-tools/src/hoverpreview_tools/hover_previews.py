@@ -5,6 +5,7 @@ import gc
 import json
 import math
 import shutil
+from collections.abc import Callable
 from typing import Any
 
 import numpy as np
@@ -29,10 +30,38 @@ def hover_preview_scale(manifest: dict[str, Any], max_size: int) -> tuple[int, i
     return scale, tiles_x, tiles_z
 
 
-def export_hover_previews(root: Path, out: Path, max_size: int = 4096, style: str = "auto", clean: bool = False) -> Path:
+def hover_preview_steps(root: Path, manifest: dict[str, Any]) -> list[str]:
+    steps = ["height"]
+    if "surface_geology" in manifest and (root / manifest["surface_geology"]["path"]).exists():
+        steps.append("surface")
+    if "vegetation" in manifest and (root / manifest["vegetation"]["path"]).exists():
+        steps.append("vegetation")
+    if "rivers" in manifest and (root / manifest["rivers"]["path"]).exists():
+        steps.append("rivers")
+    for ore, layer in manifest.get("ore_layers", {}).items():
+        if ore == "tin":
+            continue
+        if (root / layer["path"]).exists():
+            steps.append(f"ore:{ore}")
+    steps.append("manifest")
+    return steps
+
+
+def export_hover_previews(
+    root: Path,
+    out: Path,
+    max_size: int = 4096,
+    style: str = "auto",
+    clean: bool = False,
+    progress: Callable[[str], None] | None = None,
+) -> Path:
     manifest = read_manifest(root / "manifest.json")
     tile_size = int(manifest["tile_size"])
     scale, tiles_x, tiles_z = hover_preview_scale(manifest, max_size)
+
+    def report(step: str) -> None:
+        if progress is not None:
+            progress(step)
 
     if clean and out.exists():
         shutil.rmtree(out)
@@ -40,6 +69,7 @@ def export_hover_previews(root: Path, out: Path, max_size: int = 4096, style: st
     (out / "samples").mkdir(parents=True, exist_ok=True)
     (out / "mips").mkdir(parents=True, exist_ok=True)
 
+    report("height")
     height_values = _read_height_preview(root, manifest, tiles_x, tiles_z, tile_size, scale)
     base_size = (height_values.shape[1], height_values.shape[0])
     height_mips = _save_visual_layer(out, _height_image(height_values, style).convert("RGB"), "layers/height.png")
@@ -61,6 +91,7 @@ def export_hover_previews(root: Path, out: Path, max_size: int = 4096, style: st
     ]
 
     if "surface_geology" in manifest and (root / manifest["surface_geology"]["path"]).exists():
+        report("surface")
         values = _read_u8_preview(root, manifest["surface_geology"]["path"], tiles_x, tiles_z, tile_size, scale, missing_ok=False)
         visual = _fit_image(_categorical_overlay_image(values, manifest["surface_geology"].get("classes", {}), alpha=166, transparent_zero=False), base_size)
         sample = _fit_image(Image.fromarray(values, mode="L"), base_size)
@@ -71,6 +102,7 @@ def export_hover_previews(root: Path, out: Path, max_size: int = 4096, style: st
         gc.collect()
 
     if "vegetation" in manifest and (root / manifest["vegetation"]["path"]).exists():
+        report("vegetation")
         values = read_vegetation_preview(root, manifest, scale, missing_ok=False)
         visual = _fit_image(_categorical_overlay_image(values, manifest["vegetation"].get("classes", {}), alpha=176, transparent_zero=True), base_size)
         sample = _fit_image(Image.fromarray(values, mode="L"), base_size)
@@ -81,6 +113,7 @@ def export_hover_previews(root: Path, out: Path, max_size: int = 4096, style: st
         gc.collect()
 
     if "rivers" in manifest and (root / manifest["rivers"]["path"]).exists():
+        report("rivers")
         values = _read_u8_preview(root, manifest["rivers"]["path"], tiles_x, tiles_z, tile_size, scale, missing_ok=False)
         visual = _fit_image(_mask_overlay_image(values, (65, 145, 230)), base_size)
         sample = _fit_image(Image.fromarray(values, mode="L"), base_size)
@@ -100,6 +133,7 @@ def export_hover_previews(root: Path, out: Path, max_size: int = 4096, style: st
             continue
         if not (root / layer["path"]).exists():
             continue
+        report(f"ore:{ore}")
         values = _read_u8_preview(root, layer["path"], tiles_x, tiles_z, tile_size, scale, missing_ok=True)
         visual = _fit_image(_ore_overlay_image(values, ore), base_size)
         sample = _fit_image(Image.fromarray(values, mode="L"), base_size)
@@ -120,6 +154,7 @@ def export_hover_previews(root: Path, out: Path, max_size: int = 4096, style: st
         gc.collect()
     layers.extend(ore_layers)
 
+    report("manifest")
     index = {
         "format": HOVER_PREVIEW_FORMAT,
         "scale": scale,

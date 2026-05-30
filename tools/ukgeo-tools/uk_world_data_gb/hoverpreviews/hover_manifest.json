@@ -1,0 +1,1135 @@
+{
+  "format": "ukgeo-hoverpreviews-v1",
+  "scale": 5,
+  "max_size": 12000,
+  "style": "auto",
+  "tile_size": 512,
+  "image_width": 5018,
+  "image_height": 10036,
+  "world": {
+    "width": 25000,
+    "depth": 50000,
+    "padded_width": 25088,
+    "padded_depth": 50176,
+    "minecraft_min_x": -17588,
+    "minecraft_min_z": -36925,
+    "minecraft_max_x": 7411,
+    "minecraft_max_z": 13074
+  },
+  "georeferencing": {
+    "crs": "EPSG:27700",
+    "bng_min_easting": 0.0,
+    "bng_min_northing": 0.0,
+    "bng_max_easting": 650000.0,
+    "bng_max_northing": 1300000.0,
+    "note": "Final map cells are Minecraft x/z blocks resampled from the source GIS extent."
+  },
+  "minecraft_origin": {
+    "minecraft_x": 0,
+    "minecraft_z": 0,
+    "data_x": 17588,
+    "data_z": 36925,
+    "bng_easting": 457301.0,
+    "bng_northing": 339937.0
+  },
+  "surface_geology": {
+    "path": "geology/surface",
+    "extension": ".u8.gz",
+    "dtype": "uint8",
+    "classes": {
+      "0": {
+        "name": "default",
+        "block": "minecraft:stone",
+        "fallback_block": "minecraft:stone",
+        "color": "#5f625d"
+      },
+      "1": {
+        "name": "chalk",
+        "block": "minecraft:calcite",
+        "fallback_block": "minecraft:calcite",
+        "color": "#eee8cf"
+      },
+      "2": {
+        "name": "limestone",
+        "block": "create:limestone",
+        "fallback_block": "minecraft:calcite",
+        "color": "#bdb895"
+      },
+      "3": {
+        "name": "granite",
+        "block": "minecraft:granite",
+        "fallback_block": "minecraft:granite",
+        "color": "#b17e6a"
+      },
+      "4": {
+        "name": "basalt",
+        "block": "minecraft:smooth_basalt",
+        "fallback_block": "minecraft:deepslate",
+        "color": "#383c42"
+      },
+      "5": {
+        "name": "andesite",
+        "block": "minecraft:andesite",
+        "fallback_block": "minecraft:andesite",
+        "color": "#7a7e7b"
+      },
+      "6": {
+        "name": "diorite",
+        "block": "minecraft:diorite",
+        "fallback_block": "minecraft:diorite",
+        "color": "#d2d0c8"
+      },
+      "7": {
+        "name": "tuff",
+        "block": "minecraft:tuff",
+        "fallback_block": "minecraft:tuff",
+        "color": "#687062"
+      },
+      "8": {
+        "name": "sandstone",
+        "block": "minecraft:sandstone",
+        "fallback_block": "minecraft:sandstone",
+        "color": "#c6ad68"
+      },
+      "9": {
+        "name": "slate",
+        "block": "minecraft:deepslate",
+        "fallback_block": "minecraft:deepslate",
+        "color": "#4d5660"
+      }
+    }
+  },
+  "vegetation": {
+    "path": "vegetation",
+    "extension": ".u8.gz",
+    "dtype": "uint8",
+    "cell_blocks": 2,
+    "cell_metres": 50.0,
+    "width_cells": 12500,
+    "depth_cells": 25000,
+    "source": "/home/zenyfh/Documents/GitHub/mapcreator/data/FME_3564346A_1778997494261_5633.zip",
+    "source_band": 1,
+    "classes": {
+      "0": {
+        "name": "none/ocean",
+        "color": "#101820"
+      },
+      "1": {
+        "name": "broadleaf woodland",
+        "color": "#1f6f3a"
+      },
+      "2": {
+        "name": "conifer woodland",
+        "color": "#174c34"
+      },
+      "3": {
+        "name": "arable and horticulture",
+        "color": "#d9c66a"
+      },
+      "4": {
+        "name": "improved grassland",
+        "color": "#78b957"
+      },
+      "5": {
+        "name": "neutral grassland",
+        "color": "#9ccc66"
+      },
+      "6": {
+        "name": "calcareous grassland",
+        "color": "#c8d78a"
+      },
+      "7": {
+        "name": "acid grassland",
+        "color": "#8aa84f"
+      },
+      "8": {
+        "name": "wetland/bog/fen",
+        "color": "#4c8f8a"
+      },
+      "9": {
+        "name": "heath/heather",
+        "color": "#8c5a99"
+      },
+      "10": {
+        "name": "freshwater",
+        "color": "#3b82c4"
+      },
+      "11": {
+        "name": "urban/suburban",
+        "color": "#777777"
+      },
+      "12": {
+        "name": "rocky",
+        "color": "#b9b0a2"
+      }
+    },
+    "source_classes": {
+      "1": "Broadleaved woodland",
+      "2": "Coniferous woodland",
+      "3": "Arable and horticulture",
+      "4": "Improved grassland",
+      "5": "Neutral grassland",
+      "6": "Calcareous grassland",
+      "7": "Acid grassland",
+      "8": "Fen, marsh and swamp",
+      "9": "Heather",
+      "10": "Heather grassland",
+      "11": "Bog",
+      "12": "Inland rock",
+      "13": "Saltwater",
+      "14": "Freshwater",
+      "15": "Supralittoral rock",
+      "16": "Supralittoral sediment",
+      "17": "Littoral rock",
+      "18": "Littoral sediment",
+      "19": "Saltmarsh",
+      "20": "Urban",
+      "21": "Suburban"
+    }
+  },
+  "layers": [
+    {
+      "name": "height",
+      "kind": "base",
+      "file": "layers/height.png",
+      "mips": [
+        {
+          "factor": 1,
+          "file": "layers/height.png",
+          "width": 5018,
+          "height": 10036
+        },
+        {
+          "factor": 2,
+          "file": "mips/2/layers/height.png",
+          "width": 2509,
+          "height": 5018
+        },
+        {
+          "factor": 4,
+          "file": "mips/4/layers/height.png",
+          "width": 1255,
+          "height": 2509
+        },
+        {
+          "factor": 8,
+          "file": "mips/8/layers/height.png",
+          "width": 628,
+          "height": 1255
+        },
+        {
+          "factor": 16,
+          "file": "mips/16/layers/height.png",
+          "width": 314,
+          "height": 628
+        },
+        {
+          "factor": 32,
+          "file": "mips/32/layers/height.png",
+          "width": 157,
+          "height": 314
+        }
+      ],
+      "sample_file": "samples/height_u16.png",
+      "browser_sample_file": "samples/height_rgb.png",
+      "browser_sample_encoding": "signed-decimetres-rg-le-offset-32768"
+    },
+    {
+      "name": "surface",
+      "kind": "overlay",
+      "file": "layers/surface.png",
+      "mips": [
+        {
+          "factor": 1,
+          "file": "layers/surface.png",
+          "width": 5018,
+          "height": 10036
+        },
+        {
+          "factor": 2,
+          "file": "mips/2/layers/surface.png",
+          "width": 2509,
+          "height": 5018
+        },
+        {
+          "factor": 4,
+          "file": "mips/4/layers/surface.png",
+          "width": 1255,
+          "height": 2509
+        },
+        {
+          "factor": 8,
+          "file": "mips/8/layers/surface.png",
+          "width": 628,
+          "height": 1255
+        },
+        {
+          "factor": 16,
+          "file": "mips/16/layers/surface.png",
+          "width": 314,
+          "height": 628
+        },
+        {
+          "factor": 32,
+          "file": "mips/32/layers/surface.png",
+          "width": 157,
+          "height": 314
+        }
+      ],
+      "sample_file": "samples/surface_u8.png"
+    },
+    {
+      "name": "vegetation",
+      "kind": "overlay",
+      "file": "layers/vegetation.png",
+      "mips": [
+        {
+          "factor": 1,
+          "file": "layers/vegetation.png",
+          "width": 5018,
+          "height": 10036
+        },
+        {
+          "factor": 2,
+          "file": "mips/2/layers/vegetation.png",
+          "width": 2509,
+          "height": 5018
+        },
+        {
+          "factor": 4,
+          "file": "mips/4/layers/vegetation.png",
+          "width": 1255,
+          "height": 2509
+        },
+        {
+          "factor": 8,
+          "file": "mips/8/layers/vegetation.png",
+          "width": 628,
+          "height": 1255
+        },
+        {
+          "factor": 16,
+          "file": "mips/16/layers/vegetation.png",
+          "width": 314,
+          "height": 628
+        },
+        {
+          "factor": 32,
+          "file": "mips/32/layers/vegetation.png",
+          "width": 157,
+          "height": 314
+        }
+      ],
+      "sample_file": "samples/vegetation_u8.png"
+    },
+    {
+      "name": "rivers",
+      "kind": "overlay",
+      "file": "layers/rivers.png",
+      "mips": [
+        {
+          "factor": 1,
+          "file": "layers/rivers.png",
+          "width": 5018,
+          "height": 10036
+        },
+        {
+          "factor": 2,
+          "file": "mips/2/layers/rivers.png",
+          "width": 2509,
+          "height": 5018
+        },
+        {
+          "factor": 4,
+          "file": "mips/4/layers/rivers.png",
+          "width": 1255,
+          "height": 2509
+        },
+        {
+          "factor": 8,
+          "file": "mips/8/layers/rivers.png",
+          "width": 628,
+          "height": 1255
+        },
+        {
+          "factor": 16,
+          "file": "mips/16/layers/rivers.png",
+          "width": 314,
+          "height": 628
+        },
+        {
+          "factor": 32,
+          "file": "mips/32/layers/rivers.png",
+          "width": 157,
+          "height": 314
+        }
+      ],
+      "sample_file": "samples/rivers_u8.png"
+    },
+    {
+      "name": "ore:coal",
+      "ore": "coal",
+      "kind": "ore",
+      "file": "layers/ores/coal.png",
+      "mips": [
+        {
+          "factor": 1,
+          "file": "layers/ores/coal.png",
+          "width": 5018,
+          "height": 10036
+        },
+        {
+          "factor": 2,
+          "file": "mips/2/layers/ores/coal.png",
+          "width": 2509,
+          "height": 5018
+        },
+        {
+          "factor": 4,
+          "file": "mips/4/layers/ores/coal.png",
+          "width": 1255,
+          "height": 2509
+        },
+        {
+          "factor": 8,
+          "file": "mips/8/layers/ores/coal.png",
+          "width": 628,
+          "height": 1255
+        },
+        {
+          "factor": 16,
+          "file": "mips/16/layers/ores/coal.png",
+          "width": 314,
+          "height": 628
+        },
+        {
+          "factor": 32,
+          "file": "mips/32/layers/ores/coal.png",
+          "width": 157,
+          "height": 314
+        }
+      ],
+      "sample_file": "samples/ores/coal_u8.png"
+    },
+    {
+      "name": "ore:iron",
+      "ore": "iron",
+      "kind": "ore",
+      "file": "layers/ores/iron.png",
+      "mips": [
+        {
+          "factor": 1,
+          "file": "layers/ores/iron.png",
+          "width": 5018,
+          "height": 10036
+        },
+        {
+          "factor": 2,
+          "file": "mips/2/layers/ores/iron.png",
+          "width": 2509,
+          "height": 5018
+        },
+        {
+          "factor": 4,
+          "file": "mips/4/layers/ores/iron.png",
+          "width": 1255,
+          "height": 2509
+        },
+        {
+          "factor": 8,
+          "file": "mips/8/layers/ores/iron.png",
+          "width": 628,
+          "height": 1255
+        },
+        {
+          "factor": 16,
+          "file": "mips/16/layers/ores/iron.png",
+          "width": 314,
+          "height": 628
+        },
+        {
+          "factor": 32,
+          "file": "mips/32/layers/ores/iron.png",
+          "width": 157,
+          "height": 314
+        }
+      ],
+      "sample_file": "samples/ores/iron_u8.png"
+    },
+    {
+      "name": "ore:copper",
+      "ore": "copper",
+      "kind": "ore",
+      "file": "layers/ores/copper.png",
+      "mips": [
+        {
+          "factor": 1,
+          "file": "layers/ores/copper.png",
+          "width": 5018,
+          "height": 10036
+        },
+        {
+          "factor": 2,
+          "file": "mips/2/layers/ores/copper.png",
+          "width": 2509,
+          "height": 5018
+        },
+        {
+          "factor": 4,
+          "file": "mips/4/layers/ores/copper.png",
+          "width": 1255,
+          "height": 2509
+        },
+        {
+          "factor": 8,
+          "file": "mips/8/layers/ores/copper.png",
+          "width": 628,
+          "height": 1255
+        },
+        {
+          "factor": 16,
+          "file": "mips/16/layers/ores/copper.png",
+          "width": 314,
+          "height": 628
+        },
+        {
+          "factor": 32,
+          "file": "mips/32/layers/ores/copper.png",
+          "width": 157,
+          "height": 314
+        }
+      ],
+      "sample_file": "samples/ores/copper_u8.png"
+    },
+    {
+      "name": "ore:zinc",
+      "ore": "zinc",
+      "kind": "ore",
+      "file": "layers/ores/zinc.png",
+      "mips": [
+        {
+          "factor": 1,
+          "file": "layers/ores/zinc.png",
+          "width": 5018,
+          "height": 10036
+        },
+        {
+          "factor": 2,
+          "file": "mips/2/layers/ores/zinc.png",
+          "width": 2509,
+          "height": 5018
+        },
+        {
+          "factor": 4,
+          "file": "mips/4/layers/ores/zinc.png",
+          "width": 1255,
+          "height": 2509
+        },
+        {
+          "factor": 8,
+          "file": "mips/8/layers/ores/zinc.png",
+          "width": 628,
+          "height": 1255
+        },
+        {
+          "factor": 16,
+          "file": "mips/16/layers/ores/zinc.png",
+          "width": 314,
+          "height": 628
+        },
+        {
+          "factor": 32,
+          "file": "mips/32/layers/ores/zinc.png",
+          "width": 157,
+          "height": 314
+        }
+      ],
+      "sample_file": "samples/ores/zinc_u8.png"
+    },
+    {
+      "name": "ore:gold",
+      "ore": "gold",
+      "kind": "ore",
+      "file": "layers/ores/gold.png",
+      "mips": [
+        {
+          "factor": 1,
+          "file": "layers/ores/gold.png",
+          "width": 5018,
+          "height": 10036
+        },
+        {
+          "factor": 2,
+          "file": "mips/2/layers/ores/gold.png",
+          "width": 2509,
+          "height": 5018
+        },
+        {
+          "factor": 4,
+          "file": "mips/4/layers/ores/gold.png",
+          "width": 1255,
+          "height": 2509
+        },
+        {
+          "factor": 8,
+          "file": "mips/8/layers/ores/gold.png",
+          "width": 628,
+          "height": 1255
+        },
+        {
+          "factor": 16,
+          "file": "mips/16/layers/ores/gold.png",
+          "width": 314,
+          "height": 628
+        },
+        {
+          "factor": 32,
+          "file": "mips/32/layers/ores/gold.png",
+          "width": 157,
+          "height": 314
+        }
+      ],
+      "sample_file": "samples/ores/gold_u8.png"
+    },
+    {
+      "name": "ore:andesite",
+      "ore": "andesite",
+      "kind": "ore",
+      "file": "layers/ores/andesite.png",
+      "mips": [
+        {
+          "factor": 1,
+          "file": "layers/ores/andesite.png",
+          "width": 5018,
+          "height": 10036
+        },
+        {
+          "factor": 2,
+          "file": "mips/2/layers/ores/andesite.png",
+          "width": 2509,
+          "height": 5018
+        },
+        {
+          "factor": 4,
+          "file": "mips/4/layers/ores/andesite.png",
+          "width": 1255,
+          "height": 2509
+        },
+        {
+          "factor": 8,
+          "file": "mips/8/layers/ores/andesite.png",
+          "width": 628,
+          "height": 1255
+        },
+        {
+          "factor": 16,
+          "file": "mips/16/layers/ores/andesite.png",
+          "width": 314,
+          "height": 628
+        },
+        {
+          "factor": 32,
+          "file": "mips/32/layers/ores/andesite.png",
+          "width": 157,
+          "height": 314
+        }
+      ],
+      "sample_file": "samples/ores/andesite_u8.png"
+    },
+    {
+      "name": "ore:diorite",
+      "ore": "diorite",
+      "kind": "ore",
+      "file": "layers/ores/diorite.png",
+      "mips": [
+        {
+          "factor": 1,
+          "file": "layers/ores/diorite.png",
+          "width": 5018,
+          "height": 10036
+        },
+        {
+          "factor": 2,
+          "file": "mips/2/layers/ores/diorite.png",
+          "width": 2509,
+          "height": 5018
+        },
+        {
+          "factor": 4,
+          "file": "mips/4/layers/ores/diorite.png",
+          "width": 1255,
+          "height": 2509
+        },
+        {
+          "factor": 8,
+          "file": "mips/8/layers/ores/diorite.png",
+          "width": 628,
+          "height": 1255
+        },
+        {
+          "factor": 16,
+          "file": "mips/16/layers/ores/diorite.png",
+          "width": 314,
+          "height": 628
+        },
+        {
+          "factor": 32,
+          "file": "mips/32/layers/ores/diorite.png",
+          "width": 157,
+          "height": 314
+        }
+      ],
+      "sample_file": "samples/ores/diorite_u8.png"
+    },
+    {
+      "name": "ore:granite",
+      "ore": "granite",
+      "kind": "ore",
+      "file": "layers/ores/granite.png",
+      "mips": [
+        {
+          "factor": 1,
+          "file": "layers/ores/granite.png",
+          "width": 5018,
+          "height": 10036
+        },
+        {
+          "factor": 2,
+          "file": "mips/2/layers/ores/granite.png",
+          "width": 2509,
+          "height": 5018
+        },
+        {
+          "factor": 4,
+          "file": "mips/4/layers/ores/granite.png",
+          "width": 1255,
+          "height": 2509
+        },
+        {
+          "factor": 8,
+          "file": "mips/8/layers/ores/granite.png",
+          "width": 628,
+          "height": 1255
+        },
+        {
+          "factor": 16,
+          "file": "mips/16/layers/ores/granite.png",
+          "width": 314,
+          "height": 628
+        },
+        {
+          "factor": 32,
+          "file": "mips/32/layers/ores/granite.png",
+          "width": 157,
+          "height": 314
+        }
+      ],
+      "sample_file": "samples/ores/granite_u8.png"
+    },
+    {
+      "name": "ore:ochrum",
+      "ore": "ochrum",
+      "kind": "ore",
+      "file": "layers/ores/ochrum.png",
+      "mips": [
+        {
+          "factor": 1,
+          "file": "layers/ores/ochrum.png",
+          "width": 5018,
+          "height": 10036
+        },
+        {
+          "factor": 2,
+          "file": "mips/2/layers/ores/ochrum.png",
+          "width": 2509,
+          "height": 5018
+        },
+        {
+          "factor": 4,
+          "file": "mips/4/layers/ores/ochrum.png",
+          "width": 1255,
+          "height": 2509
+        },
+        {
+          "factor": 8,
+          "file": "mips/8/layers/ores/ochrum.png",
+          "width": 628,
+          "height": 1255
+        },
+        {
+          "factor": 16,
+          "file": "mips/16/layers/ores/ochrum.png",
+          "width": 314,
+          "height": 628
+        },
+        {
+          "factor": 32,
+          "file": "mips/32/layers/ores/ochrum.png",
+          "width": 157,
+          "height": 314
+        }
+      ],
+      "sample_file": "samples/ores/ochrum_u8.png"
+    },
+    {
+      "name": "ore:calcite",
+      "ore": "calcite",
+      "kind": "ore",
+      "file": "layers/ores/calcite.png",
+      "mips": [
+        {
+          "factor": 1,
+          "file": "layers/ores/calcite.png",
+          "width": 5018,
+          "height": 10036
+        },
+        {
+          "factor": 2,
+          "file": "mips/2/layers/ores/calcite.png",
+          "width": 2509,
+          "height": 5018
+        },
+        {
+          "factor": 4,
+          "file": "mips/4/layers/ores/calcite.png",
+          "width": 1255,
+          "height": 2509
+        },
+        {
+          "factor": 8,
+          "file": "mips/8/layers/ores/calcite.png",
+          "width": 628,
+          "height": 1255
+        },
+        {
+          "factor": 16,
+          "file": "mips/16/layers/ores/calcite.png",
+          "width": 314,
+          "height": 628
+        },
+        {
+          "factor": 32,
+          "file": "mips/32/layers/ores/calcite.png",
+          "width": 157,
+          "height": 314
+        }
+      ],
+      "sample_file": "samples/ores/calcite_u8.png"
+    },
+    {
+      "name": "ore:scoria",
+      "ore": "scoria",
+      "kind": "ore",
+      "file": "layers/ores/scoria.png",
+      "mips": [
+        {
+          "factor": 1,
+          "file": "layers/ores/scoria.png",
+          "width": 5018,
+          "height": 10036
+        },
+        {
+          "factor": 2,
+          "file": "mips/2/layers/ores/scoria.png",
+          "width": 2509,
+          "height": 5018
+        },
+        {
+          "factor": 4,
+          "file": "mips/4/layers/ores/scoria.png",
+          "width": 1255,
+          "height": 2509
+        },
+        {
+          "factor": 8,
+          "file": "mips/8/layers/ores/scoria.png",
+          "width": 628,
+          "height": 1255
+        },
+        {
+          "factor": 16,
+          "file": "mips/16/layers/ores/scoria.png",
+          "width": 314,
+          "height": 628
+        },
+        {
+          "factor": 32,
+          "file": "mips/32/layers/ores/scoria.png",
+          "width": 157,
+          "height": 314
+        }
+      ],
+      "sample_file": "samples/ores/scoria_u8.png"
+    },
+    {
+      "name": "ore:tuff",
+      "ore": "tuff",
+      "kind": "ore",
+      "file": "layers/ores/tuff.png",
+      "mips": [
+        {
+          "factor": 1,
+          "file": "layers/ores/tuff.png",
+          "width": 5018,
+          "height": 10036
+        },
+        {
+          "factor": 2,
+          "file": "mips/2/layers/ores/tuff.png",
+          "width": 2509,
+          "height": 5018
+        },
+        {
+          "factor": 4,
+          "file": "mips/4/layers/ores/tuff.png",
+          "width": 1255,
+          "height": 2509
+        },
+        {
+          "factor": 8,
+          "file": "mips/8/layers/ores/tuff.png",
+          "width": 628,
+          "height": 1255
+        },
+        {
+          "factor": 16,
+          "file": "mips/16/layers/ores/tuff.png",
+          "width": 314,
+          "height": 628
+        },
+        {
+          "factor": 32,
+          "file": "mips/32/layers/ores/tuff.png",
+          "width": 157,
+          "height": 314
+        }
+      ],
+      "sample_file": "samples/ores/tuff_u8.png"
+    },
+    {
+      "name": "ore:crimsite",
+      "ore": "crimsite",
+      "kind": "ore",
+      "file": "layers/ores/crimsite.png",
+      "mips": [
+        {
+          "factor": 1,
+          "file": "layers/ores/crimsite.png",
+          "width": 5018,
+          "height": 10036
+        },
+        {
+          "factor": 2,
+          "file": "mips/2/layers/ores/crimsite.png",
+          "width": 2509,
+          "height": 5018
+        },
+        {
+          "factor": 4,
+          "file": "mips/4/layers/ores/crimsite.png",
+          "width": 1255,
+          "height": 2509
+        },
+        {
+          "factor": 8,
+          "file": "mips/8/layers/ores/crimsite.png",
+          "width": 628,
+          "height": 1255
+        },
+        {
+          "factor": 16,
+          "file": "mips/16/layers/ores/crimsite.png",
+          "width": 314,
+          "height": 628
+        },
+        {
+          "factor": 32,
+          "file": "mips/32/layers/ores/crimsite.png",
+          "width": 157,
+          "height": 314
+        }
+      ],
+      "sample_file": "samples/ores/crimsite_u8.png"
+    },
+    {
+      "name": "ore:limestone",
+      "ore": "limestone",
+      "kind": "ore",
+      "file": "layers/ores/limestone.png",
+      "mips": [
+        {
+          "factor": 1,
+          "file": "layers/ores/limestone.png",
+          "width": 5018,
+          "height": 10036
+        },
+        {
+          "factor": 2,
+          "file": "mips/2/layers/ores/limestone.png",
+          "width": 2509,
+          "height": 5018
+        },
+        {
+          "factor": 4,
+          "file": "mips/4/layers/ores/limestone.png",
+          "width": 1255,
+          "height": 2509
+        },
+        {
+          "factor": 8,
+          "file": "mips/8/layers/ores/limestone.png",
+          "width": 628,
+          "height": 1255
+        },
+        {
+          "factor": 16,
+          "file": "mips/16/layers/ores/limestone.png",
+          "width": 314,
+          "height": 628
+        },
+        {
+          "factor": 32,
+          "file": "mips/32/layers/ores/limestone.png",
+          "width": 157,
+          "height": 314
+        }
+      ],
+      "sample_file": "samples/ores/limestone_u8.png"
+    },
+    {
+      "name": "ore:asurine",
+      "ore": "asurine",
+      "kind": "ore",
+      "file": "layers/ores/asurine.png",
+      "mips": [
+        {
+          "factor": 1,
+          "file": "layers/ores/asurine.png",
+          "width": 5018,
+          "height": 10036
+        },
+        {
+          "factor": 2,
+          "file": "mips/2/layers/ores/asurine.png",
+          "width": 2509,
+          "height": 5018
+        },
+        {
+          "factor": 4,
+          "file": "mips/4/layers/ores/asurine.png",
+          "width": 1255,
+          "height": 2509
+        },
+        {
+          "factor": 8,
+          "file": "mips/8/layers/ores/asurine.png",
+          "width": 628,
+          "height": 1255
+        },
+        {
+          "factor": 16,
+          "file": "mips/16/layers/ores/asurine.png",
+          "width": 314,
+          "height": 628
+        },
+        {
+          "factor": 32,
+          "file": "mips/32/layers/ores/asurine.png",
+          "width": 157,
+          "height": 314
+        }
+      ],
+      "sample_file": "samples/ores/asurine_u8.png"
+    },
+    {
+      "name": "ore:veridium",
+      "ore": "veridium",
+      "kind": "ore",
+      "file": "layers/ores/veridium.png",
+      "mips": [
+        {
+          "factor": 1,
+          "file": "layers/ores/veridium.png",
+          "width": 5018,
+          "height": 10036
+        },
+        {
+          "factor": 2,
+          "file": "mips/2/layers/ores/veridium.png",
+          "width": 2509,
+          "height": 5018
+        },
+        {
+          "factor": 4,
+          "file": "mips/4/layers/ores/veridium.png",
+          "width": 1255,
+          "height": 2509
+        },
+        {
+          "factor": 8,
+          "file": "mips/8/layers/ores/veridium.png",
+          "width": 628,
+          "height": 1255
+        },
+        {
+          "factor": 16,
+          "file": "mips/16/layers/ores/veridium.png",
+          "width": 314,
+          "height": 628
+        },
+        {
+          "factor": 32,
+          "file": "mips/32/layers/ores/veridium.png",
+          "width": 157,
+          "height": 314
+        }
+      ],
+      "sample_file": "samples/ores/veridium_u8.png"
+    },
+    {
+      "name": "ore:smooth_basalt",
+      "ore": "smooth_basalt",
+      "kind": "ore",
+      "file": "layers/ores/smooth_basalt.png",
+      "mips": [
+        {
+          "factor": 1,
+          "file": "layers/ores/smooth_basalt.png",
+          "width": 5018,
+          "height": 10036
+        },
+        {
+          "factor": 2,
+          "file": "mips/2/layers/ores/smooth_basalt.png",
+          "width": 2509,
+          "height": 5018
+        },
+        {
+          "factor": 4,
+          "file": "mips/4/layers/ores/smooth_basalt.png",
+          "width": 1255,
+          "height": 2509
+        },
+        {
+          "factor": 8,
+          "file": "mips/8/layers/ores/smooth_basalt.png",
+          "width": 628,
+          "height": 1255
+        },
+        {
+          "factor": 16,
+          "file": "mips/16/layers/ores/smooth_basalt.png",
+          "width": 314,
+          "height": 628
+        },
+        {
+          "factor": 32,
+          "file": "mips/32/layers/ores/smooth_basalt.png",
+          "width": 157,
+          "height": 314
+        }
+      ],
+      "sample_file": "samples/ores/smooth_basalt_u8.png"
+    }
+  ]
+}
