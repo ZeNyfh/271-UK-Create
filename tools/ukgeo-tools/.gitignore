@@ -7,3 +7,9 @@ build/
 *.egg-info/
 uk_world_data*/
 *.png
+
+# Keep the generated hover preview website data publishable on GitHub Pages.
+!uk_world_data_gb/
+uk_world_data_gb/*
+!uk_world_data_gb/hoverpreviews/
+!uk_world_data_gb/hoverpreviews/**
