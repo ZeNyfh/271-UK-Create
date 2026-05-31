@@ -118,8 +118,9 @@ def make_ore_tiles(
     out: Path = typer.Option(..., "--out"),
     debug_geotiff_dir: Path | None = typer.Option(None, "--debug-geotiff-dir"),
     jobs: int = typer.Option(1, "--jobs", help="Ore/mineral layers to process in parallel."),
+    only_ore: list[str] | None = typer.Option(None, "--only-ore", help="Generate only the named ore layer. Repeat for multiple ores."),
 ) -> None:
-    make_ore_tiles_impl(bgs=bgs, rules=rules, manifest_path=manifest, out=out, debug_geotiff_dir=debug_geotiff_dir, jobs=jobs)
+    make_ore_tiles_impl(bgs=bgs, rules=rules, manifest_path=manifest, out=out, debug_geotiff_dir=debug_geotiff_dir, jobs=jobs, only_ores=only_ore)
 
 
 @app.command("apply-ore-image-overlay")
@@ -132,7 +133,7 @@ def apply_ore_image_overlay(
     red_min: int = typer.Option(180, "--red-min"),
     green_max: int = typer.Option(120, "--green-max"),
     blue_max: int = typer.Option(120, "--blue-max"),
-    fit: str = typer.Option("cover", "--fit", help="Aspect-preserving placement: cover or contain."),
+    fit: str = typer.Option("outline", "--fit", help="Placement: outline, cover, or contain."),
 ) -> None:
     apply_ore_image_overlay_impl(
         image=image,

@@ -12,7 +12,9 @@ CLEAN="${CLEAN:-1}"
 DATA_DIR="${DATA_DIR:-$REPO_ROOT/data}"
 IRON_OVERLAY_IMAGE="${IRON_OVERLAY_IMAGE:-$DATA_DIR/uk_iron_ore_reference_overlay.svg}"
 IRON_OVERLAY_SCORE="${IRON_OVERLAY_SCORE:-255}"
-IRON_OVERLAY_FIT="${IRON_OVERLAY_FIT:-cover}"
+IRON_OVERLAY_FIT="${IRON_OVERLAY_FIT:-outline}"
+BGS_GEOLOGY_ZIP="${BGS_GEOLOGY_ZIP:-$DATA_DIR/BGS_Geology_625k_bedrock_gpkg.zip}"
+ORE_RULES="${ORE_RULES:-$UKGEO_TOOLS_DIR/examples/ore_rules_625k.yml}"
 
 if [[ -x "$UKGEO_TOOLS_DIR/.venv/bin/ukgeo" ]]; then
   PYTHON="$UKGEO_TOOLS_DIR/.venv/bin/python"
@@ -21,6 +23,16 @@ else
 fi
 
 if [[ -n "$IRON_OVERLAY_IMAGE" && -f "$IRON_OVERLAY_IMAGE" && -f "$ROOT/manifest.json" ]]; then
+  if [[ -f "$BGS_GEOLOGY_ZIP" && -f "$ORE_RULES" ]]; then
+    PYTHONPATH="$UKGEO_TOOLS_DIR/src${PYTHONPATH:+:$PYTHONPATH}" "$PYTHON" -m ukgeo.cli make-ore-tiles \
+      --bgs "$BGS_GEOLOGY_ZIP" \
+      --rules "$ORE_RULES" \
+      --only-ore iron \
+      --manifest "$ROOT/manifest.json" \
+      --out "$ROOT"
+  else
+    echo "Could not reset iron from geology before overlay; missing $BGS_GEOLOGY_ZIP or $ORE_RULES" >&2
+  fi
   PYTHONPATH="$UKGEO_TOOLS_DIR/src${PYTHONPATH:+:$PYTHONPATH}" "$PYTHON" -m ukgeo.cli apply-ore-image-overlay \
     --image "$IRON_OVERLAY_IMAGE" \
     --ore iron \

@@ -41,6 +41,8 @@ The full GB rebuild script uses the repository defaults, where Minecraft `(0,0)`
 
 For the national BGS 625k GeoPackage, use the 625k rules. These include the normal ore layers plus geology block layers such as granite, limestone, calcite, tuff, and optional Create stone types. For detailed whole-region ironstone belts, prefer the full BGS Geology 50k package with `examples/ore_rules.yml`: the 50k bedrock and linear layers contain named ironstone formations/members and iron-rich lithologies that the more general 625k overview may not retain.
 
+The full GB rebuild also max-merges the checked-in `../../data/uk_iron_ore_reference_overlay.svg` red vector mask into the generated iron ore tiles. By default the overlay is registered from the SVG's blue UK outline to the generated dataset's valid land/height bounds. Set `IRON_OVERLAY_IMAGE=` to disable that overlay.
+
 ```bash
 .venv/bin/ukgeo make-ore-tiles \
   --bgs ../../data/BGS_Geology_50k_GeoPackage.zip \

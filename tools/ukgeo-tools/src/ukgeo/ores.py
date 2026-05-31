@@ -29,6 +29,7 @@ def make_ore_tiles(
     out: Path,
     debug_geotiff_dir: Path | None = None,
     jobs: int = 1,
+    only_ores: list[str] | None = None,
 ) -> None:
     manifest = read_manifest(manifest_path)
     geo = manifest["georeferencing"]
@@ -40,6 +41,9 @@ def make_ore_tiles(
         config = yaml.safe_load(fh) or {}
     configured_layers = config.get("ores") or {}
     layer_names = list(dict.fromkeys([*ORE_NAMES, *configured_layers.keys()]))
+    if only_ores:
+        requested = set(only_ores)
+        layer_names = [name for name in layer_names if name in requested]
     manifest.setdefault("ore_layers", {})
     for name in layer_names:
         manifest["ore_layers"].setdefault(name, default_u8_layer(f"ores/{name}"))
