@@ -46,7 +46,7 @@ fi
 
 iron_input_hash() {
   {
-    printf 'version=%s\n' "2"
+    printf 'version=%s\n' "3"
     printf 'bgs_path=%s\n' "$BGS_GEOLOGY_ZIP"
     if [[ -f "$BGS_GEOLOGY_ZIP" ]]; then
       sha256sum "$BGS_GEOLOGY_ZIP"

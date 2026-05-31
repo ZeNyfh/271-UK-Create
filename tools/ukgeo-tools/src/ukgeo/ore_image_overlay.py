@@ -51,7 +51,7 @@ def apply_ore_image_overlay(
         depth,
         fit,
         source_bbox=outline_bbox,
-        target_bbox=_height_valid_bbox(out, manifest),
+        target_bbox=_uk_reference_target_bbox(manifest) or _height_valid_bbox(out, manifest),
     )
 
     manifest.setdefault("ore_layers", {}).setdefault(ore, default_u8_layer(f"ores/{ore}"))
@@ -324,3 +324,43 @@ def _height_valid_bbox(root: Path, manifest: dict) -> BBox | None:
     if not xs or not zs:
         return None
     return float(min(xs)), float(min(zs)), float(max(xs)), float(max(zs))
+
+
+def _uk_reference_target_bbox(manifest: dict) -> BBox | None:
+    """Return the map frame used by the supplied historic UK iron reference SVG.
+
+    The SVG's blue outline is a mainland/near-island UK reference drawing, not a
+    full valid-height extent. Matching it to all non-nodata height cells uses
+    far northern/padded islands as the vertical frame and leaves the iron
+    districts too far north. These BNG bounds match the reference-map frame more
+    closely while keeping the transform source-data driven and reproducible.
+    """
+    geo = manifest.get("georeferencing") or {}
+    world = manifest.get("world") or {}
+    if str(geo.get("crs", "")).upper() != "EPSG:27700":
+        return None
+    required = ("bng_min_easting", "bng_max_easting", "bng_min_northing", "bng_max_northing")
+    if any(geo.get(key) is None for key in required):
+        return None
+    width = float(world.get("width", 0))
+    depth = float(world.get("depth", 0))
+    if width <= 0 or depth <= 0:
+        return None
+
+    min_e = float(geo["bng_min_easting"])
+    max_e = float(geo["bng_max_easting"])
+    min_n = float(geo["bng_min_northing"])
+    max_n = float(geo["bng_max_northing"])
+
+    def x_from_easting(easting: float) -> float:
+        return (easting - min_e) * width / (max_e - min_e)
+
+    def z_from_northing(northing: float) -> float:
+        return (max_n - northing) * depth / (max_n - min_n)
+
+    return (
+        x_from_easting(39_000.0),
+        z_from_northing(1_001_000.0),
+        x_from_easting(650_000.0),
+        z_from_northing(5_000.0),
+    )

@@ -72,3 +72,4 @@ tools/ukgeo-tools/uk_world_data_gb/*
 # Local GitHub Pages staging output
 _site/
 *.gz
+/tools/ukgeo-tools/uk_world_data_gb/ores/iron
