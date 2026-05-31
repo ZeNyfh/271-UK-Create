@@ -39,6 +39,7 @@ tools/ukgeo-tools/**/*.gpkg
 
 # Large source GIS/archive files. Existing tracked LFS data remains tracked.
 *.zip
+*.gz
 *.tar.gz
 *.rar
 *.7z
