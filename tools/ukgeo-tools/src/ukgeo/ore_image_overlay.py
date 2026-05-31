@@ -24,7 +24,7 @@ def apply_ore_image_overlay(
     manifest_path: Path,
     out: Path,
     ore: str = "iron",
-    score: int = 255,
+    score: int = 180,
     red_min: int = 180,
     green_max: int = 120,
     blue_max: int = 120,
@@ -52,7 +52,9 @@ def apply_ore_image_overlay(
         fit,
         source_bbox=outline_bbox,
         target_bbox=_uk_reference_target_bbox(manifest) or _height_valid_bbox(out, manifest),
+        control_matrix=_uk_reference_control_matrix(manifest, red_mask.shape[1], red_mask.shape[0]),
     )
+    inverse_matrix = np.asarray(placement.get("inverse_matrix"), dtype=np.float64) if "inverse_matrix" in placement else None
 
     manifest.setdefault("ore_layers", {}).setdefault(ore, default_u8_layer(f"ores/{ore}"))
     layer = manifest["ore_layers"][ore]
@@ -64,22 +66,41 @@ def apply_ore_image_overlay(
     for tile_z in tqdm(range(tiles_z), desc=f"{ore} image overlay rows"):
         z = tile_z * tile_size + np.arange(tile_size)
         valid_z = z < depth
-        image_y_float = (z + 0.5 - offset_z) / scale_z
-        valid_z &= (image_y_float >= 0) & (image_y_float < red_mask.shape[0])
-        image_y = np.clip(image_y_float.astype(np.int64), 0, red_mask.shape[0] - 1)
+        if inverse_matrix is None:
+            image_y_float = (z + 0.5 - offset_z) / scale_z
+            valid_z &= (image_y_float >= 0) & (image_y_float < red_mask.shape[0])
+            image_y = np.clip(image_y_float.astype(np.int64), 0, red_mask.shape[0] - 1)
         for tile_x in range(tiles_x):
             x = tile_x * tile_size + np.arange(tile_size)
             valid_x = x < width
-            if not np.any(valid_x) or not np.any(valid_z):
-                continue
-            image_x_float = (x + 0.5 - offset_x) / scale_x
-            valid_x &= (image_x_float >= 0) & (image_x_float < red_mask.shape[1])
-            if not np.any(valid_x):
-                continue
-            image_x = np.clip(image_x_float.astype(np.int64), 0, red_mask.shape[1] - 1)
-            mask = red_mask[np.ix_(image_y, image_x)]
-            mask &= valid_z[:, None]
-            mask &= valid_x[None, :]
+            if inverse_matrix is None:
+                if not np.any(valid_x) or not np.any(valid_z):
+                    continue
+                image_x_float = (x + 0.5 - offset_x) / scale_x
+                valid_x &= (image_x_float >= 0) & (image_x_float < red_mask.shape[1])
+                if not np.any(valid_x):
+                    continue
+                image_x = np.clip(image_x_float.astype(np.int64), 0, red_mask.shape[1] - 1)
+                mask = red_mask[np.ix_(image_y, image_x)]
+                mask &= valid_z[:, None]
+                mask &= valid_x[None, :]
+            else:
+                if not np.any(valid_x) or not np.any(valid_z):
+                    continue
+                grid_x, grid_z = np.meshgrid(x + 0.5, z + 0.5)
+                image_x_float = inverse_matrix[0, 0] * grid_x + inverse_matrix[0, 1] * grid_z + inverse_matrix[0, 2]
+                image_y_float = inverse_matrix[1, 0] * grid_x + inverse_matrix[1, 1] * grid_z + inverse_matrix[1, 2]
+                valid = (
+                    valid_z[:, None]
+                    & valid_x[None, :]
+                    & (image_x_float >= 0)
+                    & (image_x_float < red_mask.shape[1])
+                    & (image_y_float >= 0)
+                    & (image_y_float < red_mask.shape[0])
+                )
+                image_x = np.clip(image_x_float.astype(np.int64), 0, red_mask.shape[1] - 1)
+                image_y = np.clip(image_y_float.astype(np.int64), 0, red_mask.shape[0] - 1)
+                mask = red_mask[image_y, image_x] & valid
             if not np.any(mask):
                 continue
 
@@ -262,7 +283,22 @@ def _overlay_placement(
     *,
     source_bbox: BBox | None = None,
     target_bbox: BBox | None = None,
+    control_matrix: np.ndarray | None = None,
 ) -> tuple[float, float, float, float, dict[str, float | str]]:
+    if fit == "outline" and control_matrix is not None:
+        matrix_3x3 = np.vstack([control_matrix, [0.0, 0.0, 1.0]])
+        inverse = np.linalg.inv(matrix_3x3)[:2, :]
+        return (
+            1.0,
+            1.0,
+            0.0,
+            0.0,
+            {
+                "mode": "control_points",
+                "matrix": control_matrix.tolist(),
+                "inverse_matrix": inverse.tolist(),
+            },
+        )
     if fit == "outline" and source_bbox and target_bbox:
         src_min_x, src_min_y, src_max_x, src_max_y = source_bbox
         dst_min_x, dst_min_z, dst_max_x, dst_max_z = target_bbox
@@ -364,3 +400,51 @@ def _uk_reference_target_bbox(manifest: dict) -> BBox | None:
         x_from_easting(650_000.0),
         z_from_northing(5_000.0),
     )
+
+
+def _uk_reference_control_matrix(manifest: dict, source_width: int, source_height: int) -> np.ndarray | None:
+    """Fit the supplied UK iron SVG to named-place BNG control points."""
+    if abs(source_width - 900) > 2 or abs(source_height - 1044) > 2:
+        return None
+    geo = manifest.get("georeferencing") or {}
+    world = manifest.get("world") or {}
+    if str(geo.get("crs", "")).upper() != "EPSG:27700":
+        return None
+    required = ("bng_min_easting", "bng_max_easting", "bng_min_northing", "bng_max_northing")
+    if any(geo.get(key) is None for key in required):
+        return None
+    width = float(world.get("width", 0))
+    depth = float(world.get("depth", 0))
+    if width <= 0 or depth <= 0:
+        return None
+
+    min_e = float(geo["bng_min_easting"])
+    max_e = float(geo["bng_max_easting"])
+    min_n = float(geo["bng_min_northing"])
+    max_n = float(geo["bng_max_northing"])
+
+    def target(easting: float, northing: float) -> tuple[float, float]:
+        return (
+            (easting - min_e) * width / (max_e - min_e),
+            (max_n - northing) * depth / (max_n - min_n),
+        )
+
+    # Source coordinates are measured in the checked-in SVG viewBox. Targets are
+    # approximate BNG locations for the named iron districts on the reference
+    # image. The least-squares affine fit keeps the whole overlay coherent while
+    # correcting the residual scale/skew visible in the bbox-only placement.
+    control_points = [
+        ((337.0, 520.0), target(266_000.0, 483_000.0)),  # Ramsey, Isle of Man
+        ((418.0, 495.0), target(301_000.0, 514_000.0)),  # Cleator Moor/Egremont
+        ((433.0, 534.0), target(326_000.0, 482_000.0)),  # Millom/Furness
+        ((610.0, 500.0), target(460_000.0, 516_000.0)),  # Cleveland
+        ((773.0, 667.0), target(612_000.0, 342_000.0)),  # Weybourne
+        ((705.0, 895.0), target(540_000.0, 135_000.0)),  # Low/High Weald
+        ((291.0, 984.0), target(176_000.0, 54_000.0)),  # Perran
+        ((352.0, 973.0), target(201_000.0, 68_000.0)),  # St Austell
+        ((420.0, 985.0), target(292_000.0, 72_000.0)),  # Brixham
+        ((638.0, 590.0), target(492_000.0, 395_000.0)),  # Frodingham
+    ]
+    source = np.asarray([[x, y, 1.0] for (x, y), _ in control_points], dtype=np.float64)
+    destination = np.asarray([point for _, point in control_points], dtype=np.float64)
+    return np.linalg.lstsq(source, destination, rcond=None)[0].T

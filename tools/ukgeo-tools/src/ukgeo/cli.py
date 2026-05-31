@@ -129,7 +129,7 @@ def apply_ore_image_overlay(
     manifest: Path = typer.Option(..., "--manifest"),
     out: Path = typer.Option(..., "--out"),
     ore: str = typer.Option("iron", "--ore"),
-    score: int = typer.Option(255, "--score"),
+    score: int = typer.Option(180, "--score"),
     red_min: int = typer.Option(180, "--red-min"),
     green_max: int = typer.Option(120, "--green-max"),
     blue_max: int = typer.Option(120, "--blue-max"),

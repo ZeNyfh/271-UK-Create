@@ -12,7 +12,7 @@ CLEAN="${CLEAN:-1}"
 HOVERPREVIEW_GPU="${HOVERPREVIEW_GPU:-auto}"
 DATA_DIR="${DATA_DIR:-$REPO_ROOT/data}"
 IRON_OVERLAY_IMAGE="${IRON_OVERLAY_IMAGE:-$DATA_DIR/uk_iron_ore_reference_overlay.svg}"
-IRON_OVERLAY_SCORE="${IRON_OVERLAY_SCORE:-255}"
+IRON_OVERLAY_SCORE="${IRON_OVERLAY_SCORE:-180}"
 IRON_OVERLAY_FIT="${IRON_OVERLAY_FIT:-outline}"
 BGS_GEOLOGY_ZIP="${BGS_GEOLOGY_ZIP:-$DATA_DIR/BGS_Geology_625k_bedrock_gpkg.zip}"
 ORE_RULES="${ORE_RULES:-$UKGEO_TOOLS_DIR/examples/ore_rules_625k.yml}"
@@ -46,7 +46,7 @@ fi
 
 iron_input_hash() {
   {
-    printf 'version=%s\n' "3"
+    printf 'version=%s\n' "5"
     printf 'bgs_path=%s\n' "$BGS_GEOLOGY_ZIP"
     if [[ -f "$BGS_GEOLOGY_ZIP" ]]; then
       sha256sum "$BGS_GEOLOGY_ZIP"
