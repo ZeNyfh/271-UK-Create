@@ -51,7 +51,8 @@ tools/ukgeo-tools/**/*.gpkg
 *.tif
 *.tiff
 /tools/ukgeo-tools/.venv-hover-build
-/data
+/data/*
+!/data/uk_iron_ore_reference_overlay.png
 /tools/ukgeo-tools/dist-hover
 tools/ukgeo-tools/ukgeo-hover.exe
 tools/ukgeo-tools/ukgeo-hover-linux
