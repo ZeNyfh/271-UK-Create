@@ -1,10 +1,6 @@
 name: Regenerate hover previews
 
 on:
-  push:
-    branches: [main]
-    paths-ignore:
-      - "tools/ukgeo-tools/uk_world_data_gb/hoverpreviews/**"
   workflow_dispatch:
 
 permissions:
@@ -72,6 +68,7 @@ jobs:
         env:
           MAX_SIZE: "12000"
           CLEAN: "0"
+          HOVERPREVIEW_GPU: "0"
         run: |
           set -euo pipefail
           tools/hoverpreview-tools/generate_hover_previews.sh \
