@@ -1,0 +1,93 @@
+name: Regenerate hover previews
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "tools/ukgeo-tools/uk_world_data_gb/hoverpreviews/**"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: regenerate-hover-previews-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  regenerate:
+    runs-on: ubuntu-latest
+    if: github.actor != 'github-actions[bot]'
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            tools/ukgeo-tools/pyproject.toml
+            tools/hoverpreview-tools/pyproject.toml
+
+      - name: Install preview tooling
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install -e "tools/ukgeo-tools"
+          python -m pip install -e "tools/hoverpreview-tools"
+
+      - name: Verify source tile dataset
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="tools/ukgeo-tools/uk_world_data_gb"
+          missing=0
+          for path in \
+            "$root/manifest.json" \
+            "$root/height" \
+            "$root/ores"
+          do
+            if [[ ! -e "$path" ]]; then
+              echo "::error::Missing source dataset path: $path"
+              missing=1
+            fi
+          done
+          if [[ "$missing" == "1" ]]; then
+            cat <<'EOF'
+          The hover-preview exporter needs the raw uk_world_data_gb tile dataset,
+          not only the generated hoverpreviews folder. Commit/LFS the required
+          source tile dataset, or provide it to this workflow before generating
+          hover previews.
+          EOF
+            exit 1
+          fi
+
+      - name: Regenerate hover previews
+        shell: bash
+        env:
+          MAX_SIZE: "12000"
+          CLEAN: "1"
+        run: |
+          set -euo pipefail
+          tools/hoverpreview-tools/generate_hover_previews.sh \
+            tools/ukgeo-tools/uk_world_data_gb \
+            tools/ukgeo-tools/uk_world_data_gb/hoverpreviews
+
+      - name: Commit regenerated hover previews
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A -f tools/ukgeo-tools/uk_world_data_gb/hoverpreviews
+          if git diff --cached --quiet; then
+            echo "Hover previews are already up to date."
+            exit 0
+          fi
+          git commit -m "Regenerate hover previews"
+          git push
