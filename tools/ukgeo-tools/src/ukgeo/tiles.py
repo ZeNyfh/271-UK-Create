@@ -15,7 +15,7 @@ def write_r16_tile(path: Path, array: np.ndarray) -> None:
     if arr.shape != (512, 512):
         raise ValueError(f"height tile must be 512x512, got {arr.shape}")
     path.parent.mkdir(parents=True, exist_ok=True)
-    with gzip.open(path, "wb") as fh:
+    with gzip.open(path, "wb", compresslevel=1) as fh:
         fh.write(arr.tobytes(order="C"))
 
 
@@ -33,7 +33,7 @@ def write_u8_tile(path: Path, array: np.ndarray, tile_size: int = 512) -> None:
     if arr.shape != (tile_size, tile_size):
         raise ValueError(f"uint8 tile must be {tile_size}x{tile_size}, got {arr.shape}")
     path.parent.mkdir(parents=True, exist_ok=True)
-    with gzip.open(path, "wb") as fh:
+    with gzip.open(path, "wb", compresslevel=1) as fh:
         fh.write(arr.tobytes(order="C"))
 
 
