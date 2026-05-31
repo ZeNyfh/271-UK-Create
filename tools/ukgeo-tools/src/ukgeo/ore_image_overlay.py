@@ -340,7 +340,9 @@ def _scale_bbox(bbox: BBox, scale: float) -> BBox:
 # centre in viewBox pixels. The second BBox is a Minecraft-coordinate box in
 # (x1, z1, x2, z2) form; corner order does not matter.
 _UK_IRON_MINECRAFT_TARGET_BBOXES: tuple[tuple[str, BBox, BBox], ...] = (
-    ("Ramsey", (330.0, 512.0, 345.0, 530.0), (-7981.0, -5706.0, -8270.0, -5814.0)),
+    ("Ramsey", (336.0, 518.0, 341.0, 525.0), (-8127.0, -5630.0, -8127.0, -5630.0)),
+    ("Millom", (418.0, 525.0, 424.0, 532.0), (-5479.0, -5300.0, -5479.0, -5300.0)),
+    ("Furness", (429.0, 528.0, 437.0, 540.0), (-4902.0, -5149.0, -4902.0, -5149.0)),
     ("Perran", (286.0, 980.0, 304.0, 996.0), (-10515.0, 10635.0, -10461.0, 10346.0)),
     ("Brixham", (416.0, 979.0, 430.0, 991.0), (-6152.0, 11032.0, -6306.0, 10942.0)),
 )
