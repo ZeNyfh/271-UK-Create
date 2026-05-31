@@ -4,6 +4,7 @@ from pathlib import Path
 import gc
 import json
 import math
+import os
 import shutil
 from collections.abc import Callable
 from typing import Any
@@ -12,12 +13,13 @@ import numpy as np
 from PIL import Image
 
 from ukgeo.manifest import read_manifest
-from ukgeo.preview import ORE_COLORS, _height_image, _hex_color, _read_height_preview, _read_u8_preview, read_vegetation_preview
+from ukgeo.preview import ORE_COLORS, _height_image as _cpu_height_image, _hex_color, _read_height_preview, _read_u8_preview, read_vegetation_preview
 from ukgeo.tiles import HEIGHT_NODATA
 
 
 HOVER_PREVIEW_FORMAT = "ukgeo-hoverpreviews-v1"
 HOVER_PREVIEW_INDEX = "hover_manifest.json"
+_CUPY_MODULE: Any | None | bool = None
 
 
 def hover_preview_scale(manifest: dict[str, Any], max_size: int) -> tuple[int, int, int]:
@@ -192,6 +194,83 @@ def _height_browser_sample_image(values: np.ndarray) -> Image.Image:
     return Image.fromarray(rgb, mode="RGB")
 
 
+def _cupy() -> Any | None:
+    global _CUPY_MODULE
+    if _CUPY_MODULE is False:
+        return None
+    if _CUPY_MODULE is not None:
+        return _CUPY_MODULE
+    mode = os.environ.get("HOVERPREVIEW_GPU", "auto").strip().lower()
+    if mode in {"0", "false", "no", "off", "cpu"}:
+        _CUPY_MODULE = False
+        return None
+    try:
+        import cupy as cp
+
+        if cp.cuda.runtime.getDeviceCount() <= 0:
+            _CUPY_MODULE = False
+            return None
+    except Exception:
+        if mode in {"1", "true", "yes", "on", "gpu"}:
+            raise
+        _CUPY_MODULE = False
+        return None
+    _CUPY_MODULE = cp
+    return cp
+
+
+def _height_image(values: np.ndarray, style: str) -> Image.Image:
+    cp = _cupy()
+    if cp is None:
+        return _cpu_height_image(values, style)
+    try:
+        gpu_values = cp.asarray(values)
+        valid = gpu_values != HEIGHT_NODATA
+        if not bool(cp.any(valid).get()):
+            return Image.fromarray(np.zeros(values.shape, dtype=np.uint8), mode="L")
+        metres = gpu_values.astype(cp.float32) * cp.float32(0.1)
+        valid_values = metres[valid]
+        lo = cp.percentile(valid_values, 1)
+        hi = cp.percentile(valid_values, 99)
+        norm = cp.clip((metres - lo) / cp.maximum(cp.float32(1.0), hi - lo), 0.0, 1.0)
+        if style == "gray":
+            gray = (norm * 255).astype(cp.uint8)
+            gray[~valid] = 0
+            return Image.fromarray(cp.asnumpy(gray), mode="L")
+        rgb = _apply_ramp_gpu(
+            norm,
+            [
+                (0.00, (35, 85, 45)),
+                (0.35, (92, 139, 63)),
+                (0.58, (176, 160, 92)),
+                (0.78, (125, 96, 69)),
+                (1.00, (238, 238, 228)),
+            ],
+            cp,
+        )
+        rgb[~valid] = cp.asarray((16, 24, 32), dtype=cp.uint8)
+        return Image.fromarray(cp.asnumpy(rgb), mode="RGB")
+    except Exception:
+        if os.environ.get("HOVERPREVIEW_GPU", "auto").strip().lower() in {"1", "true", "yes", "on", "gpu"}:
+            raise
+        return _cpu_height_image(values, style)
+
+
+def _apply_ramp_gpu(norm: Any, stops: list[tuple[float, tuple[int, int, int]]], cp: Any) -> Any:
+    rgb = cp.zeros((*norm.shape, 3), dtype=cp.float32)
+    for index in range(len(stops) - 1):
+        start_pos, start_color = stops[index]
+        end_pos, end_color = stops[index + 1]
+        mask = (norm >= start_pos) & (norm <= end_pos)
+        t = (norm[mask] - start_pos) / max(0.0001, end_pos - start_pos)
+        start = cp.asarray(start_color, dtype=cp.float32)
+        end = cp.asarray(end_color, dtype=cp.float32)
+        rgb[mask] = start + (end - start) * t[:, None]
+    rgb[norm <= stops[0][0]] = stops[0][1]
+    rgb[norm >= stops[-1][0]] = stops[-1][1]
+    return cp.clip(rgb, 0, 255).astype(cp.uint8)
+
+
 def _minecraft_origin(manifest: dict[str, Any]) -> dict[str, Any]:
     world = manifest["world"]
     geo = manifest.get("georeferencing", {})
@@ -242,6 +321,24 @@ def _fit_image(image: Image.Image, size: tuple[int, int]) -> Image.Image:
 
 
 def _categorical_overlay_image(values: np.ndarray, classes: dict, *, alpha: int, transparent_zero: bool) -> Image.Image:
+    cp = _cupy()
+    if cp is not None:
+        try:
+            gpu_values = cp.asarray(values)
+            rgba = cp.zeros((*values.shape, 4), dtype=cp.uint8)
+            for raw_id, meta in classes.items():
+                class_id = int(raw_id)
+                if transparent_zero and class_id == 0:
+                    continue
+                mask = gpu_values == class_id
+                if not bool(cp.any(mask).get()):
+                    continue
+                rgba[mask, :3] = cp.asarray(_hex_color(meta.get("color", "#777777")), dtype=cp.uint8)
+                rgba[mask, 3] = alpha
+            return Image.fromarray(cp.asnumpy(rgba), mode="RGBA")
+        except Exception:
+            if os.environ.get("HOVERPREVIEW_GPU", "auto").strip().lower() in {"1", "true", "yes", "on", "gpu"}:
+                raise
     rgba = np.zeros((*values.shape, 4), dtype=np.uint8)
     for raw_id, meta in classes.items():
         class_id = int(raw_id)
@@ -256,6 +353,18 @@ def _categorical_overlay_image(values: np.ndarray, classes: dict, *, alpha: int,
 
 
 def _mask_overlay_image(values: np.ndarray, color_value: tuple[int, int, int]) -> Image.Image:
+    cp = _cupy()
+    if cp is not None:
+        try:
+            gpu_values = cp.asarray(values)
+            score = gpu_values.astype(cp.float32) / cp.float32(255.0)
+            rgba = cp.zeros((*values.shape, 4), dtype=cp.uint8)
+            rgba[:, :, :3] = cp.asarray(color_value, dtype=cp.uint8)
+            rgba[:, :, 3] = cp.clip(score * 240, 0, 240).astype(cp.uint8)
+            return Image.fromarray(cp.asnumpy(rgba), mode="RGBA")
+        except Exception:
+            if os.environ.get("HOVERPREVIEW_GPU", "auto").strip().lower() in {"1", "true", "yes", "on", "gpu"}:
+                raise
     score = values.astype(np.float32) / 255.0
     rgba = np.zeros((*values.shape, 4), dtype=np.uint8)
     rgba[:, :, :3] = np.array(color_value, dtype=np.uint8)
@@ -264,6 +373,19 @@ def _mask_overlay_image(values: np.ndarray, color_value: tuple[int, int, int]) -
 
 
 def _ore_overlay_image(values: np.ndarray, ore: str) -> Image.Image:
+    cp = _cupy()
+    if cp is not None:
+        try:
+            gpu_values = cp.asarray(values)
+            score = gpu_values.astype(cp.float32) / cp.float32(255.0)
+            color = cp.asarray(ORE_COLORS.get(ore, (255, 255, 255)), dtype=cp.uint8)
+            rgba = cp.zeros((*values.shape, 4), dtype=cp.uint8)
+            rgba[:, :, :3] = color
+            rgba[:, :, 3] = cp.clip(score * 216, 0, 230).astype(cp.uint8)
+            return Image.fromarray(cp.asnumpy(rgba), mode="RGBA")
+        except Exception:
+            if os.environ.get("HOVERPREVIEW_GPU", "auto").strip().lower() in {"1", "true", "yes", "on", "gpu"}:
+                raise
     score = values.astype(np.float32) / 255.0
     color = np.array(ORE_COLORS.get(ore, (255, 255, 255)), dtype=np.float32)
     rgba = np.zeros((*values.shape, 4), dtype=np.uint8)
