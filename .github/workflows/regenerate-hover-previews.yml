@@ -71,7 +71,7 @@ jobs:
         shell: bash
         env:
           MAX_SIZE: "12000"
-          CLEAN: "1"
+          CLEAN: "0"
         run: |
           set -euo pipefail
           tools/hoverpreview-tools/generate_hover_previews.sh \
