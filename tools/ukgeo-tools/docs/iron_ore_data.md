@@ -56,14 +56,17 @@ layer contents with:
 
 ## Additional reference-map raster overlay
 
-The repository also keeps `data/uk_iron_ore_reference_overlay.png`, a whole-map
+The repository also keeps `data/uk_iron_ore_reference_overlay.svg`, a whole-map
 red mask derived from the supplied historic iron reference image. It is not a
 set of generated point buffers: `ukgeo apply-ore-image-overlay` samples the red
-pixels as a raster mask across the manifest extent and max-merges them into the
-existing iron ore score tiles. `rebuild_uk_world_data_gb.sh`,
+vector shapes as a raster mask across the manifest extent and max-merges them
+into the existing iron ore score tiles. The overlay is placed with an
+aspect-preserving `cover` fit by default so the source SVG is not stretched into
+the taller British National Grid extent. `rebuild_uk_world_data_gb.sh`,
 `generate_previews.sh`, and `hoverpreview-tools/generate_hover_previews.sh`
 apply this overlay by default when the file exists. Set `IRON_OVERLAY_IMAGE=` to
-disable it.
+disable it, or set `IRON_OVERLAY_FIT=contain` if a future source image includes
+a known outer map frame that should be fully visible.
 
 ## If you need a separate mining-hazard polygon dataset
 

@@ -10,8 +10,9 @@ MAX_SIZE="${MAX_SIZE:-12000}"
 STYLE="${STYLE:-auto}"
 CLEAN="${CLEAN:-1}"
 DATA_DIR="${DATA_DIR:-$REPO_ROOT/data}"
-IRON_OVERLAY_IMAGE="${IRON_OVERLAY_IMAGE:-$DATA_DIR/uk_iron_ore_reference_overlay.png}"
+IRON_OVERLAY_IMAGE="${IRON_OVERLAY_IMAGE:-$DATA_DIR/uk_iron_ore_reference_overlay.svg}"
 IRON_OVERLAY_SCORE="${IRON_OVERLAY_SCORE:-255}"
+IRON_OVERLAY_FIT="${IRON_OVERLAY_FIT:-cover}"
 
 if [[ -x "$UKGEO_TOOLS_DIR/.venv/bin/ukgeo" ]]; then
   PYTHON="$UKGEO_TOOLS_DIR/.venv/bin/python"
@@ -24,6 +25,7 @@ if [[ -n "$IRON_OVERLAY_IMAGE" && -f "$IRON_OVERLAY_IMAGE" && -f "$ROOT/manifest
     --image "$IRON_OVERLAY_IMAGE" \
     --ore iron \
     --score "$IRON_OVERLAY_SCORE" \
+    --fit "$IRON_OVERLAY_FIT" \
     --manifest "$ROOT/manifest.json" \
     --out "$ROOT"
 fi

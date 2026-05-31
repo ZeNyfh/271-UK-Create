@@ -19,8 +19,9 @@ GOLD_OCCURRENCES="${GOLD_OCCURRENCES:-$DATA_DIR/bgs_gold_occurrences.geojson}"
 OSNI_DTM_ZIP="${OSNI_DTM_ZIP:-$DATA_DIR/osni_opendata_50m_dtm.zip}"
 RIVERS_ZIP="${RIVERS_ZIP:-$DATA_DIR/oprvrs_gpkg_gb.zip}"
 LANDCOVER_ZIP="${LANDCOVER_ZIP:-$DATA_DIR/FME_3564346A_1778997494261_5633.zip}"
-IRON_OVERLAY_IMAGE="${IRON_OVERLAY_IMAGE:-$DATA_DIR/uk_iron_ore_reference_overlay.png}"
+IRON_OVERLAY_IMAGE="${IRON_OVERLAY_IMAGE:-$DATA_DIR/uk_iron_ore_reference_overlay.svg}"
 IRON_OVERLAY_SCORE="${IRON_OVERLAY_SCORE:-255}"
+IRON_OVERLAY_FIT="${IRON_OVERLAY_FIT:-cover}"
 
 ORE_RULES="${ORE_RULES:-$SCRIPT_DIR/examples/ore_rules_625k.yml}"
 SURFACE_RULES="${SURFACE_RULES:-$SCRIPT_DIR/examples/surface_geology_625k.yml}"
@@ -109,6 +110,7 @@ if [[ -n "$IRON_OVERLAY_IMAGE" ]]; then
     --image "$IRON_OVERLAY_IMAGE" \
     --ore iron \
     --score "$IRON_OVERLAY_SCORE" \
+    --fit "$IRON_OVERLAY_FIT" \
     --manifest "$TMP_ROOT/manifest.json" \
     --out "$TMP_ROOT"
 fi
