@@ -23,6 +23,20 @@ directory. The export contains:
 - `samples/` images used by the website to report height and layer values under
   the pointer.
 
+## Optional GPU rendering
+
+The exporter can use an NVIDIA GPU for the large per-pixel preview rendering
+steps when CuPy is installed:
+
+```bash
+python -m pip install -e "./tools/hoverpreview-tools[gpu]"
+HOVERPREVIEW_GPU=1 ./tools/hoverpreview-tools/generate_hover_previews.sh
+```
+
+`HOVERPREVIEW_GPU=auto` is the default. It uses CuPy when available and falls
+back to CPU rendering otherwise. Tile reads and PNG encoding still run on the
+CPU, so the speedup depends on where the local run spends its time.
+
 ## Publish from the repository root
 
 This repository is configured for GitHub Pages served from the `main` branch at

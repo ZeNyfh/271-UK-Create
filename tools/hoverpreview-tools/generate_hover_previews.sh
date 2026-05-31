@@ -9,6 +9,7 @@ OUT_DIR="${2:-$ROOT/hoverpreviews}"
 MAX_SIZE="${MAX_SIZE:-12000}"
 STYLE="${STYLE:-auto}"
 CLEAN="${CLEAN:-1}"
+HOVERPREVIEW_GPU="${HOVERPREVIEW_GPU:-auto}"
 DATA_DIR="${DATA_DIR:-$REPO_ROOT/data}"
 IRON_OVERLAY_IMAGE="${IRON_OVERLAY_IMAGE:-$DATA_DIR/uk_iron_ore_reference_overlay.svg}"
 IRON_OVERLAY_SCORE="${IRON_OVERLAY_SCORE:-255}"
@@ -20,6 +21,25 @@ if [[ -x "$UKGEO_TOOLS_DIR/.venv/bin/ukgeo" ]]; then
   PYTHON="$UKGEO_TOOLS_DIR/.venv/bin/python"
 else
   PYTHON="${PYTHON:-python3}"
+fi
+
+export HOVERPREVIEW_GPU
+if [[ "$HOVERPREVIEW_GPU" != "0" && "$HOVERPREVIEW_GPU" != "false" && "$HOVERPREVIEW_GPU" != "off" ]]; then
+  if command -v nvidia-smi >/dev/null 2>&1; then
+    if "$PYTHON" -c "import cupy" >/dev/null 2>&1; then
+      echo "Hover preview GPU acceleration enabled with CuPy."
+    elif [[ "$HOVERPREVIEW_GPU" == "1" || "$HOVERPREVIEW_GPU" == "true" || "$HOVERPREVIEW_GPU" == "on" || "$HOVERPREVIEW_GPU" == "gpu" ]]; then
+      echo "HOVERPREVIEW_GPU=$HOVERPREVIEW_GPU requested, but CuPy is not installed." >&2
+      echo "Install with: $PYTHON -m pip install -e '$SCRIPT_DIR[gpu]'" >&2
+      exit 1
+    else
+      echo "NVIDIA GPU detected, but CuPy is not installed. Install with: $PYTHON -m pip install -e '$SCRIPT_DIR[gpu]'" >&2
+      echo "Continuing with CPU hover preview rendering." >&2
+    fi
+  elif [[ "$HOVERPREVIEW_GPU" == "1" || "$HOVERPREVIEW_GPU" == "true" || "$HOVERPREVIEW_GPU" == "on" || "$HOVERPREVIEW_GPU" == "gpu" ]]; then
+    echo "HOVERPREVIEW_GPU=$HOVERPREVIEW_GPU requested, but nvidia-smi was not found." >&2
+    exit 1
+  fi
 fi
 
 if [[ -n "$IRON_OVERLAY_IMAGE" && -f "$IRON_OVERLAY_IMAGE" && -f "$ROOT/manifest.json" ]]; then
