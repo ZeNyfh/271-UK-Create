@@ -132,6 +132,7 @@ def apply_ore_image_overlay(
     red_min: int = typer.Option(180, "--red-min"),
     green_max: int = typer.Option(120, "--green-max"),
     blue_max: int = typer.Option(120, "--blue-max"),
+    fit: str = typer.Option("cover", "--fit", help="Aspect-preserving placement: cover or contain."),
 ) -> None:
     apply_ore_image_overlay_impl(
         image=image,
@@ -142,6 +143,7 @@ def apply_ore_image_overlay(
         red_min=red_min,
         green_max=green_max,
         blue_max=blue_max,
+        fit=fit,
     )
 
 
