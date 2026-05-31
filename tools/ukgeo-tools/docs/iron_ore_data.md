@@ -21,10 +21,13 @@ includes entries such as:
 BGS also documents the Cleveland Ironstone Formation
 (<https://webapps.bgs.ac.uk/lexicon/lexicon.cfm?pub=CDI>) as a mapped
 lithostratigraphic unit with ironstone seams and lists the 1:50k map sheets on
-which it appears. The BGS Geology product page
-(<https://www.bgs.ac.uk/datasets/bgs-geology/>) states that the 50k dataset
-covers almost all of Great Britain and gives detailed local-to-regional geology,
-while linear features can include rock lines such as ironstone beds.
+which it appears. The BGS Geology 50K product page
+(<https://www.bgs.ac.uk/datasets/bgs-geology-50k-digmapgb/>) states that the
+50k dataset covers almost all of Great Britain and gives detailed
+local-to-regional geology, while linear features include mapped rock lines such
+as observed and inferred ironstone beds. The 50k linear layer should therefore
+be searched through `FEATURE`/`FEATURE_D` as well as the lithostratigraphic
+fields.
 
 ## Recommended input
 
@@ -40,19 +43,36 @@ ore layers:
   --jobs 4
 ```
 
-The checked-in `data/BGS_Geology_50k_GeoPackage_SAMPLE.zip` is a Git LFS pointer
-in this checkout, not an inspectable GeoPackage payload. Fetch LFS objects or
-provide the full BGS download before validating local layer contents with:
+The checked-in `data/BGS_Geology_50k_GeoPackage_SAMPLE.zip` may be either a
+Git LFS pointer in a partial checkout or the real BGS sample archive. In this
+checkout it is a real sample GeoPackage, but it only contains a tiny sample area
+and is not enough to validate national ironstone belts. Fetch LFS objects if the
+file is a pointer, or provide the full BGS download before validating national
+layer contents with:
 
 ```bash
 .venv/bin/ukgeo inspect-bgs ../../data/BGS_Geology_50k_GeoPackage.zip
 ```
+
+## Additional reference-map raster overlay
+
+The repository also keeps `data/uk_iron_ore_reference_overlay.png`, a whole-map
+red mask derived from the supplied historic iron reference image. It is not a
+set of generated point buffers: `ukgeo apply-ore-image-overlay` samples the red
+pixels as a raster mask across the manifest extent and max-merges them into the
+existing iron ore score tiles. `rebuild_uk_world_data_gb.sh`,
+`generate_previews.sh`, and `hoverpreview-tools/generate_hover_previews.sh`
+apply this overlay by default when the file exists. Set `IRON_OVERLAY_IMAGE=` to
+disable it.
 
 ## If you need a separate mining-hazard polygon dataset
 
 BGS's **Mining Hazard (not including coal) GB** dataset is a better whole-area
 fallback than manually digitised circles if the geology package is unavailable or
 if you specifically want legacy workings/hazard extents. BGS describes that
-product (<https://earthwise.bgs.ac.uk/index.php/OR/14/037_Technical_information>)
-as polygons derived from DiGMapGB-50 plus expert knowledge and literature, and
-its bedded-ore category includes iron ores.
+product
+(<https://www.bgs.ac.uk/geology-projects/hazard-and-resilience-modelling/mining-hazard-not-including-coal/>)
+as combining geology with literature and expert records, and its bedded-ore
+category includes ironstone. The technical notes
+(<https://earthwise.bgs.ac.uk/index.php/OR/15/039_Technical_information>)
+state that the underlying geology polygons are derived from BGS 1:50k DiGMapGB.

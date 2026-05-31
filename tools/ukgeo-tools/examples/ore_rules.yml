@@ -13,7 +13,7 @@ ores:
     # may also appear in the linear theme. Superficial deposits are retained
     # only for ferruginous/haematite surface expressions.
     layers: [gb_50k_bedrock_V9, gb_50k_linear_V9, gb_50k_superficial_V9]
-    fields: [LEX_D, LEX_RCS_D, RCS_D, RANK, LITH_D, NAME]
+    fields: [LEX_D, LEX_RCS_D, RCS_D, RANK, LITH_D, NAME, FEATURE, FEATURE_D, MINERAL_D, FLTNAME_D]
     maximum_score: 255
     keyword_groups:
       - score: 245
@@ -34,6 +34,8 @@ ores:
           - ferruginous sandstone and ironstone
           - ferruginous limestone and ironstone
           - mudstone and ironstone
+          - sandstone, limestone and ironstone
+          - ironstone bed
       - score: 220
         keywords: [ironstone, ferruginous, haematite, hematite, magnetite, siderite, sideritic]
   copper:

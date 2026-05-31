@@ -23,6 +23,7 @@ from .gold import harvest_gold_occurrences as harvest_gold_occurrences_impl
 from .gold import make_gold_occurrence_tiles as make_gold_occurrence_tiles_impl
 from .landmask import mask_height_to_bgs_land as mask_height_to_bgs_land_impl
 from .manifest import read_manifest
+from .ore_image_overlay import apply_ore_image_overlay as apply_ore_image_overlay_impl
 from .ores import make_ore_tiles as make_ore_tiles_impl
 from .preview import make_preview
 from .rivers import make_river_tiles as make_river_tiles_impl
@@ -119,6 +120,29 @@ def make_ore_tiles(
     jobs: int = typer.Option(1, "--jobs", help="Ore/mineral layers to process in parallel."),
 ) -> None:
     make_ore_tiles_impl(bgs=bgs, rules=rules, manifest_path=manifest, out=out, debug_geotiff_dir=debug_geotiff_dir, jobs=jobs)
+
+
+@app.command("apply-ore-image-overlay")
+def apply_ore_image_overlay(
+    image: Path = typer.Option(..., "--image"),
+    manifest: Path = typer.Option(..., "--manifest"),
+    out: Path = typer.Option(..., "--out"),
+    ore: str = typer.Option("iron", "--ore"),
+    score: int = typer.Option(255, "--score"),
+    red_min: int = typer.Option(180, "--red-min"),
+    green_max: int = typer.Option(120, "--green-max"),
+    blue_max: int = typer.Option(120, "--blue-max"),
+) -> None:
+    apply_ore_image_overlay_impl(
+        image=image,
+        manifest_path=manifest,
+        out=out,
+        ore=ore,
+        score=score,
+        red_min=red_min,
+        green_max=green_max,
+        blue_max=blue_max,
+    )
 
 
 @app.command("make-coal-resource-tiles")

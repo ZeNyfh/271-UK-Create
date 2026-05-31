@@ -8,7 +8,6 @@ from rich.progress import BarColumn, Progress, TaskProgressColumn, TextColumn, T
 
 from ukgeo.manifest import read_manifest
 
-from .hover import open_height_hover_map
 from .hover_previews import export_hover_previews, hover_preview_steps
 
 app = typer.Typer(no_args_is_help=True)
@@ -71,6 +70,8 @@ def open_cmd(
     """Open an interactive pre-rendered hover map."""
     try:
         from tkinter import TclError
+
+        from .hover import open_height_hover_map
 
         open_height_hover_map(root, max_size=max_size, style=style, previews_dir=previews)
     except ImportError as exc:

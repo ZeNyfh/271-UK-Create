@@ -19,6 +19,8 @@ GOLD_OCCURRENCES="${GOLD_OCCURRENCES:-$DATA_DIR/bgs_gold_occurrences.geojson}"
 OSNI_DTM_ZIP="${OSNI_DTM_ZIP:-$DATA_DIR/osni_opendata_50m_dtm.zip}"
 RIVERS_ZIP="${RIVERS_ZIP:-$DATA_DIR/oprvrs_gpkg_gb.zip}"
 LANDCOVER_ZIP="${LANDCOVER_ZIP:-$DATA_DIR/FME_3564346A_1778997494261_5633.zip}"
+IRON_OVERLAY_IMAGE="${IRON_OVERLAY_IMAGE:-$DATA_DIR/uk_iron_ore_reference_overlay.png}"
+IRON_OVERLAY_SCORE="${IRON_OVERLAY_SCORE:-255}"
 
 ORE_RULES="${ORE_RULES:-$SCRIPT_DIR/examples/ore_rules_625k.yml}"
 SURFACE_RULES="${SURFACE_RULES:-$SCRIPT_DIR/examples/surface_geology_625k.yml}"
@@ -39,6 +41,9 @@ require_file "$RIVERS_ZIP"
 require_file "$LANDCOVER_ZIP"
 require_file "$ORE_RULES"
 require_file "$SURFACE_RULES"
+if [[ -n "$IRON_OVERLAY_IMAGE" ]]; then
+  require_file "$IRON_OVERLAY_IMAGE"
+fi
 
 cd "$SCRIPT_DIR"
 
@@ -98,6 +103,15 @@ echo "Rebuilding GB runtime tiles into: $TMP_ROOT"
   --manifest "$TMP_ROOT/manifest.json" \
   --out "$TMP_ROOT" \
   --jobs "$ORE_JOBS"
+
+if [[ -n "$IRON_OVERLAY_IMAGE" ]]; then
+  "$UKGEO" apply-ore-image-overlay \
+    --image "$IRON_OVERLAY_IMAGE" \
+    --ore iron \
+    --score "$IRON_OVERLAY_SCORE" \
+    --manifest "$TMP_ROOT/manifest.json" \
+    --out "$TMP_ROOT"
+fi
 
 "$UKGEO" make-coal-resource-tiles \
   --coal-resources "$COAL_RESOURCES_ZIP" \
