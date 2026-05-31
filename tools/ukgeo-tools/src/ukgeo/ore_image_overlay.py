@@ -29,6 +29,7 @@ def apply_ore_image_overlay(
     green_max: int = 120,
     blue_max: int = 120,
     fit: str = "outline",
+    svg_raster_scale: int = 4,
 ) -> None:
     manifest = read_manifest(manifest_path)
     tile_size = int(manifest["tile_size"])
@@ -40,7 +41,14 @@ def apply_ore_image_overlay(
     tiles_x = math.ceil(padded_width / tile_size)
     tiles_z = math.ceil(padded_depth / tile_size)
 
-    red_mask, outline_bbox = _read_overlay_mask(image, red_min=red_min, green_max=green_max, blue_max=blue_max)
+    red_mask, outline_bbox = _read_overlay_mask(
+        image,
+        red_min=red_min,
+        green_max=green_max,
+        blue_max=blue_max,
+        manifest=manifest,
+        svg_raster_scale=svg_raster_scale,
+    )
     if not np.any(red_mask):
         console.print(f"[yellow]No red ore pixels found in {image}; {ore} tiles were unchanged.[/yellow]")
         return
@@ -123,6 +131,7 @@ def apply_ore_image_overlay(
         "green_max": int(green_max),
         "blue_max": int(blue_max),
         "fit": fit,
+        "svg_raster_scale": int(svg_raster_scale),
         "placement": placement,
         "note": "Image red shapes were max-merged into the existing ore score tiles.",
     }
@@ -133,9 +142,24 @@ def apply_ore_image_overlay(
     console.print(f"{ore}: applied image overlay from {image} to {changed_tiles} tiles")
 
 
-def _read_overlay_mask(path: Path, *, red_min: int, green_max: int, blue_max: int) -> tuple[np.ndarray, BBox | None]:
+def _read_overlay_mask(
+    path: Path,
+    *,
+    red_min: int,
+    green_max: int,
+    blue_max: int,
+    manifest: dict | None = None,
+    svg_raster_scale: int = 4,
+) -> tuple[np.ndarray, BBox | None]:
     if path.suffix.lower() == ".svg":
-        return _read_svg_overlay_mask(path, red_min=red_min, green_max=green_max, blue_max=blue_max)
+        return _read_svg_overlay_mask(
+            path,
+            red_min=red_min,
+            green_max=green_max,
+            blue_max=blue_max,
+            manifest=manifest,
+            svg_raster_scale=svg_raster_scale,
+        )
     pixels = np.asarray(Image.open(path).convert("RGBA"), dtype=np.uint8)
     red = pixels[:, :, 0].astype(np.uint16)
     green = pixels[:, :, 1].astype(np.uint16)
@@ -152,10 +176,33 @@ def _read_overlay_mask(path: Path, *, red_min: int, green_max: int, blue_max: in
     )
 
 
-def _read_svg_overlay_mask(path: Path, *, red_min: int, green_max: int, blue_max: int) -> tuple[np.ndarray, BBox | None]:
+def _read_svg_overlay_mask(
+    path: Path,
+    *,
+    red_min: int,
+    green_max: int,
+    blue_max: int,
+    manifest: dict | None = None,
+    svg_raster_scale: int = 4,
+) -> tuple[np.ndarray, BBox | None]:
     root = ET.parse(path).getroot()
     min_x, min_y, width, height = _svg_viewbox(root)
-    mask = Image.new("L", (max(1, math.ceil(width)), max(1, math.ceil(height))), 0)
+    base_source_width = max(1, math.ceil(width))
+    base_source_height = max(1, math.ceil(height))
+    raster_scale = max(1, int(svg_raster_scale))
+    source_width = base_source_width * raster_scale
+    source_height = base_source_height * raster_scale
+    # Used only for the few deposits where you supplied Minecraft-coordinate
+    # target boxes. If this SVG/manifest is not the checked UK iron reference,
+    # this remains None and the rasteriser behaves as before. The snapping math
+    # stays in the original SVG viewBox coordinate system; only the final mask is
+    # supersampled to remove chunky SVG-pixel edges on the generated map.
+    control_matrix = (
+        _uk_reference_control_matrix(manifest, base_source_width, base_source_height)
+        if manifest is not None
+        else None
+    )
+    mask = Image.new("L", (source_width, source_height), 0)
     draw = ImageDraw.Draw(mask)
     outline_points: list[tuple[float, float]] = []
     for element in root.iter():
@@ -168,10 +215,19 @@ def _read_svg_overlay_mask(path: Path, *, red_min: int, green_max: int, blue_max
         if _is_red_paint(fill, red_min=red_min, green_max=green_max, blue_max=blue_max):
             for polygon in polygons:
                 if len(polygon) >= 3:
-                    draw.polygon([(x - min_x, y - min_y) for x, y in polygon], fill=255)
+                    polygon = _snap_uk_iron_svg_polygon_to_minecraft(
+                        polygon,
+                        manifest=manifest,
+                        control_matrix=control_matrix,
+                    )
+                    draw.polygon([((x - min_x) * raster_scale, (y - min_y) * raster_scale) for x, y in polygon], fill=255)
         if _is_blue_paint(stroke):
             outline_points.extend(point for polygon in polygons for point in polygon)
-    outline_bbox = _points_bbox(outline_points, min_x=min_x, min_y=min_y) if outline_points else None
+    outline_bbox = (
+        _scale_bbox(_points_bbox(outline_points, min_x=min_x, min_y=min_y), raster_scale)
+        if outline_points
+        else None
+    )
     return np.asarray(mask, dtype=np.uint8) > 0, outline_bbox
 
 
@@ -272,6 +328,77 @@ def _points_bbox(points: list[tuple[float, float]], *, min_x: float, min_y: floa
     xs = [p[0] - min_x for p in points]
     ys = [p[1] - min_y for p in points]
     return min(xs), min(ys), max(xs), max(ys)
+
+
+def _scale_bbox(bbox: BBox, scale: float) -> BBox:
+    min_x, min_y, max_x, max_y = bbox
+    return min_x * scale, min_y * scale, max_x * scale, max_y * scale
+
+
+# Exact local targets from in-game Minecraft X/Z boxes supplied for the checked
+# UK iron reference SVG. The first BBox identifies the source SVG patch by its
+# centre in viewBox pixels. The second BBox is a Minecraft-coordinate box in
+# (x1, z1, x2, z2) form; corner order does not matter.
+_UK_IRON_MINECRAFT_TARGET_BBOXES: tuple[tuple[str, BBox, BBox], ...] = (
+    ("Ramsey", (330.0, 512.0, 345.0, 530.0), (-7981.0, -5706.0, -8270.0, -5814.0)),
+    ("Perran", (286.0, 980.0, 304.0, 996.0), (-10515.0, 10635.0, -10461.0, 10346.0)),
+    ("Brixham", (416.0, 979.0, 430.0, 991.0), (-6152.0, 11032.0, -6306.0, 10942.0)),
+)
+
+
+def _snap_uk_iron_svg_polygon_to_minecraft(
+    polygon: list[tuple[float, float]],
+    *,
+    manifest: dict | None,
+    control_matrix: np.ndarray | None,
+) -> list[tuple[float, float]]:
+    """Move selected SVG patches so their post-transform centres hit MC boxes.
+
+    This is deliberately local: the global UK affine transform and all unrelated
+    deposits stay unchanged. The conversion assumes the generated Minecraft map
+    uses the raster centre as Minecraft (0, 0), i.e. raster x = mc_x + width/2
+    and raster z = mc_z + depth/2, which matches the coordinate convention used
+    by the generated maps in this project.
+    """
+    if manifest is None or control_matrix is None or len(polygon) < 3:
+        return polygon
+    world = manifest.get("world") or {}
+    width = float(world.get("width", 0.0))
+    depth = float(world.get("depth", 0.0))
+    if width <= 0.0 or depth <= 0.0:
+        return polygon
+
+    src_bbox = _points_bbox(polygon, min_x=0.0, min_y=0.0)
+    src_cx = (src_bbox[0] + src_bbox[2]) / 2.0
+    src_cy = (src_bbox[1] + src_bbox[3]) / 2.0
+
+    for _name, selector_bbox, minecraft_bbox in _UK_IRON_MINECRAFT_TARGET_BBOXES:
+        sel_min_x, sel_min_y, sel_max_x, sel_max_y = selector_bbox
+        if not (sel_min_x <= src_cx <= sel_max_x and sel_min_y <= src_cy <= sel_max_y):
+            continue
+
+        mc_x1, mc_z1, mc_x2, mc_z2 = minecraft_bbox
+        desired_mc_x = (mc_x1 + mc_x2) / 2.0
+        desired_mc_z = (mc_z1 + mc_z2) / 2.0
+        desired_target = np.asarray(
+            [desired_mc_x + width / 2.0, desired_mc_z + depth / 2.0],
+            dtype=np.float64,
+        )
+
+        current_source = np.asarray([src_cx, src_cy, 1.0], dtype=np.float64)
+        current_target = control_matrix @ current_source
+        target_delta = desired_target - current_target
+
+        linear = control_matrix[:, :2]
+        try:
+            source_delta = np.linalg.solve(linear, target_delta)
+        except np.linalg.LinAlgError:
+            return polygon
+
+        dx, dy = float(source_delta[0]), float(source_delta[1])
+        return [(x + dx, y + dy) for x, y in polygon]
+
+    return polygon
 
 
 def _overlay_placement(
@@ -403,8 +530,21 @@ def _uk_reference_target_bbox(manifest: dict) -> BBox | None:
 
 
 def _uk_reference_control_matrix(manifest: dict, source_width: int, source_height: int) -> np.ndarray | None:
-    """Fit the supplied UK iron SVG to named-place BNG control points."""
-    if abs(source_width - 900) > 2 or abs(source_height - 1044) > 2:
+    """Fit the supplied UK iron SVG to named-place BNG control points.
+
+    The checked-in reference SVG has a 900 x 1044 viewBox. The rasteriser may
+    supersample it to 1800/3600/etc. pixels to avoid jagged edges, so this
+    accepts any near-integer multiple of that base size and scales the source
+    control points accordingly.
+    """
+    base_width = 900.0
+    base_height = 1044.0
+    source_scale_x = float(source_width) / base_width
+    source_scale_y = float(source_height) / base_height
+    if abs(source_scale_x - source_scale_y) > 0.01:
+        return None
+    source_scale = (source_scale_x + source_scale_y) / 2.0
+    if source_scale < 0.5 or abs(source_width - base_width * source_scale) > 2 or abs(source_height - base_height * source_scale) > 2:
         return None
     geo = manifest.get("georeferencing") or {}
     world = manifest.get("world") or {}
@@ -429,21 +569,25 @@ def _uk_reference_control_matrix(manifest: dict, source_width: int, source_heigh
             (max_n - northing) * depth / (max_n - min_n),
         )
 
-    # Source coordinates are measured in the checked-in SVG viewBox. Targets are
-    # approximate BNG locations for the named iron districts on the reference
-    # image. The least-squares affine fit keeps the whole overlay coherent while
-    # correcting the residual scale/skew visible in the bbox-only placement.
+    def spt(x: float, y: float) -> tuple[float, float]:
+        return x * source_scale, y * source_scale
+
+    # Source coordinates are measured in the checked-in SVG viewBox, then scaled
+    # if the SVG mask is being supersampled. Targets are approximate BNG
+    # locations for the named iron districts on the reference image. The least-
+    # squares affine fit keeps the whole overlay coherent while correcting the
+    # residual scale/skew visible in the bbox-only placement.
     control_points = [
-        ((337.0, 520.0), target(266_000.0, 483_000.0)),  # Ramsey, Isle of Man
-        ((418.0, 495.0), target(301_000.0, 514_000.0)),  # Cleator Moor/Egremont
-        ((433.0, 534.0), target(326_000.0, 482_000.0)),  # Millom/Furness
-        ((610.0, 500.0), target(460_000.0, 516_000.0)),  # Cleveland
-        ((773.0, 667.0), target(612_000.0, 342_000.0)),  # Weybourne
-        ((705.0, 895.0), target(540_000.0, 135_000.0)),  # Low/High Weald
-        ((291.0, 984.0), target(176_000.0, 54_000.0)),  # Perran
-        ((352.0, 973.0), target(201_000.0, 68_000.0)),  # St Austell
-        ((420.0, 985.0), target(292_000.0, 72_000.0)),  # Brixham
-        ((638.0, 590.0), target(492_000.0, 395_000.0)),  # Frodingham
+        (spt(337.0, 520.0), target(266_000.0, 483_000.0)),  # Ramsey, Isle of Man
+        (spt(418.0, 495.0), target(301_000.0, 514_000.0)),  # Cleator Moor/Egremont
+        (spt(433.0, 534.0), target(326_000.0, 482_000.0)),  # Millom/Furness
+        (spt(610.0, 500.0), target(460_000.0, 516_000.0)),  # Cleveland
+        (spt(773.0, 667.0), target(612_000.0, 342_000.0)),  # Weybourne
+        (spt(705.0, 895.0), target(553_000.0, 119_600.0)),  # Low/High Weald
+        (spt(291.0, 984.0), target(176_000.0, 54_000.0)),  # Perran
+        (spt(352.0, 973.0), target(201_000.0, 68_000.0)),  # St Austell
+        (spt(420.0, 985.0), target(292_000.0, 72_000.0)),  # Brixham
+        (spt(638.0, 590.0), target(492_000.0, 395_000.0)),  # Frodingham
     ]
     source = np.asarray([[x, y, 1.0] for (x, y), _ in control_points], dtype=np.float64)
     destination = np.asarray([point for _, point in control_points], dtype=np.float64)
