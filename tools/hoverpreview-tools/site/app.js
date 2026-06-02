@@ -5,6 +5,7 @@ const DEFAULT_VISIBLE_OVERLAYS = new Set(["surface", "vegetation", "rivers"]);
 const DEFAULT_VISIBLE_ORES = new Set(["coal", "iron", "copper", "zinc", "gold"]);
 const MAX_DEVICE_PIXEL_RATIO = 2;
 const MIN_DECODE_PADDING_PIXELS = 192;
+const MAX_CONCURRENT_BITMAP_LOADS = 1;
 const MIN_MAP_ZOOM = 0.09;
 const MAX_DISPLAY_ZOOM_PERCENT = 500;
 const MAX_MAP_ZOOM = MIN_MAP_ZOOM + MAX_DISPLAY_ZOOM_PERCENT / 100;
@@ -70,6 +71,9 @@ const state = {
   layers: new Map(),
   layerBitmaps: new Map(),
   layerLoads: new Map(),
+  activeLayerBitmapKeys: new Set(),
+  bitmapLoadQueue: [],
+  activeBitmapLoads: 0,
   samples: new Map(),
   sampleLoads: new Map(),
   measure: null,
@@ -521,9 +525,14 @@ function renderViewport() {
   ctx.fillRect(0, 0, rect.width, rect.height);
 
   const crop = visibleImageCrop(rect);
-  if (!crop) return;
+  if (!crop) {
+    state.activeLayerBitmapKeys = new Set();
+    releaseUnusedLayerBitmaps(state.activeLayerBitmapKeys);
+    return;
+  }
 
   const activeBitmapKeys = new Set();
+  state.activeLayerBitmapKeys = activeBitmapKeys;
   for (const entry of state.layers.values()) {
     if (!entry.enabled) continue;
     const mip = chooseMip(entry.layer);
@@ -537,6 +546,7 @@ function renderViewport() {
     drawLayerBitmap(ctx, decoded, crop);
   }
   releaseUnusedLayerBitmaps(activeBitmapKeys);
+  pruneStaleBitmapLoads();
 }
 
 function visibleImageCrop(rect) {
@@ -552,6 +562,42 @@ function ensureLayerBitmapLoad(layer, mip, region, key) {
   if (state.layerBitmaps.has(key) || state.layerLoads.has(key)) return;
   const load = loadLayerBitmap(layer, mip, region, key).finally(() => state.layerLoads.delete(key));
   state.layerLoads.set(key, load);
+}
+
+function enqueueBitmapLoad(task, key = null) {
+  return new Promise((resolve, reject) => {
+    state.bitmapLoadQueue.push({ task, key, resolve, reject });
+    pumpBitmapLoadQueue();
+  });
+}
+
+function pumpBitmapLoadQueue() {
+  while (state.activeBitmapLoads < MAX_CONCURRENT_BITMAP_LOADS && state.bitmapLoadQueue.length) {
+    const item = state.bitmapLoadQueue.shift();
+    if (item.key && !state.activeLayerBitmapKeys.has(item.key)) {
+      item.resolve(null);
+      continue;
+    }
+    state.activeBitmapLoads += 1;
+    item.task()
+      .then(item.resolve, item.reject)
+      .finally(() => {
+        state.activeBitmapLoads -= 1;
+        pumpBitmapLoadQueue();
+      });
+  }
+}
+
+function pruneStaleBitmapLoads() {
+  const pending = [];
+  for (const item of state.bitmapLoadQueue) {
+    if (item.key && !state.activeLayerBitmapKeys.has(item.key)) {
+      item.resolve(null);
+    } else {
+      pending.push(item);
+    }
+  }
+  state.bitmapLoadQueue = pending;
 }
 
 function fallbackLayerRegion(layer, crop) {
@@ -626,12 +672,17 @@ function intersectImageCrop(crop, decoded) {
 }
 
 async function loadLayerBitmap(layer, mip, region, key) {
-  const response = await fetch(layerUrl(layer, mip), { cache: "force-cache" });
-  if (!response.ok) return;
-  const blob = await response.blob();
-  const bitmap = await createImageBitmap(blob, region.left, region.top, region.right - region.left, region.bottom - region.top);
+  const bitmap = await enqueueBitmapLoad(async () => {
+    if (!state.activeLayerBitmapKeys.has(key)) return null;
+    const response = await fetch(layerUrl(layer, mip), { cache: "force-cache" });
+    if (!response.ok || !state.activeLayerBitmapKeys.has(key)) return null;
+    const blob = await response.blob();
+    if (!state.activeLayerBitmapKeys.has(key)) return null;
+    return createImageBitmap(blob, region.left, region.top, region.right - region.left, region.bottom - region.top);
+  }, key);
+  if (!bitmap) return;
   const entry = state.layers.get(layer.name);
-  if (!entry?.enabled || !key.startsWith(`${layerCacheKey(layer, chooseMip(layer))}\n`)) {
+  if (!entry?.enabled || !state.activeLayerBitmapKeys.has(key) || !key.startsWith(`${layerCacheKey(layer, chooseMip(layer))}\n`)) {
     if (typeof bitmap.close === "function") bitmap.close();
     return;
   }
@@ -676,6 +727,9 @@ function clearBitmapCaches() {
   }
   state.layerBitmaps.clear();
   state.layerLoads.clear();
+  for (const item of state.bitmapLoadQueue) item.resolve(null);
+  state.bitmapLoadQueue = [];
+  state.activeLayerBitmapKeys = new Set();
   for (const sample of state.samples.values()) {
     sample.canvas.width = 0;
     sample.canvas.height = 0;
@@ -860,10 +914,15 @@ async function loadSample(layer, imageX = null, imageY = null) {
   const key = `${layer.name}\n${crop.left},${crop.top},${crop.width},${crop.height}`;
   if (state.sampleLoads.has(key)) return state.sampleLoads.get(key);
   const load = (async () => {
-    const response = await fetch(new URL(sampleFile, state.baseUrl), { cache: "force-cache" });
-    if (!response.ok) return;
-    const blob = await response.blob();
-    const decoded = await decodeSampleBitmap(blob, crop);
+    const decoded = await enqueueBitmapLoad(async () => {
+      const entry = state.layers.get(layer.name);
+      if (layer.name !== "height" && (!entry || !entry.enabled)) return null;
+      const response = await fetch(new URL(sampleFile, state.baseUrl), { cache: "force-cache" });
+      if (!response.ok) return null;
+      const blob = await response.blob();
+      return decodeSampleBitmap(blob, crop);
+    });
+    if (!decoded) return;
     const entry = state.layers.get(layer.name);
     if (layer.name !== "height" && (!entry || !entry.enabled)) {
       if (typeof decoded.bitmap.close === "function") decoded.bitmap.close();
