@@ -2,9 +2,9 @@
 
 This directory contains the hover-preview export tooling plus the static files used
 by the GitHub Pages hover map. The browser viewer is intentionally simple: it
-loads a generated `hoverpreviews/` directory from a relative path, matching the
-same layer controls, scroll-bar layout, status overlay, and mouse behaviour as
-the Tkinter hover application.
+loads generated `hoverpreviews/` data through the repository-root page, matching
+the same layer controls, scroll-bar layout, status overlay, and mouse behaviour
+as the published site.
 
 ## Generate preview assets
 
@@ -79,49 +79,29 @@ allow that folder while keeping the rest of `uk_world_data_gb` ignored.
 
 ## Run locally
 
-From the repository root, serve the whole checkout so the relative paths match
-GitHub Pages:
+From the repository root, run:
 
 ```bash
-python3 -m http.server 8000
+./hoverpreview-local
 ```
 
-Then visit <http://localhost:8000>. The page expects the generated data at
-`tools/ukgeo-tools/uk_world_data_gb/hoverpreviews/`.
-
-For development from inside this directory, the copy under `site/` can also be
-served directly:
+To open a generated preview folder explicitly, pass either the folder or manifest:
 
 ```bash
-python3 -m http.server 8000 --directory site
+./hoverpreview-local tools/ukgeo-tools/uk_world_data_gb/hoverpreviews
 ```
 
-That version uses `../../ukgeo-tools/uk_world_data_gb/hoverpreviews/`
-relative to `site/`, so it works when served from this repository layout.
+The script serves the whole checkout from the repository root and opens
+<http://127.0.0.1:8000/> in the default browser. The page expects generated data
+at `tools/ukgeo-tools/uk_world_data_gb/hoverpreviews/`. Do not open
+`tools/hoverpreview-tools/site/index.html` directly; browser file URLs and
+serving only `site/` do not match the published path layout.
 
 ## Viewer controls
 
 - Move the pointer over the map to show Minecraft `x/z`, height, tile/cell,
   and British National Grid coordinates.
 - Use the mouse wheel or toolbar buttons to zoom.
-- Middle/right drag the map to pan, matching the Python app.
+- Middle/right drag the map to pan.
 - Left drag measures a distance; left click copies the Minecraft `x z` pair to
   the clipboard.
-
-## Legacy desktop tooling
-
-The Tkinter launcher remains available for native desktop use:
-
-```bash
-./open_hover_map.sh
-```
-
-Build native binaries with:
-
-```bash
-./build_hover_binaries.sh
-```
-
-By default, binary artifacts are written to `dist-hover/` in this directory. Set
-`DIST_DIR` to write them elsewhere. The finished executable expects a
-`hoverpreviews` directory next to it at runtime.

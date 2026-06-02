@@ -60,30 +60,5 @@ def export_cmd(
     console.print(f"Wrote hover previews to {written}")
 
 
-@app.command("open")
-def open_cmd(
-    root: Path = typer.Argument(Path("."), help="Dataset root containing hoverpreviews, or the hoverpreviews folder itself."),
-    previews: Path | None = typer.Option(None, "--previews", help="Explicit hoverpreviews directory."),
-    max_size: int = typer.Option(4096, "--max-size", help="Deprecated; hover-map now uses pre-exported hoverpreviews."),
-    style: str = typer.Option("auto", "--style", help="auto or gray"),
-) -> None:
-    """Open an interactive pre-rendered hover map."""
-    try:
-        from tkinter import TclError
-
-        from .hover import open_height_hover_map
-
-        open_height_hover_map(root, max_size=max_size, style=style, previews_dir=previews)
-    except ImportError as exc:
-        console.print(f"[red]Could not import tkinter/Pillow GUI support: {exc}[/red]")
-        raise typer.Exit(1) from exc
-    except (FileNotFoundError, ValueError) as exc:
-        console.print(f"[red]{exc}[/red]")
-        raise typer.Exit(1) from exc
-    except TclError as exc:
-        console.print(f"[red]Could not open a GUI window: {exc}[/red]")
-        raise typer.Exit(1) from exc
-
-
 if __name__ == "__main__":
     app()

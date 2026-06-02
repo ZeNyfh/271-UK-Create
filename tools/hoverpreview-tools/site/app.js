@@ -128,6 +128,8 @@ loadManifest(defaultManifest()).catch((error) => {
 });
 
 function defaultManifest() {
+  const manifest = new URLSearchParams(location.search).get("manifest");
+  if (manifest) return manifest;
   return document.body.dataset.defaultManifest || DEFAULT_MANIFEST;
 }
 

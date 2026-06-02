@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "hoverpreview-tools"
 version = "0.1.0"
-description = "Hover preview export and standalone map tooling for UKGeo raster datasets."
+description = "Hover preview export tooling for UKGeo raster datasets."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -18,12 +18,10 @@ dependencies = [
 
 [project.optional-dependencies]
 test = ["pytest"]
-build = ["pyinstaller"]
 gpu = ["cupy-cuda12x[ctk]"]
 
 [project.scripts]
 hoverpreview = "hoverpreview_tools.cli:app"
-ukgeo-hover = "hoverpreview_tools.launcher:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/hoverpreview_tools"]
