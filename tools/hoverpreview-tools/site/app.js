@@ -3,6 +3,8 @@ const DEFAULT_MANIFEST = "hoverpreviews/hover_manifest.json";
 const START_STATUS = "Mouse wheel zooms. Middle/right drag pans. Left click copies the current Minecraft coordinates.";
 const DEFAULT_VISIBLE_OVERLAYS = new Set(["surface", "vegetation", "rivers"]);
 const DEFAULT_VISIBLE_ORES = new Set(["coal", "iron", "copper", "zinc", "gold"]);
+const MAX_DEVICE_PIXEL_RATIO = 2;
+const MAX_DECODED_LAYER_PIXELS = 4_000_000;
 
 const elements = {
   loadState: document.querySelector("#load-state"),
@@ -39,8 +41,14 @@ const state = {
   measureStart: null,
   measureMoved: false,
   layers: new Map(),
+  layerBitmaps: new Map(),
+  layerLoads: new Map(),
   samples: new Map(),
+  sampleLoads: new Map(),
   measure: null,
+  mapCanvas: null,
+  mapCtx: null,
+  renderRequest: 0,
 };
 
 elements.zoomIn.addEventListener("click", () => zoomAroundCentre(1.25));
@@ -124,8 +132,8 @@ function defaultManifest() {
 }
 
 async function loadManifest(url) {
-  if (elements.loadState) elements.loadState.textContent = `Loading ${url}…`;
-  setStatus(`Loading ${url}…`);
+  if (elements.loadState) elements.loadState.textContent = `Loading ${url}...`;
+  setStatus(`Loading ${url}...`);
   const response = await fetch(url, { cache: "no-cache" });
   if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
   const manifest = await response.json();
@@ -137,40 +145,36 @@ async function loadManifest(url) {
   state.imageWidth = Number(manifest.image_width);
   state.imageHeight = Number(manifest.image_height);
   state.layers.clear();
-  state.samples.clear();
+  clearBitmapCaches();
   clearMeasurement();
   elements.stack.replaceChildren();
   elements.layerControls.replaceChildren();
   elements.oreControls.replaceChildren();
 
+  state.mapCanvas = document.createElement("canvas");
+  state.mapCanvas.className = "map-canvas";
+  state.mapCtx = state.mapCanvas.getContext("2d", { alpha: false });
+  state.mapCtx.imageSmoothingEnabled = true;
+  elements.stack.append(state.mapCanvas);
+
   for (const layer of manifest.layers || []) {
     addLayer(layer);
-    if (layer.browser_sample_file || layer.sample_file) loadSample(layer).catch(() => undefined);
   }
 
+  const height = state.layers.get("height");
+  if (height) loadSample(height.layer).catch(() => undefined);
+
   elements.empty.hidden = true;
-  elements.stack.style.width = `${state.imageWidth}px`;
-  elements.stack.style.height = `${state.imageHeight}px`;
   fitView();
   if (elements.loadState) elements.loadState.textContent = `Loaded ${(manifest.layers || []).length} layers`;
   setStatus(START_STATUS);
 }
 
 function addLayer(layer) {
-  const img = document.createElement("img");
-  img.className = "map-layer";
-  img.alt = "";
-  img.draggable = false;
-  img.width = state.imageWidth;
-  img.height = state.imageHeight;
-  img.dataset.name = layer.name;
-  img.src = layerUrl(layer, chooseMip(layer));
-  img.hidden = !isLayerVisibleByDefault(layer);
-  elements.stack.append(img);
-
-  state.layers.set(layer.name, { layer, img, enabled: !img.hidden });
+  const enabled = isLayerVisibleByDefault(layer);
+  state.layers.set(layer.name, { layer, enabled });
   const controls = layer.kind === "ore" ? elements.oreControls : elements.layerControls;
-  controls.append(toggleFor(layer, !img.hidden));
+  controls.append(toggleFor(layer, enabled));
 }
 
 function isLayerVisibleByDefault(layer) {
@@ -188,8 +192,11 @@ function toggleFor(layer, checked) {
   input.addEventListener("change", () => {
     const entry = state.layers.get(layer.name);
     entry.enabled = input.checked;
-    entry.img.hidden = !input.checked;
-    updateAllLayerSources();
+    if (!input.checked) {
+      releaseLayerBitmaps(layer.name);
+      releaseSample(layer.name);
+    }
+    scheduleRender();
   });
   const name = document.createElement("span");
   name.textContent = layer.ore || labelFor(layer.name);
@@ -202,11 +209,14 @@ function labelFor(name) {
 }
 
 function chooseMip(layer) {
-  const mips = layer.mips || [{ factor: 1, file: layer.file }];
+  const mips = layer.mips || [{ factor: 1, file: layer.file, width: state.imageWidth, height: state.imageHeight }];
   const idealFactor = Math.max(1, Math.floor(1 / Math.max(state.zoom, 0.001)));
   let chosen = mips[0];
   for (const mip of mips) {
     if (Number(mip.factor) <= idealFactor) chosen = mip;
+  }
+  if (mipPixels(chosen) > MAX_DECODED_LAYER_PIXELS) {
+    chosen = mips.find((mip) => mipPixels(mip) <= MAX_DECODED_LAYER_PIXELS) || mips[mips.length - 1];
   }
   return chosen;
 }
@@ -215,12 +225,15 @@ function layerUrl(layer, mip) {
   return new URL(mip.file || layer.file, state.baseUrl).href;
 }
 
-function updateAllLayerSources() {
-  for (const entry of state.layers.values()) {
-    if (!entry.enabled) continue;
-    const url = layerUrl(entry.layer, chooseMip(entry.layer));
-    if (entry.img.src !== url) entry.img.src = url;
-  }
+function mipPixels(mip) {
+  const factor = Number(mip.factor) || 1;
+  const width = Number(mip.width) || Math.ceil(state.imageWidth / factor);
+  const height = Number(mip.height) || Math.ceil(state.imageHeight / factor);
+  return width * height;
+}
+
+function layerCacheKey(layer, mip) {
+  return `${layer.name}\n${Number(mip.factor) || 1}\n${mip.file || layer.file}`;
 }
 
 function fitView() {
@@ -255,10 +268,10 @@ function applyTransform() {
   const minY = Math.min(0, rect.height - scaledHeight);
   state.offsetX = Math.min(0, Math.max(minX, state.offsetX));
   state.offsetY = Math.min(0, Math.max(minY, state.offsetY));
-  elements.stack.style.transform = `translate(${state.offsetX}px, ${state.offsetY}px) scale(${state.zoom})`;
   elements.zoomLabel.textContent = `${Math.round(state.zoom * 100)}%`;
   updateScrollbars(rect, scaledWidth, scaledHeight);
-  updateAllLayerSources();
+  updateMeasurementOverlay();
+  scheduleRender();
 }
 
 function updateScrollbars(rect, scaledWidth, scaledHeight) {
@@ -276,6 +289,125 @@ function updateScrollbars(rect, scaledWidth, scaledHeight) {
   elements.scrollX.style.left = `${1 + xOffset}px`;
   elements.scrollY.style.height = `${yThumb}px`;
   elements.scrollY.style.top = `${1 + yOffset}px`;
+}
+
+function scheduleRender() {
+  if (state.renderRequest) return;
+  state.renderRequest = requestAnimationFrame(() => {
+    state.renderRequest = 0;
+    renderViewport();
+  });
+}
+
+function renderViewport() {
+  if (!state.manifest || !state.mapCanvas || !state.mapCtx) return;
+  const rect = elements.viewer.getBoundingClientRect();
+  const dpr = Math.min(MAX_DEVICE_PIXEL_RATIO, window.devicePixelRatio || 1);
+  const canvasWidth = Math.max(1, Math.floor(rect.width * dpr));
+  const canvasHeight = Math.max(1, Math.floor(rect.height * dpr));
+  if (state.mapCanvas.width !== canvasWidth || state.mapCanvas.height !== canvasHeight) {
+    state.mapCanvas.width = canvasWidth;
+    state.mapCanvas.height = canvasHeight;
+    state.mapCanvas.style.width = `${rect.width}px`;
+    state.mapCanvas.style.height = `${rect.height}px`;
+  }
+
+  const ctx = state.mapCtx;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, rect.width, rect.height);
+  ctx.fillStyle = "#222222";
+  ctx.fillRect(0, 0, rect.width, rect.height);
+
+  const crop = visibleImageCrop(rect);
+  if (!crop) return;
+
+  const activeBitmapKeys = new Set();
+  for (const entry of state.layers.values()) {
+    if (!entry.enabled) continue;
+    const mip = chooseMip(entry.layer);
+    activeBitmapKeys.add(layerCacheKey(entry.layer, mip));
+    const bitmap = bitmapForLayer(entry.layer, mip);
+    if (!bitmap) continue;
+    drawLayerBitmap(ctx, bitmap, mip, crop);
+  }
+  releaseUnusedLayerBitmaps(activeBitmapKeys);
+}
+
+function visibleImageCrop(rect) {
+  const left = Math.max(0, -state.offsetX / state.zoom);
+  const top = Math.max(0, -state.offsetY / state.zoom);
+  const right = Math.min(state.imageWidth, (rect.width - state.offsetX) / state.zoom);
+  const bottom = Math.min(state.imageHeight, (rect.height - state.offsetY) / state.zoom);
+  if (right <= left || bottom <= top) return null;
+  return { left, top, right, bottom };
+}
+
+function bitmapForLayer(layer, mip) {
+  const key = layerCacheKey(layer, mip);
+  const cached = state.layerBitmaps.get(key);
+  if (cached) return cached;
+  if (!state.layerLoads.has(key)) {
+    const load = loadLayerBitmap(layer, mip, key).finally(() => state.layerLoads.delete(key));
+    state.layerLoads.set(key, load);
+  }
+  return null;
+}
+
+async function loadLayerBitmap(layer, mip, key) {
+  const response = await fetch(layerUrl(layer, mip), { cache: "force-cache" });
+  if (!response.ok) return;
+  const blob = await response.blob();
+  const bitmap = await createImageBitmap(blob);
+  const entry = state.layers.get(layer.name);
+  if (!entry?.enabled || layerCacheKey(layer, chooseMip(layer)) !== key) {
+    if (typeof bitmap.close === "function") bitmap.close();
+    return;
+  }
+  state.layerBitmaps.set(key, bitmap);
+  scheduleRender();
+}
+
+function drawLayerBitmap(ctx, bitmap, mip, crop) {
+  const factor = Number(mip.factor) || 1;
+  const sx = crop.left / factor;
+  const sy = crop.top / factor;
+  const sw = (crop.right - crop.left) / factor;
+  const sh = (crop.bottom - crop.top) / factor;
+  const dx = state.offsetX + crop.left * state.zoom;
+  const dy = state.offsetY + crop.top * state.zoom;
+  const dw = (crop.right - crop.left) * state.zoom;
+  const dh = (crop.bottom - crop.top) * state.zoom;
+  ctx.drawImage(bitmap, sx, sy, sw, sh, dx, dy, dw, dh);
+}
+
+function releaseLayerBitmaps(layerName) {
+  for (const [key, bitmap] of state.layerBitmaps) {
+    if (!key.startsWith(`${layerName}\n`)) continue;
+    if (typeof bitmap.close === "function") bitmap.close();
+    state.layerBitmaps.delete(key);
+  }
+}
+
+function releaseUnusedLayerBitmaps(activeKeys) {
+  for (const [key, bitmap] of state.layerBitmaps) {
+    if (activeKeys.has(key)) continue;
+    if (typeof bitmap.close === "function") bitmap.close();
+    state.layerBitmaps.delete(key);
+  }
+}
+
+function clearBitmapCaches() {
+  for (const bitmap of state.layerBitmaps.values()) {
+    if (typeof bitmap.close === "function") bitmap.close();
+  }
+  state.layerBitmaps.clear();
+  state.layerLoads.clear();
+  for (const sample of state.samples.values()) {
+    sample.canvas.width = 0;
+    sample.canvas.height = 0;
+  }
+  state.samples.clear();
+  state.sampleLoads.clear();
 }
 
 function screenToImage(clientX, clientY) {
@@ -367,11 +499,27 @@ function updateMeasurement(event) {
   const dz = current.minecraftZ - start.minecraftZ;
   const distance = Math.hypot(dx, dz);
   const heightDelta = current.height !== null && current.height !== undefined && start.height !== null && start.height !== undefined
-    ? `, Δh ${((current.height - start.height) * 0.1).toFixed(1)} m`
+    ? `, dh ${((current.height - start.height) * 0.1).toFixed(1)} m`
     : "";
   const label = `${distance.toFixed(1)} blocks (${dx}, ${dz}${heightDelta})`;
-  const startPoint = imageToViewer(start.imageX, start.imageY);
-  const endPoint = imageToViewer(current.imageX, current.imageY);
+  drawMeasurement(line, start.imageX, start.imageY, current.imageX, current.imageY, label);
+}
+
+function updateMeasurementOverlay() {
+  if (!state.measure || !state.measureMoved || !state.measureStart) return;
+  const line = state.measure.querySelector("line");
+  if (!line) return;
+  const x2 = Number(line.dataset.imageX2);
+  const y2 = Number(line.dataset.imageY2);
+  if (!Number.isFinite(x2) || !Number.isFinite(y2)) return;
+  drawMeasurement(line, state.measureStart.imageX, state.measureStart.imageY, x2, y2, line.nextElementSibling.textContent);
+}
+
+function drawMeasurement(line, imageX1, imageY1, imageX2, imageY2, label) {
+  line.dataset.imageX2 = String(imageX2);
+  line.dataset.imageY2 = String(imageY2);
+  const startPoint = imageToViewer(imageX1, imageY1);
+  const endPoint = imageToViewer(imageX2, imageY2);
   line.setAttribute("x1", startPoint.x);
   line.setAttribute("y1", startPoint.y);
   line.setAttribute("x2", endPoint.x);
@@ -418,26 +566,52 @@ function imageToViewer(imageX, imageY) {
 
 async function loadSample(layer) {
   const sampleFile = layer.browser_sample_file || layer.sample_file;
-  const response = await fetch(new URL(sampleFile, state.baseUrl), { cache: "force-cache" });
-  if (!response.ok) return;
-  const blob = await response.blob();
-  const bitmap = await createImageBitmap(blob);
-  const canvas = document.createElement("canvas");
-  canvas.width = bitmap.width;
-  canvas.height = bitmap.height;
-  const ctx = canvas.getContext("2d", { willReadFrequently: true });
-  ctx.drawImage(bitmap, 0, 0);
-  state.samples.set(layer.name, {
-    ctx,
-    width: canvas.width,
-    height: canvas.height,
-    heightLayer: layer.name === "height",
-  });
+  if (!sampleFile || state.samples.has(layer.name)) return;
+  if (state.sampleLoads.has(layer.name)) return state.sampleLoads.get(layer.name);
+  const load = (async () => {
+    const response = await fetch(new URL(sampleFile, state.baseUrl), { cache: "force-cache" });
+    if (!response.ok) return;
+    const blob = await response.blob();
+    const bitmap = await createImageBitmap(blob);
+    const entry = state.layers.get(layer.name);
+    if (layer.name !== "height" && (!entry || !entry.enabled)) {
+      if (typeof bitmap.close === "function") bitmap.close();
+      return;
+    }
+    const canvas = document.createElement("canvas");
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    ctx.drawImage(bitmap, 0, 0);
+    if (typeof bitmap.close === "function") bitmap.close();
+    state.samples.set(layer.name, {
+      canvas,
+      ctx,
+      width: canvas.width,
+      height: canvas.height,
+      heightLayer: layer.name === "height",
+    });
+  })().finally(() => state.sampleLoads.delete(layer.name));
+  state.sampleLoads.set(layer.name, load);
+  return load;
+}
+
+function releaseSample(layerName) {
+  if (layerName === "height") return;
+  const sample = state.samples.get(layerName);
+  if (!sample) return;
+  sample.canvas.width = 0;
+  sample.canvas.height = 0;
+  state.samples.delete(layerName);
 }
 
 function samplePixel(layerName, imageX, imageY) {
   const sample = state.samples.get(layerName);
-  if (!sample) return undefined;
+  if (!sample) {
+    const entry = state.layers.get(layerName);
+    if (entry && layerName === "height") loadSample(entry.layer).catch(() => undefined);
+    return undefined;
+  }
   const x = Math.max(0, Math.min(sample.width - 1, Math.floor(imageX)));
   const y = Math.max(0, Math.min(sample.height - 1, Math.floor(imageY)));
   const rgba = sample.ctx.getImageData(x, y, 1, 1).data;

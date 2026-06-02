@@ -102,7 +102,7 @@ relative to `site/`, so it works when served from this repository layout.
 ## Viewer controls
 
 - Move the pointer over the map to show Minecraft `x/z`, height, tile/cell,
-  British National Grid coordinates, and enabled layer values.
+  and British National Grid coordinates.
 - Use the mouse wheel or toolbar buttons to zoom.
 - Middle/right drag the map to pan, matching the Python app.
 - Left drag measures a distance; left click copies the Minecraft `x z` pair to
