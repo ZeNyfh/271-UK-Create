@@ -4,7 +4,7 @@ const START_STATUS = "Mouse wheel zooms. Middle/right drag pans. Left click copi
 const DEFAULT_VISIBLE_OVERLAYS = new Set(["surface", "vegetation", "rivers"]);
 const DEFAULT_VISIBLE_ORES = new Set(["coal", "iron", "copper", "zinc", "gold"]);
 const MAX_DEVICE_PIXEL_RATIO = 2;
-const MAX_DECODED_LAYER_PIXELS = 4_000_000;
+const MIN_DECODE_PADDING_PIXELS = 192;
 
 const elements = {
   loadState: document.querySelector("#load-state"),
@@ -217,9 +217,6 @@ function chooseMip(layer) {
   for (const mip of mips) {
     if (Number(mip.factor) <= idealFactor) chosen = mip;
   }
-  if (mipPixels(chosen) > MAX_DECODED_LAYER_PIXELS) {
-    chosen = mips.find((mip) => mipPixels(mip) <= MAX_DECODED_LAYER_PIXELS) || mips[mips.length - 1];
-  }
   return chosen;
 }
 
@@ -227,15 +224,12 @@ function layerUrl(layer, mip) {
   return new URL(mip.file || layer.file, state.baseUrl).href;
 }
 
-function mipPixels(mip) {
-  const factor = Number(mip.factor) || 1;
-  const width = Number(mip.width) || Math.ceil(state.imageWidth / factor);
-  const height = Number(mip.height) || Math.ceil(state.imageHeight / factor);
-  return width * height;
-}
-
 function layerCacheKey(layer, mip) {
   return `${layer.name}\n${Number(mip.factor) || 1}\n${mip.file || layer.file}`;
+}
+
+function layerRegionCacheKey(layer, mip, region) {
+  return `${layerCacheKey(layer, mip)}\n${region.left},${region.top},${region.right},${region.bottom}`;
 }
 
 function fitView() {
@@ -327,10 +321,10 @@ function renderViewport() {
   for (const entry of state.layers.values()) {
     if (!entry.enabled) continue;
     const mip = chooseMip(entry.layer);
-    activeBitmapKeys.add(layerCacheKey(entry.layer, mip));
-    const bitmap = bitmapForLayer(entry.layer, mip);
-    if (!bitmap) continue;
-    drawLayerBitmap(ctx, bitmap, mip, crop);
+    const decoded = bitmapForLayer(entry.layer, mip, crop);
+    if (!decoded) continue;
+    activeBitmapKeys.add(decoded.key);
+    drawLayerBitmap(ctx, decoded, crop);
   }
   releaseUnusedLayerBitmaps(activeBitmapKeys);
 }
@@ -344,63 +338,110 @@ function visibleImageCrop(rect) {
   return { left, top, right, bottom };
 }
 
-function bitmapForLayer(layer, mip) {
-  const key = layerCacheKey(layer, mip);
-  const cached = state.layerBitmaps.get(key);
-  if (cached) return cached;
+function bitmapForLayer(layer, mip, crop) {
+  const existing = cachedLayerRegion(layer, mip, crop);
+  if (existing) return existing;
+  const region = layerDecodeRegion(crop, mip);
+  const key = layerRegionCacheKey(layer, mip, region);
   if (!state.layerLoads.has(key)) {
-    const load = loadLayerBitmap(layer, mip, key).finally(() => state.layerLoads.delete(key));
+    const load = loadLayerBitmap(layer, mip, region, key).finally(() => state.layerLoads.delete(key));
     state.layerLoads.set(key, load);
   }
   return null;
 }
 
-async function loadLayerBitmap(layer, mip, key) {
+function cachedLayerRegion(layer, mip, crop) {
+  const prefix = `${layerCacheKey(layer, mip)}\n`;
+  const visible = mipVisibleRegion(crop, mip);
+  for (const [key, decoded] of state.layerBitmaps) {
+    if (!key.startsWith(prefix)) continue;
+    if (containsRegion(decoded.region, visible)) return decoded;
+  }
+  return null;
+}
+
+function mipVisibleRegion(crop, mip) {
+  const factor = Number(mip.factor) || 1;
+  const width = Number(mip.width) || Math.ceil(state.imageWidth / factor);
+  const height = Number(mip.height) || Math.ceil(state.imageHeight / factor);
+  return {
+    left: Math.max(0, Math.floor(crop.left / factor)),
+    top: Math.max(0, Math.floor(crop.top / factor)),
+    right: Math.min(width, Math.ceil(crop.right / factor)),
+    bottom: Math.min(height, Math.ceil(crop.bottom / factor)),
+  };
+}
+
+function layerDecodeRegion(crop, mip) {
+  const visible = mipVisibleRegion(crop, mip);
+  const width = Number(mip.width) || Math.ceil(state.imageWidth / (Number(mip.factor) || 1));
+  const height = Number(mip.height) || Math.ceil(state.imageHeight / (Number(mip.factor) || 1));
+  const visibleWidth = Math.max(1, visible.right - visible.left);
+  const visibleHeight = Math.max(1, visible.bottom - visible.top);
+  const padX = Math.max(MIN_DECODE_PADDING_PIXELS, Math.ceil(visibleWidth * 0.5));
+  const padY = Math.max(MIN_DECODE_PADDING_PIXELS, Math.ceil(visibleHeight * 0.5));
+  const snapX = Math.max(MIN_DECODE_PADDING_PIXELS, Math.ceil(visibleWidth * 0.5));
+  const snapY = Math.max(MIN_DECODE_PADDING_PIXELS, Math.ceil(visibleHeight * 0.5));
+  const left = Math.max(0, Math.floor((visible.left - padX) / snapX) * snapX);
+  const top = Math.max(0, Math.floor((visible.top - padY) / snapY) * snapY);
+  return {
+    left,
+    top,
+    right: Math.min(width, Math.max(visible.right + padX, left + visibleWidth)),
+    bottom: Math.min(height, Math.max(visible.bottom + padY, top + visibleHeight)),
+  };
+}
+
+function containsRegion(outer, inner) {
+  return outer.left <= inner.left && outer.top <= inner.top && outer.right >= inner.right && outer.bottom >= inner.bottom;
+}
+
+async function loadLayerBitmap(layer, mip, region, key) {
   const response = await fetch(layerUrl(layer, mip), { cache: "force-cache" });
   if (!response.ok) return;
   const blob = await response.blob();
-  const bitmap = await createImageBitmap(blob);
+  const bitmap = await createImageBitmap(blob, region.left, region.top, region.right - region.left, region.bottom - region.top);
   const entry = state.layers.get(layer.name);
-  if (!entry?.enabled || layerCacheKey(layer, chooseMip(layer)) !== key) {
+  if (!entry?.enabled || !key.startsWith(`${layerCacheKey(layer, chooseMip(layer))}\n`)) {
     if (typeof bitmap.close === "function") bitmap.close();
     return;
   }
-  state.layerBitmaps.set(key, bitmap);
+  state.layerBitmaps.set(key, { key, bitmap, mip, region });
   scheduleRender();
 }
 
-function drawLayerBitmap(ctx, bitmap, mip, crop) {
-  const factor = Number(mip.factor) || 1;
-  const sx = crop.left / factor;
-  const sy = crop.top / factor;
+function drawLayerBitmap(ctx, decoded, crop) {
+  const factor = Number(decoded.mip.factor) || 1;
+  const sx = crop.left / factor - decoded.region.left;
+  const sy = crop.top / factor - decoded.region.top;
   const sw = (crop.right - crop.left) / factor;
   const sh = (crop.bottom - crop.top) / factor;
   const dx = state.offsetX + crop.left * state.zoom;
   const dy = state.offsetY + crop.top * state.zoom;
   const dw = (crop.right - crop.left) * state.zoom;
   const dh = (crop.bottom - crop.top) * state.zoom;
-  ctx.drawImage(bitmap, sx, sy, sw, sh, dx, dy, dw, dh);
+  ctx.drawImage(decoded.bitmap, sx, sy, sw, sh, dx, dy, dw, dh);
 }
 
 function releaseLayerBitmaps(layerName) {
-  for (const [key, bitmap] of state.layerBitmaps) {
+  for (const [key, decoded] of state.layerBitmaps) {
     if (!key.startsWith(`${layerName}\n`)) continue;
-    if (typeof bitmap.close === "function") bitmap.close();
+    if (typeof decoded.bitmap.close === "function") decoded.bitmap.close();
     state.layerBitmaps.delete(key);
   }
 }
 
 function releaseUnusedLayerBitmaps(activeKeys) {
-  for (const [key, bitmap] of state.layerBitmaps) {
+  for (const [key, decoded] of state.layerBitmaps) {
     if (activeKeys.has(key)) continue;
-    if (typeof bitmap.close === "function") bitmap.close();
+    if (typeof decoded.bitmap.close === "function") decoded.bitmap.close();
     state.layerBitmaps.delete(key);
   }
 }
 
 function clearBitmapCaches() {
-  for (const bitmap of state.layerBitmaps.values()) {
-    if (typeof bitmap.close === "function") bitmap.close();
+  for (const decoded of state.layerBitmaps.values()) {
+    if (typeof decoded.bitmap.close === "function") decoded.bitmap.close();
   }
   state.layerBitmaps.clear();
   state.layerLoads.clear();
