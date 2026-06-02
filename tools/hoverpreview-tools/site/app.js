@@ -11,6 +11,28 @@ const MAX_MAP_ZOOM = MIN_MAP_ZOOM + MAX_DISPLAY_ZOOM_PERCENT / 100;
 const WHEEL_DELTA_PER_ZOOM_STEP = 100;
 const PINCH_PIXELS_PER_ZOOM_STEP = 80;
 const PINCH_DISTANCE_DEADZONE_PIXELS = 10;
+const SAMPLE_CROP_SIZE = 512;
+const BACKGROUND_ORE_ATTEMPT_MULTIPLIER = 0.1;
+const ORE_AREA_ATTEMPT_MULTIPLIER = 3.0;
+const ORE_ATTEMPT_SETTINGS = {
+  coal: { base: 1, maxBonus: 14 },
+  iron: { base: 1, maxBonus: 10 },
+  copper: { base: 1, maxBonus: 10 },
+  zinc: { base: 1, maxBonus: 14 },
+  gold: { base: 0, maxBonus: 5 },
+  andesite: { base: 0, maxBonus: 18 },
+  diorite: { base: 0, maxBonus: 14 },
+  granite: { base: 0, maxBonus: 18 },
+  ochrum: { base: 0, maxBonus: 14 },
+  calcite: { base: 0, maxBonus: 14 },
+  scoria: { base: 0, maxBonus: 14 },
+  tuff: { base: 0, maxBonus: 16 },
+  crimsite: { base: 0, maxBonus: 14 },
+  limestone: { base: 0, maxBonus: 16 },
+  asurine: { base: 0, maxBonus: 12 },
+  veridium: { base: 0, maxBonus: 12 },
+  smooth_basalt: { base: 0, maxBonus: 16 },
+};
 
 const elements = {
   loadState: document.querySelector("#load-state"),
@@ -61,6 +83,7 @@ const state = {
   pinchCenterX: null,
   pinchCenterY: null,
   pinchRemainder: 0,
+  lastStatusPoint: null,
 };
 
 elements.zoomIn.addEventListener("click", (event) => stepZoomAroundCentre(1, event.shiftKey));
@@ -170,6 +193,7 @@ elements.viewer.addEventListener("pointerleave", () => {
   if (!state.manifest) return;
   state.touchPointers.clear();
   resetPinch();
+  state.lastStatusPoint = null;
   setStatus(START_STATUS);
 });
 
@@ -694,6 +718,7 @@ function sampleFromEvent(event) {
 }
 
 function updateStatus(event) {
+  state.lastStatusPoint = { clientX: event.clientX, clientY: event.clientY };
   const sample = sampleFromEvent(event);
   if (!sample) {
     setStatus("outside generated world");
@@ -721,12 +746,23 @@ function layerDetails(sample) {
     const value = samplePixel(entry.layer.name, sample.dataX / Number(state.manifest.scale || 1), sample.dataZ / Number(state.manifest.scale || 1));
     if (value === null || value === undefined || value === 0) continue;
     if (entry.layer.kind === "ore") {
-      parts.push(`${entry.layer.ore}: ${value}`);
+      const oreText = oreAmountText(entry.layer.ore, value);
+      if (oreText) parts.push(`${entry.layer.ore}: ${oreText}`);
     } else {
       parts.push(`${labelFor(entry.layer.name)}: ${classLabel(entry.layer.name, value)}`);
     }
   }
   return parts.length ? ` | ${parts.join(" | ")}` : "";
+}
+
+function oreAmountText(oreName, score) {
+  const settings = ORE_ATTEMPT_SETTINGS[oreName];
+  if (!settings || score <= 0) return null;
+  const normalAttempts = settings.base + Math.round(settings.maxBonus * (score / 255));
+  const backgroundAttempts = (settings.base + settings.maxBonus) * BACKGROUND_ORE_ATTEMPT_MULTIPLIER;
+  if (backgroundAttempts <= 0) return null;
+  const oreAreaAttempts = normalAttempts * ORE_AREA_ATTEMPT_MULTIPLIER;
+  return `${Math.round((oreAreaAttempts / backgroundAttempts) * 100)}% of normal`;
 }
 
 function classLabel(layerName, value) {
@@ -814,15 +850,21 @@ function imageToViewer(imageX, imageY) {
   };
 }
 
-async function loadSample(layer) {
+async function loadSample(layer, imageX = null, imageY = null) {
   const sampleFile = layer.browser_sample_file || layer.sample_file;
-  if (!sampleFile || state.samples.has(layer.name)) return;
-  if (state.sampleLoads.has(layer.name)) return state.sampleLoads.get(layer.name);
+  if (!sampleFile) return;
+  const crop = sampleCropFor(layer, imageX, imageY);
+  const existing = state.samples.get(layer.name);
+  if (existing && sampleContains(existing, imageX, imageY)) return;
+  const key = `${layer.name}\n${crop.left},${crop.top},${crop.width},${crop.height}`;
+  if (state.sampleLoads.has(key)) return state.sampleLoads.get(key);
   const load = (async () => {
     const response = await fetch(new URL(sampleFile, state.baseUrl), { cache: "force-cache" });
     if (!response.ok) return;
     const blob = await response.blob();
-    const bitmap = await createImageBitmap(blob);
+    const bitmap = crop.full
+      ? await createImageBitmap(blob)
+      : await createImageBitmap(blob, crop.left, crop.top, crop.width, crop.height);
     const entry = state.layers.get(layer.name);
     if (layer.name !== "height" && (!entry || !entry.enabled)) {
       if (typeof bitmap.close === "function") bitmap.close();
@@ -834,16 +876,45 @@ async function loadSample(layer) {
     const ctx = canvas.getContext("2d", { willReadFrequently: true });
     ctx.drawImage(bitmap, 0, 0);
     if (typeof bitmap.close === "function") bitmap.close();
+    releaseSample(layer.name);
     state.samples.set(layer.name, {
       canvas,
       ctx,
       width: canvas.width,
       height: canvas.height,
+      originX: crop.left,
+      originY: crop.top,
       heightLayer: layer.name === "height",
     });
-  })().finally(() => state.sampleLoads.delete(layer.name));
-  state.sampleLoads.set(layer.name, load);
+    if (layer.name !== "height" && state.lastStatusPoint) requestAnimationFrame(() => updateStatus(state.lastStatusPoint));
+  })().finally(() => state.sampleLoads.delete(key));
+  state.sampleLoads.set(key, load);
   return load;
+}
+
+function sampleCropFor(layer, imageX, imageY) {
+  if (layer.name === "height" || !Number.isFinite(imageX) || !Number.isFinite(imageY)) {
+    return { full: true, left: 0, top: 0, width: state.imageWidth, height: state.imageHeight };
+  }
+  const centreX = Math.max(0, Math.min(state.imageWidth - 1, Math.floor(imageX)));
+  const centreY = Math.max(0, Math.min(state.imageHeight - 1, Math.floor(imageY)));
+  const half = Math.floor(SAMPLE_CROP_SIZE / 2);
+  const left = Math.max(0, Math.min(Math.max(0, state.imageWidth - SAMPLE_CROP_SIZE), centreX - half));
+  const top = Math.max(0, Math.min(Math.max(0, state.imageHeight - SAMPLE_CROP_SIZE), centreY - half));
+  return {
+    full: false,
+    left,
+    top,
+    width: Math.min(SAMPLE_CROP_SIZE, state.imageWidth - left),
+    height: Math.min(SAMPLE_CROP_SIZE, state.imageHeight - top),
+  };
+}
+
+function sampleContains(sample, imageX, imageY) {
+  if (!Number.isFinite(imageX) || !Number.isFinite(imageY)) return true;
+  const x = Math.floor(imageX);
+  const y = Math.floor(imageY);
+  return x >= sample.originX && y >= sample.originY && x < sample.originX + sample.width && y < sample.originY + sample.height;
 }
 
 function releaseSample(layerName) {
@@ -857,13 +928,13 @@ function releaseSample(layerName) {
 
 function samplePixel(layerName, imageX, imageY) {
   const sample = state.samples.get(layerName);
-  if (!sample) {
+  if (!sample || !sampleContains(sample, imageX, imageY)) {
     const entry = state.layers.get(layerName);
-    if (entry && layerName === "height") loadSample(entry.layer).catch(() => undefined);
+    if (entry && (layerName === "height" || entry.enabled)) loadSample(entry.layer, imageX, imageY).catch(() => undefined);
     return undefined;
   }
-  const x = Math.max(0, Math.min(sample.width - 1, Math.floor(imageX)));
-  const y = Math.max(0, Math.min(sample.height - 1, Math.floor(imageY)));
+  const x = Math.max(0, Math.min(sample.width - 1, Math.floor(imageX) - sample.originX));
+  const y = Math.max(0, Math.min(sample.height - 1, Math.floor(imageY) - sample.originY));
   const rgba = sample.ctx.getImageData(x, y, 1, 1).data;
   if (!sample.heightLayer) return rgba[0];
   const encoded = rgba[0] + rgba[1] * 256;
