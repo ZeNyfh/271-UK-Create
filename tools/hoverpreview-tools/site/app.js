@@ -57,6 +57,8 @@ const state = {
   wheelZoomPrecise: false,
   touchPointers: new Map(),
   pinchDistance: null,
+  pinchCenterX: null,
+  pinchCenterY: null,
   pinchRemainder: 0,
 };
 
@@ -121,7 +123,7 @@ elements.viewer.addEventListener("pointermove", (event) => {
   if (event.pointerType === "touch" && state.touchPointers.has(event.pointerId)) {
     state.touchPointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
     if (state.touchPointers.size >= 2) {
-      updatePinchZoom();
+      updatePinchGesture();
       event.preventDefault();
       return;
     }
@@ -311,26 +313,37 @@ function beginPinch() {
   const gesture = pinchGesture();
   if (!gesture) return;
   state.pinchDistance = gesture.distance;
+  state.pinchCenterX = gesture.centerX;
+  state.pinchCenterY = gesture.centerY;
   state.pinchRemainder = 0;
 }
 
-function updatePinchZoom() {
+function updatePinchGesture() {
   const gesture = pinchGesture();
   if (!gesture) return;
   if (state.pinchDistance === null) {
     beginPinch();
     return;
   }
+  state.offsetX += gesture.centerX - state.pinchCenterX;
+  state.offsetY += gesture.centerY - state.pinchCenterY;
+  state.pinchCenterX = gesture.centerX;
+  state.pinchCenterY = gesture.centerY;
   state.pinchRemainder += gesture.distance - state.pinchDistance;
   state.pinchDistance = gesture.distance;
   const steps = Math.trunc(state.pinchRemainder / PINCH_PIXELS_PER_ZOOM_STEP);
-  if (steps === 0) return;
-  state.pinchRemainder -= steps * PINCH_PIXELS_PER_ZOOM_STEP;
-  setDisplayZoomAt(displayZoomPercent() + steps, gesture.centerX, gesture.centerY);
+  if (steps !== 0) {
+    state.pinchRemainder -= steps * PINCH_PIXELS_PER_ZOOM_STEP;
+    setDisplayZoomAt(displayZoomPercent() + steps, gesture.centerX, gesture.centerY);
+    return;
+  }
+  applyTransform();
 }
 
 function resetPinch() {
   state.pinchDistance = null;
+  state.pinchCenterX = null;
+  state.pinchCenterY = null;
   state.pinchRemainder = 0;
 }
 
