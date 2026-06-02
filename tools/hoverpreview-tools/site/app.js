@@ -14,6 +14,7 @@ const MAX_DISPLAY_ZOOM_PERCENT = 500;
 const MAX_MAP_ZOOM = MIN_MAP_ZOOM + MAX_DISPLAY_ZOOM_PERCENT / 100;
 const WHEEL_DELTA_PER_ZOOM_STEP = 100;
 const PINCH_ZOOM_SENSITIVITY = 1.25;
+const PINCH_ZOOM_DEADZONE = 0.04;
 const PINCH_MIN_DISTANCE = 8;
 const SAMPLE_CROP_SIZE = 512;
 const BACKGROUND_ORE_ATTEMPT_MULTIPLIER = 0.1;
@@ -391,7 +392,18 @@ function updatePinchGesture() {
   const rect = elements.viewer.getBoundingClientRect();
 
   const rawRatio = gesture.distance / Math.max(PINCH_MIN_DISTANCE, state.pinchDistance);
-  const zoomRatio = Math.pow(rawRatio, PINCH_ZOOM_SENSITIVITY);
+
+  const distanceFromNeutral = Math.abs(rawRatio - 1);
+  const direction = rawRatio >= 1 ? 1 : -1;
+
+  let effectiveRatio = 1;
+
+  if (distanceFromNeutral > PINCH_ZOOM_DEADZONE) {
+    const adjustedDistance = distanceFromNeutral - PINCH_ZOOM_DEADZONE;
+    effectiveRatio = 1 + direction * adjustedDistance;
+  }
+
+  const zoomRatio = Math.pow(effectiveRatio, PINCH_ZOOM_SENSITIVITY);
 
   state.zoom = clampZoom(state.pinchStartZoom * zoomRatio);
 
