@@ -8,6 +8,7 @@ const MIN_DECODE_PADDING_PIXELS = 192;
 const MIN_MAP_ZOOM = 0.09;
 const MAX_DISPLAY_ZOOM_PERCENT = 500;
 const MAX_MAP_ZOOM = MIN_MAP_ZOOM + MAX_DISPLAY_ZOOM_PERCENT / 100;
+const WHEEL_DELTA_PER_ZOOM_STEP = 100;
 
 const elements = {
   loadState: document.querySelector("#load-state"),
@@ -51,16 +52,34 @@ const state = {
   mapCanvas: null,
   mapCtx: null,
   renderRequest: 0,
+  wheelZoomDelta: 0,
+  wheelZoomPrecise: false,
 };
 
-elements.zoomIn.addEventListener("click", () => zoomAroundCentre(1.25));
-elements.zoomOut.addEventListener("click", () => zoomAroundCentre(0.8));
+elements.zoomIn.addEventListener("click", (event) => stepZoomAroundCentre(1, event.shiftKey));
+elements.zoomOut.addEventListener("click", (event) => stepZoomAroundCentre(-1, event.shiftKey));
 elements.zoomFit.addEventListener("click", fitView);
+elements.zoomLabel.addEventListener("focus", () => elements.zoomLabel.select());
+elements.zoomLabel.addEventListener("blur", commitZoomInput);
+elements.zoomLabel.addEventListener("change", commitZoomInput);
+elements.zoomLabel.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    commitZoomInput();
+    elements.zoomLabel.blur();
+  } else if (event.key === "Escape") {
+    updateZoomInput();
+    elements.zoomLabel.blur();
+  }
+});
+elements.zoomLabel.addEventListener("wheel", (event) => {
+  event.preventDefault();
+  stepZoomAroundCentre(event.deltaY < 0 ? 1 : -1, event.shiftKey);
+}, { passive: false });
 
 elements.viewer.addEventListener("contextmenu", (event) => event.preventDefault());
 elements.viewer.addEventListener("wheel", (event) => {
   event.preventDefault();
-  zoomAt(event.clientX, event.clientY, event.deltaY < 0 ? 1.25 : 0.8);
+  handleWheelZoom(event);
 }, { passive: false });
 
 elements.viewer.addEventListener("pointerdown", (event) => {
@@ -241,21 +260,52 @@ function fitView() {
   state.offsetX = 0;
   state.offsetY = 0;
   applyTransform();
+  updateZoomInput();
 }
 
-function zoomAroundCentre(factor) {
+function stepZoomAroundCentre(direction, precise) {
   const rect = elements.viewer.getBoundingClientRect();
-  zoomAt(rect.left + rect.width / 2, rect.top + rect.height / 2, factor);
+  stepZoomAt(rect.left + rect.width / 2, rect.top + rect.height / 2, direction, precise);
 }
 
-function zoomAt(clientX, clientY, factor) {
+function handleWheelZoom(event) {
+  if (!state.manifest) return;
+  if (state.wheelZoomPrecise !== event.shiftKey) {
+    state.wheelZoomDelta = 0;
+    state.wheelZoomPrecise = event.shiftKey;
+  }
+  const modeMultiplier = event.deltaMode === WheelEvent.DOM_DELTA_PAGE ? 800 : event.deltaMode === WheelEvent.DOM_DELTA_LINE ? 16 : 1;
+  state.wheelZoomDelta += event.deltaY * modeMultiplier;
+  if (Math.abs(state.wheelZoomDelta) < WHEEL_DELTA_PER_ZOOM_STEP) return;
+  const direction = state.wheelZoomDelta < 0 ? 1 : -1;
+  state.wheelZoomDelta = 0;
+  stepZoomAt(event.clientX, event.clientY, direction, event.shiftKey);
+}
+
+function stepZoomAt(clientX, clientY, direction, precise) {
+  const current = displayZoomPercent();
+  setDisplayZoomAt(nextZoomPercent(current, direction, precise), clientX, clientY);
+}
+
+function nextZoomPercent(percent, direction, precise) {
+  if (precise) return percent + direction;
+  if (direction > 0) {
+    if (percent < 100) return Math.min(100, Math.floor(percent / 10) * 10 + 10);
+    return Math.floor(percent / 50) * 50 + 50;
+  }
+  if (percent > 100) return Math.max(100, Math.ceil(percent / 50) * 50 - 50);
+  return Math.ceil(percent / 10) * 10 - 10;
+}
+
+function setDisplayZoomAt(percent, clientX, clientY) {
   if (!state.manifest) return;
   const rect = elements.viewer.getBoundingClientRect();
   const before = screenToImage(clientX, clientY);
-  state.zoom = clampZoom(state.zoom * factor);
+  state.zoom = zoomForDisplayPercent(percent);
   state.offsetX = clientX - rect.left - before.x * state.zoom;
   state.offsetY = clientY - rect.top - before.y * state.zoom;
   applyTransform();
+  updateZoomInput();
 }
 
 function clampZoom(zoom) {
@@ -266,6 +316,27 @@ function displayZoomPercent() {
   return Math.max(0, Math.min(MAX_DISPLAY_ZOOM_PERCENT, Math.round((state.zoom - MIN_MAP_ZOOM) * 100)));
 }
 
+function zoomForDisplayPercent(percent) {
+  const cleanPercent = Number.isFinite(percent) ? percent : displayZoomPercent();
+  return clampZoom(MIN_MAP_ZOOM + Math.max(0, Math.min(MAX_DISPLAY_ZOOM_PERCENT, cleanPercent)) / 100);
+}
+
+function commitZoomInput() {
+  const value = parseZoomPercent(elements.zoomLabel.value);
+  const rect = elements.viewer.getBoundingClientRect();
+  setDisplayZoomAt(value, rect.left + rect.width / 2, rect.top + rect.height / 2);
+}
+
+function parseZoomPercent(value) {
+  const parsed = Number.parseFloat(String(value).replace("%", "").trim());
+  if (!Number.isFinite(parsed)) return displayZoomPercent();
+  return Math.max(0, Math.min(MAX_DISPLAY_ZOOM_PERCENT, Math.round(parsed)));
+}
+
+function updateZoomInput() {
+  elements.zoomLabel.value = `${displayZoomPercent()}%`;
+}
+
 function applyTransform() {
   const rect = elements.viewer.getBoundingClientRect();
   const scaledWidth = state.imageWidth * state.zoom;
@@ -274,7 +345,7 @@ function applyTransform() {
   const minY = Math.min(0, rect.height - scaledHeight);
   state.offsetX = Math.min(0, Math.max(minX, state.offsetX));
   state.offsetY = Math.min(0, Math.max(minY, state.offsetY));
-  elements.zoomLabel.textContent = `${displayZoomPercent()}%`;
+  if (document.activeElement !== elements.zoomLabel) updateZoomInput();
   updateScrollbars(rect, scaledWidth, scaledHeight);
   updateMeasurementOverlay();
   scheduleRender();

@@ -56,7 +56,18 @@ button:active { background: var(--button-active); }
 }
 
 .app-title { margin-right: 4px; }
-.load-state, .zoom-label { color: var(--muted); }
+.load-state, .zoom-hint { color: var(--muted); }
+.zoom-label {
+  width: 54px;
+  min-height: 26px;
+  border: 1px solid #9f9f9f;
+  border-radius: 2px;
+  background: #ffffff;
+  color: var(--text);
+  padding: 2px 5px;
+  text-align: right;
+}
+.zoom-hint { font-size: 12px; }
 .control-separator {
   align-self: stretch;
   width: 1px;
