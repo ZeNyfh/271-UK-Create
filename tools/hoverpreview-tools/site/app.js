@@ -13,6 +13,8 @@ const MIN_MAP_ZOOM = 0.09;
 const MAX_DISPLAY_ZOOM_PERCENT = 500;
 const MAX_MAP_ZOOM = MIN_MAP_ZOOM + MAX_DISPLAY_ZOOM_PERCENT / 100;
 const WHEEL_DELTA_PER_ZOOM_STEP = 100;
+const PINCH_ZOOM_SENSITIVITY = 1.25;
+const PINCH_MIN_DISTANCE = 8;
 const SAMPLE_CROP_SIZE = 512;
 const BACKGROUND_ORE_ATTEMPT_MULTIPLIER = 0.1;
 const ORE_AREA_ATTEMPT_MULTIPLIER = 3.0;
@@ -94,6 +96,9 @@ const state = {
   pinchDistance: null,
   pinchCenterX: null,
   pinchCenterY: null,
+  pinchStartZoom: null,
+  pinchStartImageX: null,
+  pinchStartImageY: null,
   lastStatusPoint: null,
 };
 
@@ -206,8 +211,7 @@ elements.viewer.addEventListener("pointercancel", (event) => {
 
 elements.viewer.addEventListener("pointerleave", () => {
   if (!state.manifest) return;
-  state.touchPointers.clear();
-  resetPinch();
+  if (state.touchPointers.size > 0 || state.panPointerId !== null || state.measurePointerId !== null) return;
   state.lastStatusPoint = null;
   setStatus(START_STATUS);
 });
@@ -362,29 +366,41 @@ function cancelPointerInteractions() {
 
 function beginPinch() {
   const gesture = pinchGesture();
-  if (!gesture) return;
+  if (!gesture || gesture.distance < PINCH_MIN_DISTANCE) return;
+
+  const rect = elements.viewer.getBoundingClientRect();
+
   state.pinchDistance = gesture.distance;
   state.pinchCenterX = gesture.centerX;
   state.pinchCenterY = gesture.centerY;
+
+  state.pinchStartZoom = state.zoom;
+  state.pinchStartImageX = (gesture.centerX - rect.left - state.offsetX) / state.zoom;
+  state.pinchStartImageY = (gesture.centerY - rect.top - state.offsetY) / state.zoom;
 }
 
 function updatePinchGesture() {
   const gesture = pinchGesture();
   if (!gesture) return;
-  if (state.pinchDistance === null) {
+
+  if (state.pinchDistance === null || state.pinchStartZoom === null) {
     beginPinch();
     return;
   }
+
   const rect = elements.viewer.getBoundingClientRect();
-  const imageX = (state.pinchCenterX - rect.left - state.offsetX) / state.zoom;
-  const imageY = (state.pinchCenterY - rect.top - state.offsetY) / state.zoom;
-  const distanceRatio = gesture.distance / Math.max(1, state.pinchDistance);
-  state.zoom = clampZoom(state.zoom * distanceRatio);
-  state.offsetX = gesture.centerX - rect.left - imageX * state.zoom;
-  state.offsetY = gesture.centerY - rect.top - imageY * state.zoom;
+
+  const rawRatio = gesture.distance / Math.max(PINCH_MIN_DISTANCE, state.pinchDistance);
+  const zoomRatio = Math.pow(rawRatio, PINCH_ZOOM_SENSITIVITY);
+
+  state.zoom = clampZoom(state.pinchStartZoom * zoomRatio);
+
+  state.offsetX = gesture.centerX - rect.left - state.pinchStartImageX * state.zoom;
+  state.offsetY = gesture.centerY - rect.top - state.pinchStartImageY * state.zoom;
+
   state.pinchCenterX = gesture.centerX;
   state.pinchCenterY = gesture.centerY;
-  state.pinchDistance = gesture.distance;
+
   applyTransform();
 }
 
@@ -392,6 +408,9 @@ function resetPinch() {
   state.pinchDistance = null;
   state.pinchCenterX = null;
   state.pinchCenterY = null;
+  state.pinchStartZoom = null;
+  state.pinchStartImageX = null;
+  state.pinchStartImageY = null;
 }
 
 function pinchGesture() {
