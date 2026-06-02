@@ -7,6 +7,8 @@ const MAX_DEVICE_PIXEL_RATIO = 2;
 const DECODE_CHUNK_PIXELS = 192;
 const MAX_CONCURRENT_BITMAP_LOADS = 2;
 const CHUNK_LOAD_DEBOUNCE_MS = 60;
+const DEFAULT_TILE_SIZE = 256;
+const SAMPLE_LOAD_PRIORITY = 50000;
 const MIN_MAP_ZOOM = 0.09;
 const MAX_DISPLAY_ZOOM_PERCENT = 500;
 const MAX_MAP_ZOOM = MIN_MAP_ZOOM + MAX_DISPLAY_ZOOM_PERCENT / 100;
@@ -287,6 +289,7 @@ function toggleFor(layer, checked) {
       releaseSample(layer.name);
     }
     scheduleRender();
+    refreshStatus();
   });
   const name = document.createElement("span");
   name.textContent = layer.ore || labelFor(layer.name);
@@ -882,9 +885,8 @@ function updateStatus(event) {
   }
   const heightText = sample.height === null || sample.height === undefined ? "nodata/ocean" : `${(sample.height * 0.1).toFixed(1)} m`;
   const bng = bngText(sample.dataX, sample.dataZ);
-  const details = layerDetails(sample);
-  const detailText = details ? `${details} | ` : "";
-  setStatus(`${detailText}Minecraft x ${sample.minecraftX}, z ${sample.minecraftZ} | height ${heightText} | data ${sample.dataX},${sample.dataZ} | tile ${String(sample.tileX).padStart(3, "0")}_${String(sample.tileZ).padStart(3, "0")} cell ${sample.localX},${sample.localZ}${bng}`);
+  const details = statusDetails(sample);
+  setStatus(`Minecraft x ${sample.minecraftX}, z ${sample.minecraftZ} | height ${heightText} | data ${sample.dataX},${sample.dataZ} | tile ${String(sample.tileX).padStart(3, "0")}_${String(sample.tileZ).padStart(3, "0")} cell ${sample.localX},${sample.localZ}${bng}${details}`);
 }
 
 function bngText(dataX, dataZ) {
@@ -896,30 +898,54 @@ function bngText(dataX, dataZ) {
   return ` | BNG E ${easting.toFixed(0)}, N ${northing.toFixed(0)}`;
 }
 
-function layerDetails(sample) {
-  const parts = [];
+function statusDetails(sample) {
+  const overlays = [];
+  const ores = [];
+
   for (const entry of state.layers.values()) {
-    if (!entry.enabled || entry.layer.kind === "base") continue;
-    const value = samplePixel(entry.layer.name, sample.dataX / Number(state.manifest.scale || 1), sample.dataZ / Number(state.manifest.scale || 1));
+    if (entry.layer.kind === "base" || !entry.enabled) continue;
+
+    const value = samplePixel(
+        entry.layer.name,
+        sample.dataX / Number(state.manifest.scale || 1),
+        sample.dataZ / Number(state.manifest.scale || 1)
+    );
+
     if (value === null || value === undefined || value === 0) continue;
+
     if (entry.layer.kind === "ore") {
       const oreText = oreAmountText(entry.layer.ore, value);
-      if (oreText) parts.push(`${entry.layer.ore}: ${oreText}`);
+      if (oreText) ores.push(`${entry.layer.ore}: ${oreText}`);
     } else {
-      parts.push(`${labelFor(entry.layer.name)}: ${classLabel(entry.layer.name, value)}`);
+      overlays.push(`${labelFor(entry.layer.name)}: ${classLabel(entry.layer.name, value)}`);
     }
   }
-  return parts.join(" | ");
+
+  const parts = [];
+  if (overlays.length) parts.push(overlays.join(" | "));
+  if (ores.length) parts.push(`Ores ${ores.join(", ")}`);
+
+  return parts.length ? ` | ${parts.join(" | ")}` : "";
 }
 
 function oreAmountText(oreName, score) {
   const settings = ORE_ATTEMPT_SETTINGS[oreName];
   if (!settings || score <= 0) return null;
+
   const normalAttempts = settings.base + Math.round(settings.maxBonus * (score / 255));
   const backgroundAttempts = (settings.base + settings.maxBonus) * BACKGROUND_ORE_ATTEMPT_MULTIPLIER;
+
   if (backgroundAttempts <= 0) return null;
+
   const oreAreaAttempts = normalAttempts * ORE_AREA_ATTEMPT_MULTIPLIER;
-  return `${Math.round((oreAreaAttempts / backgroundAttempts) * 100)}% of normal`;
+  return `${formatMultiplier(oreAreaAttempts / backgroundAttempts)}x`;
+}
+
+function formatMultiplier(multiplier) {
+  if (!Number.isFinite(multiplier)) return "0";
+
+  const decimals = multiplier >= 10 || Number.isInteger(multiplier) ? 0 : 1;
+  return multiplier.toFixed(decimals);
 }
 
 function classLabel(layerName, value) {
@@ -1009,7 +1035,7 @@ function imageToViewer(imageX, imageY) {
 
 async function loadSample(layer, imageX = null, imageY = null) {
   const sampleFile = layer.browser_sample_file || layer.sample_file;
-  if (!sampleFile) return;
+  if (!sampleFile && !layer.sample_tiles) return;
   const crop = sampleCropFor(layer, imageX, imageY);
   const existing = state.samples.get(layer.name);
   if (existing && sampleContains(existing, imageX, imageY)) return;
@@ -1018,13 +1044,15 @@ async function loadSample(layer, imageX = null, imageY = null) {
   const load = (async () => {
     const decoded = await enqueueBitmapLoad(async () => {
       const entry = state.layers.get(layer.name);
-      if (layer.name !== "height" && (!entry || !entry.enabled)) return null;
-      const blob = await loadSourceBlob(new URL(sampleFile, state.baseUrl).href);
+      if (layer.name !== "height" && (!entry || !shouldLoadSample(entry))) return null;
+      const blob = crop.tile
+        ? await fetchBlob(sampleRegionUrl(layer, crop))
+        : await loadSourceBlob(new URL(sampleFile, state.baseUrl).href);
       return decodeSampleBitmap(blob, crop);
-    }, null, 300000);
+    }, null, SAMPLE_LOAD_PRIORITY);
     if (!decoded) return;
     const entry = state.layers.get(layer.name);
-    if (layer.name !== "height" && (!entry || !entry.enabled)) {
+    if (layer.name !== "height" && (!entry || !shouldLoadSample(entry))) {
       if (typeof decoded.bitmap.close === "function") decoded.bitmap.close();
       return;
     }
@@ -1051,7 +1079,7 @@ async function loadSample(layer, imageX = null, imageY = null) {
 }
 
 async function decodeSampleBitmap(blob, crop) {
-  if (crop.full) {
+  if (crop.full || crop.tile) {
     const bitmap = await createImageBitmap(blob);
     return { bitmap, sourceX: 0, sourceY: 0, width: bitmap.width, height: bitmap.height };
   }
@@ -1065,6 +1093,22 @@ async function decodeSampleBitmap(blob, crop) {
 }
 
 function sampleCropFor(layer, imageX, imageY) {
+  if (layer.sample_tiles && Number.isFinite(imageX) && Number.isFinite(imageY)) {
+    const tileSize = Number(layer.sample_tiles.size) || DEFAULT_TILE_SIZE;
+    const centreX = Math.max(0, Math.min(state.imageWidth - 1, Math.floor(imageX)));
+    const centreY = Math.max(0, Math.min(state.imageHeight - 1, Math.floor(imageY)));
+    const left = Math.floor(centreX / tileSize) * tileSize;
+    const top = Math.floor(centreY / tileSize) * tileSize;
+    return {
+      tile: true,
+      left,
+      top,
+      width: Math.min(tileSize, state.imageWidth - left),
+      height: Math.min(tileSize, state.imageHeight - top),
+      tileX: Math.floor(centreX / tileSize),
+      tileY: Math.floor(centreY / tileSize),
+    };
+  }
   if (layer.name === "height" || !Number.isFinite(imageX) || !Number.isFinite(imageY)) {
     return { full: true, left: 0, top: 0, width: state.imageWidth, height: state.imageHeight };
   }
@@ -1080,6 +1124,13 @@ function sampleCropFor(layer, imageX, imageY) {
     width: Math.min(SAMPLE_CROP_SIZE, state.imageWidth - left),
     height: Math.min(SAMPLE_CROP_SIZE, state.imageHeight - top),
   };
+}
+
+function sampleRegionUrl(layer, crop) {
+  return new URL(
+    String(layer.sample_tiles.template).replace("{x}", String(crop.tileX)).replace("{y}", String(crop.tileY)),
+    state.baseUrl
+  ).href;
 }
 
 function sampleContains(sample, imageX, imageY) {
@@ -1102,7 +1153,7 @@ function samplePixel(layerName, imageX, imageY) {
   const sample = state.samples.get(layerName);
   if (!sample || !sampleContains(sample, imageX, imageY)) {
     const entry = state.layers.get(layerName);
-    if (entry && (layerName === "height" || entry.enabled)) loadSample(entry.layer, imageX, imageY).catch(() => undefined);
+    if (entry && (layerName === "height" || shouldLoadSample(entry))) loadSample(entry.layer, imageX, imageY).catch(() => undefined);
     return undefined;
   }
   const x = Math.max(0, Math.min(sample.width - 1, Math.floor(imageX) - sample.originX));
@@ -1111,6 +1162,10 @@ function samplePixel(layerName, imageX, imageY) {
   if (!sample.heightLayer) return rgba[0];
   const encoded = rgba[0] + rgba[1] * 256;
   return encoded === 0 ? null : encoded - 32768;
+}
+
+function shouldLoadSample(entry) {
+  return entry.layer.kind === "ore" || entry.enabled;
 }
 
 async function copyCoordinates(event) {

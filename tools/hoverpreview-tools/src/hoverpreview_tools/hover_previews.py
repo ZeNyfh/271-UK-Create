@@ -77,7 +77,9 @@ def export_hover_previews(
     base_size = (height_values.shape[1], height_values.shape[0])
     height_mips = _save_visual_layer(out, _height_image(height_values, style).convert("RGB"), "layers/height.png")
     _height_sample_image(height_values).save(out / "samples" / "height_u16.png")
-    _height_browser_sample_image(height_values).save(out / "samples" / "height_rgb.png")
+    height_browser_sample = _height_browser_sample_image(height_values)
+    height_browser_sample.save(out / "samples" / "height_rgb.png")
+    height_sample_tiles = _save_sample_tiles(out, height_browser_sample, "samples/height_rgb.png")
     del height_values
     gc.collect()
 
@@ -90,6 +92,7 @@ def export_hover_previews(
             "sample_file": "samples/height_u16.png",
             "browser_sample_file": "samples/height_rgb.png",
             "browser_sample_encoding": "signed-decimetres-rg-le-offset-32768",
+            "sample_tiles": height_sample_tiles,
         },
     ]
 
@@ -100,7 +103,14 @@ def export_hover_previews(
         sample = _fit_image(Image.fromarray(values, mode="L"), base_size)
         mips = _save_visual_layer(out, visual, "layers/surface.png")
         sample.save(out / "samples" / "surface_u8.png")
-        layers.append({"name": "surface", "kind": "overlay", "file": "layers/surface.png", "mips": mips, "sample_file": "samples/surface_u8.png"})
+        layers.append({
+            "name": "surface",
+            "kind": "overlay",
+            "file": "layers/surface.png",
+            "mips": mips,
+            "sample_file": "samples/surface_u8.png",
+            "sample_tiles": _save_sample_tiles(out, sample, "samples/surface_u8.png"),
+        })
         del values, visual, sample
         gc.collect()
 
@@ -111,7 +121,14 @@ def export_hover_previews(
         sample = _fit_image(Image.fromarray(values, mode="L"), base_size)
         mips = _save_visual_layer(out, visual, "layers/vegetation.png")
         sample.save(out / "samples" / "vegetation_u8.png")
-        layers.append({"name": "vegetation", "kind": "overlay", "file": "layers/vegetation.png", "mips": mips, "sample_file": "samples/vegetation_u8.png"})
+        layers.append({
+            "name": "vegetation",
+            "kind": "overlay",
+            "file": "layers/vegetation.png",
+            "mips": mips,
+            "sample_file": "samples/vegetation_u8.png",
+            "sample_tiles": _save_sample_tiles(out, sample, "samples/vegetation_u8.png"),
+        })
         del values, visual, sample
         gc.collect()
 
@@ -122,7 +139,14 @@ def export_hover_previews(
         sample = _fit_image(Image.fromarray(values, mode="L"), base_size)
         mips = _save_visual_layer(out, visual, "layers/rivers.png")
         sample.save(out / "samples" / "rivers_u8.png")
-        layers.append({"name": "rivers", "kind": "overlay", "file": "layers/rivers.png", "mips": mips, "sample_file": "samples/rivers_u8.png"})
+        layers.append({
+            "name": "rivers",
+            "kind": "overlay",
+            "file": "layers/rivers.png",
+            "mips": mips,
+            "sample_file": "samples/rivers_u8.png",
+            "sample_tiles": _save_sample_tiles(out, sample, "samples/rivers_u8.png"),
+        })
         del values, visual, sample
         gc.collect()
 
@@ -143,6 +167,7 @@ def export_hover_previews(
         sample_path = ore_sample_dir / f"{ore}_u8.png"
         mips = _save_visual_layer(out, visual, f"layers/ores/{ore}.png")
         sample.save(sample_path)
+        sample_file = f"samples/ores/{ore}_u8.png"
         ore_layers.append(
             {
                 "name": f"ore:{ore}",
@@ -150,7 +175,8 @@ def export_hover_previews(
                 "kind": "ore",
                 "file": f"layers/ores/{ore}.png",
                 "mips": mips,
-                "sample_file": f"samples/ores/{ore}_u8.png",
+                "sample_file": sample_file,
+                "sample_tiles": _save_sample_tiles(out, sample, sample_file),
             }
         )
         del values, visual, sample
@@ -344,6 +370,24 @@ def _save_visual_tiles(root: Path, image: Image.Image, relative_path: str, facto
             tile = image.crop((left, top, min(image.width, left + VISUAL_TILE_SIZE), min(image.height, top + VISUAL_TILE_SIZE)))
             tile.save(tile_dir / f"{tile_x}_{tile_z}.png")
     return f"tiles/{factor}/{stem}/{{x}}_{{y}}.png"
+
+
+def _save_sample_tiles(root: Path, image: Image.Image, relative_path: str) -> dict[str, Any]:
+    stem = str(Path(relative_path).with_suffix(""))
+    tile_dir = root / "sample_tiles" / stem
+    tile_dir.mkdir(parents=True, exist_ok=True)
+    for top in range(0, image.height, VISUAL_TILE_SIZE):
+        tile_z = top // VISUAL_TILE_SIZE
+        for left in range(0, image.width, VISUAL_TILE_SIZE):
+            tile_x = left // VISUAL_TILE_SIZE
+            tile = image.crop((left, top, min(image.width, left + VISUAL_TILE_SIZE), min(image.height, top + VISUAL_TILE_SIZE)))
+            tile.save(tile_dir / f"{tile_x}_{tile_z}.png")
+    return {
+        "size": VISUAL_TILE_SIZE,
+        "template": f"sample_tiles/{stem}/{{x}}_{{y}}.png",
+        "columns": math.ceil(image.width / VISUAL_TILE_SIZE),
+        "rows": math.ceil(image.height / VISUAL_TILE_SIZE),
+    }
 
 
 def _fit_image(image: Image.Image, size: tuple[int, int]) -> Image.Image:
