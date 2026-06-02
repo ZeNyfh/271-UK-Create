@@ -4,8 +4,9 @@ const START_STATUS = "Mouse wheel zooms. Middle/right drag pans. Left click copi
 const DEFAULT_VISIBLE_OVERLAYS = new Set(["surface", "vegetation", "rivers"]);
 const DEFAULT_VISIBLE_ORES = new Set(["coal", "iron", "copper", "zinc", "gold"]);
 const MAX_DEVICE_PIXEL_RATIO = 2;
-const MIN_DECODE_PADDING_PIXELS = 192;
-const MAX_CONCURRENT_BITMAP_LOADS = 1;
+const DECODE_CHUNK_PIXELS = 192;
+const MAX_CONCURRENT_BITMAP_LOADS = 2;
+const CHUNK_LOAD_DEBOUNCE_MS = 60;
 const MIN_MAP_ZOOM = 0.09;
 const MAX_DISPLAY_ZOOM_PERCENT = 500;
 const MAX_MAP_ZOOM = MIN_MAP_ZOOM + MAX_DISPLAY_ZOOM_PERCENT / 100;
@@ -71,15 +72,19 @@ const state = {
   layers: new Map(),
   layerBitmaps: new Map(),
   layerLoads: new Map(),
+  sourceBlobs: new Map(),
   activeLayerBitmapKeys: new Set(),
   bitmapLoadQueue: [],
   activeBitmapLoads: 0,
+  pendingLayerLoadRequests: new Map(),
+  chunkLoadRequestTimer: 0,
   samples: new Map(),
   sampleLoads: new Map(),
   measure: null,
   mapCanvas: null,
   mapCtx: null,
   renderRequest: 0,
+  chunkRenderRequest: 0,
   wheelZoomDelta: 0,
   wheelZoomPrecise: false,
   touchPointers: new Map(),
@@ -315,6 +320,16 @@ function layerRegionCacheKey(layer, mip, region) {
   return `${layerCacheKey(layer, mip)}\n${region.left},${region.top},${region.right},${region.bottom}`;
 }
 
+function layerRegionUrl(layer, mip, region) {
+  if (mip.tiles && region.tileX !== undefined && region.tileY !== undefined) {
+    return new URL(
+      String(mip.tiles.template).replace("{x}", String(region.tileX)).replace("{y}", String(region.tileY)),
+      state.baseUrl
+    ).href;
+  }
+  return layerUrl(layer, mip);
+}
+
 function fitView() {
   if (!state.manifest) return;
   const rect = elements.viewer.getBoundingClientRect();
@@ -505,6 +520,14 @@ function scheduleRender() {
   });
 }
 
+function scheduleChunkRender() {
+  if (state.renderRequest || state.chunkRenderRequest) return;
+  state.chunkRenderRequest = window.setTimeout(() => {
+    state.chunkRenderRequest = 0;
+    scheduleRender();
+  }, 16);
+}
+
 function renderViewport() {
   if (!state.manifest || !state.mapCanvas || !state.mapCtx) return;
   const rect = elements.viewer.getBoundingClientRect();
@@ -532,21 +555,37 @@ function renderViewport() {
   }
 
   const activeBitmapKeys = new Set();
+  const loadRequests = [];
   state.activeLayerBitmapKeys = activeBitmapKeys;
   for (const entry of state.layers.values()) {
     if (!entry.enabled) continue;
     const mip = chooseMip(entry.layer);
-    const region = layerDecodeRegion(crop, mip);
-    const desiredKey = layerRegionCacheKey(entry.layer, mip, region);
-    activeBitmapKeys.add(desiredKey);
-    ensureLayerBitmapLoad(entry.layer, mip, region, desiredKey);
-    const decoded = cachedLayerRegion(entry.layer, mip, crop) || fallbackLayerRegion(entry.layer, crop);
-    if (!decoded) continue;
-    activeBitmapKeys.add(decoded.key);
-    drawLayerBitmap(ctx, decoded, crop);
+    const fallback = fallbackLayerRegion(entry.layer, crop, mip);
+    if (fallback) {
+      activeBitmapKeys.add(fallback.key);
+      drawLayerBitmap(ctx, fallback, crop);
+    }
+    for (const region of layerDecodeRegions(crop, mip)) {
+      const desiredKey = layerRegionCacheKey(entry.layer, mip, region);
+      activeBitmapKeys.add(desiredKey);
+      const decoded = state.layerBitmaps.get(desiredKey);
+      if (decoded) {
+        drawLayerBitmap(ctx, decoded, crop);
+      } else {
+        loadRequests.push({
+          layer: entry.layer,
+          mip,
+          region,
+          key: desiredKey,
+          priority: layerLoadPriority(entry.layer, mip, region, crop),
+        });
+      }
+    }
   }
   releaseUnusedLayerBitmaps(activeBitmapKeys);
   pruneStaleBitmapLoads();
+  loadRequests.sort((a, b) => a.priority - b.priority);
+  scheduleLayerLoadRequests(loadRequests);
 }
 
 function visibleImageCrop(rect) {
@@ -558,15 +597,35 @@ function visibleImageCrop(rect) {
   return { left, top, right, bottom };
 }
 
-function ensureLayerBitmapLoad(layer, mip, region, key) {
+function ensureLayerBitmapLoad(layer, mip, region, key, priority = 0) {
   if (state.layerBitmaps.has(key) || state.layerLoads.has(key)) return;
-  const load = loadLayerBitmap(layer, mip, region, key).finally(() => state.layerLoads.delete(key));
+  const load = loadLayerBitmap(layer, mip, region, key, priority).finally(() => state.layerLoads.delete(key));
   state.layerLoads.set(key, load);
 }
 
-function enqueueBitmapLoad(task, key = null) {
+function scheduleLayerLoadRequests(requests) {
+  for (const request of requests) state.pendingLayerLoadRequests.set(request.key, request);
+  if (state.chunkLoadRequestTimer) window.clearTimeout(state.chunkLoadRequestTimer);
+  state.chunkLoadRequestTimer = window.setTimeout(() => {
+    state.chunkLoadRequestTimer = 0;
+    flushLayerLoadRequests();
+  }, CHUNK_LOAD_DEBOUNCE_MS);
+}
+
+function flushLayerLoadRequests() {
+  const requests = Array.from(state.pendingLayerLoadRequests.values())
+    .filter((request) => state.activeLayerBitmapKeys.has(request.key))
+    .sort((a, b) => a.priority - b.priority);
+  state.pendingLayerLoadRequests.clear();
+  for (const request of requests) {
+    ensureLayerBitmapLoad(request.layer, request.mip, request.region, request.key, request.priority);
+  }
+}
+
+function enqueueBitmapLoad(task, key = null, priority = 0) {
   return new Promise((resolve, reject) => {
-    state.bitmapLoadQueue.push({ task, key, resolve, reject });
+    state.bitmapLoadQueue.push({ task, key, priority, resolve, reject });
+    state.bitmapLoadQueue.sort((a, b) => a.priority - b.priority);
     pumpBitmapLoadQueue();
   });
 }
@@ -598,45 +657,63 @@ function pruneStaleBitmapLoads() {
     }
   }
   state.bitmapLoadQueue = pending;
+  for (const key of state.pendingLayerLoadRequests.keys()) {
+    if (!state.activeLayerBitmapKeys.has(key)) state.pendingLayerLoadRequests.delete(key);
+  }
 }
 
-function fallbackLayerRegion(layer, crop) {
+function layerLoadPriority(layer, mip, region, crop) {
+  const layerPriority = layer.kind === "base" ? 0 : layer.kind === "ore" ? 200000 : 100000;
+  const factor = Number(mip.factor) || 1;
+  const cropCenterX = (crop.left + crop.right) / (2 * factor);
+  const cropCenterY = (crop.top + crop.bottom) / (2 * factor);
+  const regionCenterX = (region.left + region.right) / 2;
+  const regionCenterY = (region.top + region.bottom) / 2;
+  return layerPriority + Math.hypot(regionCenterX - cropCenterX, regionCenterY - cropCenterY);
+}
+
+function fallbackLayerRegion(layer, crop, preferredMip) {
   const candidates = Array.from(state.layerBitmaps.values()).reverse();
   for (const decoded of candidates) {
     if (!decoded.key.startsWith(`${layer.name}\n`)) continue;
+    if (Number(decoded.mip.factor) === Number(preferredMip.factor)) continue;
     if (intersectImageCrop(crop, decoded)) return decoded;
   }
   return null;
 }
 
-function cachedLayerRegion(layer, mip, crop) {
-  const prefix = `${layerCacheKey(layer, mip)}\n`;
-  const visible = mipVisibleRegion(crop, mip);
-  for (const decoded of state.layerBitmaps.values()) {
-    if (!decoded.key.startsWith(prefix)) continue;
-    if (containsRegion(decoded.region, visible)) return decoded;
-  }
-  return null;
-}
-
-function layerDecodeRegion(crop, mip) {
+function layerDecodeRegions(crop, mip) {
   const visible = mipVisibleRegion(crop, mip);
   const width = Number(mip.width) || Math.ceil(state.imageWidth / (Number(mip.factor) || 1));
   const height = Number(mip.height) || Math.ceil(state.imageHeight / (Number(mip.factor) || 1));
-  const visibleWidth = Math.max(1, visible.right - visible.left);
-  const visibleHeight = Math.max(1, visible.bottom - visible.top);
-  const padX = Math.max(MIN_DECODE_PADDING_PIXELS, Math.ceil(visibleWidth * 0.5));
-  const padY = Math.max(MIN_DECODE_PADDING_PIXELS, Math.ceil(visibleHeight * 0.5));
-  const snapX = Math.max(MIN_DECODE_PADDING_PIXELS, Math.ceil(visibleWidth * 0.5));
-  const snapY = Math.max(MIN_DECODE_PADDING_PIXELS, Math.ceil(visibleHeight * 0.5));
-  const left = Math.max(0, Math.floor((visible.left - padX) / snapX) * snapX);
-  const top = Math.max(0, Math.floor((visible.top - padY) / snapY) * snapY);
-  return {
-    left,
-    top,
-    right: Math.min(width, Math.max(visible.right + padX, left + visibleWidth)),
-    bottom: Math.min(height, Math.max(visible.bottom + padY, top + visibleHeight)),
-  };
+  const chunk = Number(mip.tiles?.size) || DECODE_CHUNK_PIXELS;
+  const leftChunk = Math.max(0, Math.floor(visible.left / chunk) * chunk);
+  const topChunk = Math.max(0, Math.floor(visible.top / chunk) * chunk);
+  const rightChunk = Math.min(width, Math.ceil(visible.right / chunk) * chunk);
+  const bottomChunk = Math.min(height, Math.ceil(visible.bottom / chunk) * chunk);
+  const regions = [];
+  for (let top = topChunk; top < bottomChunk; top += chunk) {
+    for (let left = leftChunk; left < rightChunk; left += chunk) {
+      if (mip.tiles) {
+        regions.push({
+          left,
+          top,
+          right: Math.min(width, left + chunk),
+          bottom: Math.min(height, top + chunk),
+          tileX: left / chunk,
+          tileY: top / chunk,
+        });
+      } else {
+        regions.push({
+          left: Math.max(visible.left, left),
+          top: Math.max(visible.top, top),
+          right: Math.min(width, visible.right, left + chunk),
+          bottom: Math.min(height, visible.bottom, top + chunk),
+        });
+      }
+    }
+  }
+  return regions;
 }
 
 function mipVisibleRegion(crop, mip) {
@@ -649,10 +726,6 @@ function mipVisibleRegion(crop, mip) {
     right: Math.min(width, Math.ceil(crop.right / factor)),
     bottom: Math.min(height, Math.ceil(crop.bottom / factor)),
   };
-}
-
-function containsRegion(outer, inner) {
-  return outer.left <= inner.left && outer.top <= inner.top && outer.right >= inner.right && outer.bottom >= inner.bottom;
 }
 
 function intersectImageCrop(crop, decoded) {
@@ -671,15 +744,15 @@ function intersectImageCrop(crop, decoded) {
   return { left, top, right, bottom };
 }
 
-async function loadLayerBitmap(layer, mip, region, key) {
+async function loadLayerBitmap(layer, mip, region, key, priority) {
   const bitmap = await enqueueBitmapLoad(async () => {
     if (!state.activeLayerBitmapKeys.has(key)) return null;
-    const response = await fetch(layerUrl(layer, mip), { cache: "force-cache" });
-    if (!response.ok || !state.activeLayerBitmapKeys.has(key)) return null;
-    const blob = await response.blob();
+    const url = layerRegionUrl(layer, mip, region);
+    const blob = mip.tiles ? await fetchBlob(url) : await loadSourceBlob(url);
     if (!state.activeLayerBitmapKeys.has(key)) return null;
+    if (mip.tiles) return createImageBitmap(blob);
     return createImageBitmap(blob, region.left, region.top, region.right - region.left, region.bottom - region.top);
-  }, key);
+  }, key, priority);
   if (!bitmap) return;
   const entry = state.layers.get(layer.name);
   if (!entry?.enabled || !state.activeLayerBitmapKeys.has(key) || !key.startsWith(`${layerCacheKey(layer, chooseMip(layer))}\n`)) {
@@ -687,7 +760,25 @@ async function loadLayerBitmap(layer, mip, region, key) {
     return;
   }
   state.layerBitmaps.set(key, { key, bitmap, mip, region });
-  scheduleRender();
+  scheduleChunkRender();
+}
+
+async function loadSourceBlob(url) {
+  if (state.sourceBlobs.has(url)) return state.sourceBlobs.get(url);
+  const load = fetchBlob(url);
+  state.sourceBlobs.set(url, load);
+  try {
+    return await load;
+  } catch (error) {
+    state.sourceBlobs.delete(url);
+    throw error;
+  }
+}
+
+async function fetchBlob(url) {
+  const response = await fetch(url, { cache: "force-cache" });
+  if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+  return response.blob();
 }
 
 function drawLayerBitmap(ctx, decoded, crop) {
@@ -702,6 +793,7 @@ function drawLayerBitmap(ctx, decoded, crop) {
   const dy = state.offsetY + drawCrop.top * state.zoom;
   const dw = (drawCrop.right - drawCrop.left) * state.zoom;
   const dh = (drawCrop.bottom - drawCrop.top) * state.zoom;
+  ctx.imageSmoothingEnabled = !(Number(decoded.mip.factor) === 1 && state.zoom >= 1);
   ctx.drawImage(decoded.bitmap, sx, sy, sw, sh, dx, dy, dw, dh);
 }
 
@@ -727,9 +819,19 @@ function clearBitmapCaches() {
   }
   state.layerBitmaps.clear();
   state.layerLoads.clear();
+  state.sourceBlobs.clear();
   for (const item of state.bitmapLoadQueue) item.resolve(null);
   state.bitmapLoadQueue = [];
+  state.pendingLayerLoadRequests.clear();
   state.activeLayerBitmapKeys = new Set();
+  if (state.chunkLoadRequestTimer) {
+    window.clearTimeout(state.chunkLoadRequestTimer);
+    state.chunkLoadRequestTimer = 0;
+  }
+  if (state.chunkRenderRequest) {
+    window.clearTimeout(state.chunkRenderRequest);
+    state.chunkRenderRequest = 0;
+  }
   for (const sample of state.samples.values()) {
     sample.canvas.width = 0;
     sample.canvas.height = 0;
@@ -917,11 +1019,9 @@ async function loadSample(layer, imageX = null, imageY = null) {
     const decoded = await enqueueBitmapLoad(async () => {
       const entry = state.layers.get(layer.name);
       if (layer.name !== "height" && (!entry || !entry.enabled)) return null;
-      const response = await fetch(new URL(sampleFile, state.baseUrl), { cache: "force-cache" });
-      if (!response.ok) return null;
-      const blob = await response.blob();
+      const blob = await loadSourceBlob(new URL(sampleFile, state.baseUrl).href);
       return decodeSampleBitmap(blob, crop);
-    });
+    }, null, 300000);
     if (!decoded) return;
     const entry = state.layers.get(layer.name);
     if (layer.name !== "height" && (!entry || !entry.enabled)) {

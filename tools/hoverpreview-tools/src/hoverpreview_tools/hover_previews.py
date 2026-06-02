@@ -19,6 +19,7 @@ from ukgeo.tiles import HEIGHT_NODATA
 
 HOVER_PREVIEW_FORMAT = "ukgeo-hoverpreviews-v1"
 HOVER_PREVIEW_INDEX = "hover_manifest.json"
+VISUAL_TILE_SIZE = 256
 _CUPY_MODULE: Any | None | bool = None
 
 
@@ -298,7 +299,9 @@ def _save_visual_layer(root: Path, image: Image.Image, relative_path: str) -> li
     path = root / relative_path
     path.parent.mkdir(parents=True, exist_ok=True)
     image.save(path)
-    mips: list[dict[str, Any]] = [{"factor": 1, "file": relative_path, "width": image.width, "height": image.height}]
+    mips: list[dict[str, Any]] = [
+        _visual_mip_entry(root, image, relative_path, factor=1, file=relative_path)
+    ]
     factor = 2
     current = image
     while max(current.size) > 512:
@@ -307,9 +310,40 @@ def _save_visual_layer(root: Path, image: Image.Image, relative_path: str) -> li
         mip_path = root / "mips" / str(factor) / relative_path
         mip_path.parent.mkdir(parents=True, exist_ok=True)
         current.save(mip_path)
-        mips.append({"factor": factor, "file": f"mips/{factor}/{relative_path}", "width": current.width, "height": current.height})
+        mips.append(
+            _visual_mip_entry(root, current, relative_path, factor=factor, file=f"mips/{factor}/{relative_path}")
+        )
         factor *= 2
     return mips
+
+
+def _visual_mip_entry(root: Path, image: Image.Image, relative_path: str, *, factor: int, file: str) -> dict[str, Any]:
+    tile_template = _save_visual_tiles(root, image, relative_path, factor)
+    return {
+        "factor": factor,
+        "file": file,
+        "width": image.width,
+        "height": image.height,
+        "tiles": {
+            "size": VISUAL_TILE_SIZE,
+            "template": tile_template,
+            "columns": math.ceil(image.width / VISUAL_TILE_SIZE),
+            "rows": math.ceil(image.height / VISUAL_TILE_SIZE),
+        },
+    }
+
+
+def _save_visual_tiles(root: Path, image: Image.Image, relative_path: str, factor: int) -> str:
+    stem = str(Path(relative_path).with_suffix(""))
+    tile_dir = root / "tiles" / str(factor) / stem
+    tile_dir.mkdir(parents=True, exist_ok=True)
+    for top in range(0, image.height, VISUAL_TILE_SIZE):
+        tile_z = top // VISUAL_TILE_SIZE
+        for left in range(0, image.width, VISUAL_TILE_SIZE):
+            tile_x = left // VISUAL_TILE_SIZE
+            tile = image.crop((left, top, min(image.width, left + VISUAL_TILE_SIZE), min(image.height, top + VISUAL_TILE_SIZE)))
+            tile.save(tile_dir / f"{tile_x}_{tile_z}.png")
+    return f"tiles/{factor}/{stem}/{{x}}_{{y}}.png"
 
 
 def _fit_image(image: Image.Image, size: tuple[int, int]) -> Image.Image:

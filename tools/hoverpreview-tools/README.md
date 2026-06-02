@@ -20,6 +20,8 @@ directory. The export contains:
 - `hover_manifest.json` metadata.
 - `layers/` PNG map layers.
 - `mips/` downsampled layer images for fast zoomed-out rendering.
+- `tiles/` pre-cut visual tiles used by the browser for fast, low-memory
+  panning and zooming.
 - `samples/` images used by the website to report height and layer values under
   the pointer.
 

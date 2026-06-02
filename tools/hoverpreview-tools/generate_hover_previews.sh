@@ -16,7 +16,7 @@ IRON_OVERLAY_SCORE="${IRON_OVERLAY_SCORE:-180}"
 IRON_OVERLAY_FIT="${IRON_OVERLAY_FIT:-outline}"
 BGS_GEOLOGY_ZIP="${BGS_GEOLOGY_ZIP:-$DATA_DIR/BGS_Geology_625k_bedrock_gpkg.zip}"
 ORE_RULES="${ORE_RULES:-$UKGEO_TOOLS_DIR/examples/ore_rules_625k.yml}"
-REBUILD_IRON="${REBUILD_IRON:-auto}"
+REBUILD_IRON="${REBUILD_IRON:-1}"
 IRON_STAMP="${IRON_STAMP:-$ROOT/.iron_ore_inputs.sha256}"
 
 if [[ -x "$UKGEO_TOOLS_DIR/.venv/bin/ukgeo" ]]; then
@@ -101,7 +101,7 @@ if [[ -n "$IRON_OVERLAY_IMAGE" && -f "$IRON_OVERLAY_IMAGE" && -f "$ROOT/manifest
   fi
 fi
 
-ARGS=("$PYTHON" -m hoverpreview_tools.cli export "$ROOT" --out "$OUT_DIR" --max-size "$MAX_SIZE" --style "$STYLE")
+ARGS=("$PYTHON" -m hoverpreview_tools.cli "$ROOT" --out "$OUT_DIR" --max-size "$MAX_SIZE" --style "$STYLE")
 if [[ "$CLEAN" == "1" ]]; then
   ARGS+=(--clean)
 fi
