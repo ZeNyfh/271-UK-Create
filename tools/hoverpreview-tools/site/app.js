@@ -9,6 +9,7 @@ const MIN_MAP_ZOOM = 0.09;
 const MAX_DISPLAY_ZOOM_PERCENT = 500;
 const MAX_MAP_ZOOM = MIN_MAP_ZOOM + MAX_DISPLAY_ZOOM_PERCENT / 100;
 const WHEEL_DELTA_PER_ZOOM_STEP = 100;
+const PINCH_PIXELS_PER_ZOOM_STEP = 12;
 
 const elements = {
   loadState: document.querySelector("#load-state"),
@@ -54,6 +55,9 @@ const state = {
   renderRequest: 0,
   wheelZoomDelta: 0,
   wheelZoomPrecise: false,
+  touchPointers: new Map(),
+  pinchDistance: null,
+  pinchRemainder: 0,
 };
 
 elements.zoomIn.addEventListener("click", (event) => stepZoomAroundCentre(1, event.shiftKey));
@@ -85,6 +89,15 @@ elements.viewer.addEventListener("wheel", (event) => {
 elements.viewer.addEventListener("pointerdown", (event) => {
   if (!state.manifest) return;
   elements.viewer.setPointerCapture(event.pointerId);
+  if (event.pointerType === "touch") {
+    state.touchPointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (state.touchPointers.size >= 2) {
+      beginPinch();
+      cancelPointerInteractions();
+      event.preventDefault();
+      return;
+    }
+  }
   if (event.button === 1 || event.button === 2) {
     state.panPointerId = event.pointerId;
     state.panStartX = event.clientX;
@@ -105,6 +118,14 @@ elements.viewer.addEventListener("pointerdown", (event) => {
 
 elements.viewer.addEventListener("pointermove", (event) => {
   if (!state.manifest) return;
+  if (event.pointerType === "touch" && state.touchPointers.has(event.pointerId)) {
+    state.touchPointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (state.touchPointers.size >= 2) {
+      updatePinchZoom();
+      event.preventDefault();
+      return;
+    }
+  }
   if (state.panPointerId === event.pointerId) {
     state.offsetX = state.panOffsetX + event.clientX - state.panStartX;
     state.offsetY = state.panOffsetY + event.clientY - state.panStartY;
@@ -117,6 +138,10 @@ elements.viewer.addEventListener("pointermove", (event) => {
 
 elements.viewer.addEventListener("pointerup", (event) => {
   if (!state.manifest) return;
+  if (event.pointerType === "touch") {
+    state.touchPointers.delete(event.pointerId);
+    if (state.touchPointers.size < 2) resetPinch();
+  }
   if (state.panPointerId === event.pointerId) {
     state.panPointerId = null;
     elements.viewer.classList.remove("dragging");
@@ -129,6 +154,10 @@ elements.viewer.addEventListener("pointerup", (event) => {
 });
 
 elements.viewer.addEventListener("pointercancel", (event) => {
+  if (event.pointerType === "touch") {
+    state.touchPointers.delete(event.pointerId);
+    if (state.touchPointers.size < 2) resetPinch();
+  }
   if (state.panPointerId === event.pointerId) state.panPointerId = null;
   if (state.measurePointerId === event.pointerId) state.measurePointerId = null;
   elements.viewer.classList.remove("dragging");
@@ -136,6 +165,8 @@ elements.viewer.addEventListener("pointercancel", (event) => {
 
 elements.viewer.addEventListener("pointerleave", () => {
   if (!state.manifest) return;
+  state.touchPointers.clear();
+  resetPinch();
   setStatus(START_STATUS);
 });
 
@@ -266,6 +297,52 @@ function fitView() {
 function stepZoomAroundCentre(direction, precise) {
   const rect = elements.viewer.getBoundingClientRect();
   stepZoomAt(rect.left + rect.width / 2, rect.top + rect.height / 2, direction, precise);
+}
+
+function cancelPointerInteractions() {
+  state.panPointerId = null;
+  state.measurePointerId = null;
+  state.measureMoved = false;
+  elements.viewer.classList.remove("dragging");
+  clearMeasurement();
+}
+
+function beginPinch() {
+  const gesture = pinchGesture();
+  if (!gesture) return;
+  state.pinchDistance = gesture.distance;
+  state.pinchRemainder = 0;
+}
+
+function updatePinchZoom() {
+  const gesture = pinchGesture();
+  if (!gesture) return;
+  if (state.pinchDistance === null) {
+    beginPinch();
+    return;
+  }
+  state.pinchRemainder += gesture.distance - state.pinchDistance;
+  state.pinchDistance = gesture.distance;
+  const steps = Math.trunc(state.pinchRemainder / PINCH_PIXELS_PER_ZOOM_STEP);
+  if (steps === 0) return;
+  state.pinchRemainder -= steps * PINCH_PIXELS_PER_ZOOM_STEP;
+  setDisplayZoomAt(displayZoomPercent() + steps, gesture.centerX, gesture.centerY);
+}
+
+function resetPinch() {
+  state.pinchDistance = null;
+  state.pinchRemainder = 0;
+}
+
+function pinchGesture() {
+  const points = Array.from(state.touchPointers.values());
+  if (points.length < 2) return null;
+  const [a, b] = points;
+  return {
+    distance: Math.hypot(a.x - b.x, a.y - b.y),
+    centerX: (a.x + b.x) / 2,
+    centerY: (a.y + b.y) / 2,
+  };
 }
 
 function handleWheelZoom(event) {
