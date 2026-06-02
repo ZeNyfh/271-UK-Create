@@ -340,7 +340,12 @@ function updatePinchGesture() {
   const steps = Math.trunc(state.pinchRemainder / PINCH_PIXELS_PER_ZOOM_STEP);
   if (steps !== 0) {
     state.pinchRemainder -= steps * PINCH_PIXELS_PER_ZOOM_STEP;
-    setDisplayZoomAt(displayZoomPercent() + steps, gesture.centerX, gesture.centerY);
+    let percent = displayZoomPercent();
+    const direction = Math.sign(steps);
+    for (let i = 0; i < Math.abs(steps); i += 1) {
+      percent = nextZoomPercent(percent, direction, false);
+    }
+    setDisplayZoomAt(percent, gesture.centerX, gesture.centerY);
     return;
   }
   applyTransform();
@@ -498,7 +503,11 @@ function renderViewport() {
   for (const entry of state.layers.values()) {
     if (!entry.enabled) continue;
     const mip = chooseMip(entry.layer);
-    const decoded = bitmapForLayer(entry.layer, mip, crop);
+    const region = layerDecodeRegion(crop, mip);
+    const desiredKey = layerRegionCacheKey(entry.layer, mip, region);
+    activeBitmapKeys.add(desiredKey);
+    ensureLayerBitmapLoad(entry.layer, mip, region, desiredKey);
+    const decoded = cachedLayerRegion(entry.layer, mip, crop) || fallbackLayerRegion(entry.layer, crop);
     if (!decoded) continue;
     activeBitmapKeys.add(decoded.key);
     drawLayerBitmap(ctx, decoded, crop);
@@ -515,14 +524,17 @@ function visibleImageCrop(rect) {
   return { left, top, right, bottom };
 }
 
-function bitmapForLayer(layer, mip, crop) {
-  const existing = cachedLayerRegion(layer, mip, crop);
-  if (existing) return existing;
-  const region = layerDecodeRegion(crop, mip);
-  const key = layerRegionCacheKey(layer, mip, region);
-  if (!state.layerLoads.has(key)) {
-    const load = loadLayerBitmap(layer, mip, region, key).finally(() => state.layerLoads.delete(key));
-    state.layerLoads.set(key, load);
+function ensureLayerBitmapLoad(layer, mip, region, key) {
+  if (state.layerBitmaps.has(key) || state.layerLoads.has(key)) return;
+  const load = loadLayerBitmap(layer, mip, region, key).finally(() => state.layerLoads.delete(key));
+  state.layerLoads.set(key, load);
+}
+
+function fallbackLayerRegion(layer, crop) {
+  const candidates = Array.from(state.layerBitmaps.values()).reverse();
+  for (const decoded of candidates) {
+    if (!decoded.key.startsWith(`${layer.name}\n`)) continue;
+    if (intersectImageCrop(crop, decoded)) return decoded;
   }
   return null;
 }
@@ -530,23 +542,11 @@ function bitmapForLayer(layer, mip, crop) {
 function cachedLayerRegion(layer, mip, crop) {
   const prefix = `${layerCacheKey(layer, mip)}\n`;
   const visible = mipVisibleRegion(crop, mip);
-  for (const [key, decoded] of state.layerBitmaps) {
-    if (!key.startsWith(prefix)) continue;
+  for (const decoded of state.layerBitmaps.values()) {
+    if (!decoded.key.startsWith(prefix)) continue;
     if (containsRegion(decoded.region, visible)) return decoded;
   }
   return null;
-}
-
-function mipVisibleRegion(crop, mip) {
-  const factor = Number(mip.factor) || 1;
-  const width = Number(mip.width) || Math.ceil(state.imageWidth / factor);
-  const height = Number(mip.height) || Math.ceil(state.imageHeight / factor);
-  return {
-    left: Math.max(0, Math.floor(crop.left / factor)),
-    top: Math.max(0, Math.floor(crop.top / factor)),
-    right: Math.min(width, Math.ceil(crop.right / factor)),
-    bottom: Math.min(height, Math.ceil(crop.bottom / factor)),
-  };
 }
 
 function layerDecodeRegion(crop, mip) {
@@ -569,8 +569,36 @@ function layerDecodeRegion(crop, mip) {
   };
 }
 
+function mipVisibleRegion(crop, mip) {
+  const factor = Number(mip.factor) || 1;
+  const width = Number(mip.width) || Math.ceil(state.imageWidth / factor);
+  const height = Number(mip.height) || Math.ceil(state.imageHeight / factor);
+  return {
+    left: Math.max(0, Math.floor(crop.left / factor)),
+    top: Math.max(0, Math.floor(crop.top / factor)),
+    right: Math.min(width, Math.ceil(crop.right / factor)),
+    bottom: Math.min(height, Math.ceil(crop.bottom / factor)),
+  };
+}
+
 function containsRegion(outer, inner) {
   return outer.left <= inner.left && outer.top <= inner.top && outer.right >= inner.right && outer.bottom >= inner.bottom;
+}
+
+function intersectImageCrop(crop, decoded) {
+  const factor = Number(decoded.mip.factor) || 1;
+  const decodedCrop = {
+    left: decoded.region.left * factor,
+    top: decoded.region.top * factor,
+    right: decoded.region.right * factor,
+    bottom: decoded.region.bottom * factor,
+  };
+  const left = Math.max(crop.left, decodedCrop.left);
+  const top = Math.max(crop.top, decodedCrop.top);
+  const right = Math.min(crop.right, decodedCrop.right);
+  const bottom = Math.min(crop.bottom, decodedCrop.bottom);
+  if (right <= left || bottom <= top) return null;
+  return { left, top, right, bottom };
 }
 
 async function loadLayerBitmap(layer, mip, region, key) {
@@ -588,15 +616,17 @@ async function loadLayerBitmap(layer, mip, region, key) {
 }
 
 function drawLayerBitmap(ctx, decoded, crop) {
+  const drawCrop = intersectImageCrop(crop, decoded);
+  if (!drawCrop) return;
   const factor = Number(decoded.mip.factor) || 1;
-  const sx = crop.left / factor - decoded.region.left;
-  const sy = crop.top / factor - decoded.region.top;
-  const sw = (crop.right - crop.left) / factor;
-  const sh = (crop.bottom - crop.top) / factor;
-  const dx = state.offsetX + crop.left * state.zoom;
-  const dy = state.offsetY + crop.top * state.zoom;
-  const dw = (crop.right - crop.left) * state.zoom;
-  const dh = (crop.bottom - crop.top) * state.zoom;
+  const sx = drawCrop.left / factor - decoded.region.left;
+  const sy = drawCrop.top / factor - decoded.region.top;
+  const sw = (drawCrop.right - drawCrop.left) / factor;
+  const sh = (drawCrop.bottom - drawCrop.top) / factor;
+  const dx = state.offsetX + drawCrop.left * state.zoom;
+  const dy = state.offsetY + drawCrop.top * state.zoom;
+  const dw = (drawCrop.right - drawCrop.left) * state.zoom;
+  const dh = (drawCrop.bottom - drawCrop.top) * state.zoom;
   ctx.drawImage(decoded.bitmap, sx, sy, sw, sh, dx, dy, dw, dh);
 }
 
