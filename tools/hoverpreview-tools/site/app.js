@@ -727,7 +727,8 @@ function updateStatus(event) {
   const heightText = sample.height === null || sample.height === undefined ? "nodata/ocean" : `${(sample.height * 0.1).toFixed(1)} m`;
   const bng = bngText(sample.dataX, sample.dataZ);
   const details = layerDetails(sample);
-  setStatus(`Minecraft x ${sample.minecraftX}, z ${sample.minecraftZ} | height ${heightText} | data ${sample.dataX},${sample.dataZ} | tile ${String(sample.tileX).padStart(3, "0")}_${String(sample.tileZ).padStart(3, "0")} cell ${sample.localX},${sample.localZ}${bng}${details}`);
+  const detailText = details ? `${details} | ` : "";
+  setStatus(`${detailText}Minecraft x ${sample.minecraftX}, z ${sample.minecraftZ} | height ${heightText} | data ${sample.dataX},${sample.dataZ} | tile ${String(sample.tileX).padStart(3, "0")}_${String(sample.tileZ).padStart(3, "0")} cell ${sample.localX},${sample.localZ}${bng}`);
 }
 
 function bngText(dataX, dataZ) {
@@ -752,7 +753,7 @@ function layerDetails(sample) {
       parts.push(`${labelFor(entry.layer.name)}: ${classLabel(entry.layer.name, value)}`);
     }
   }
-  return parts.length ? ` | ${parts.join(" | ")}` : "";
+  return parts.join(" | ");
 }
 
 function oreAmountText(oreName, score) {
@@ -862,20 +863,18 @@ async function loadSample(layer, imageX = null, imageY = null) {
     const response = await fetch(new URL(sampleFile, state.baseUrl), { cache: "force-cache" });
     if (!response.ok) return;
     const blob = await response.blob();
-    const bitmap = crop.full
-      ? await createImageBitmap(blob)
-      : await createImageBitmap(blob, crop.left, crop.top, crop.width, crop.height);
+    const decoded = await decodeSampleBitmap(blob, crop);
     const entry = state.layers.get(layer.name);
     if (layer.name !== "height" && (!entry || !entry.enabled)) {
-      if (typeof bitmap.close === "function") bitmap.close();
+      if (typeof decoded.bitmap.close === "function") decoded.bitmap.close();
       return;
     }
     const canvas = document.createElement("canvas");
-    canvas.width = bitmap.width;
-    canvas.height = bitmap.height;
+    canvas.width = decoded.width;
+    canvas.height = decoded.height;
     const ctx = canvas.getContext("2d", { willReadFrequently: true });
-    ctx.drawImage(bitmap, 0, 0);
-    if (typeof bitmap.close === "function") bitmap.close();
+    ctx.drawImage(decoded.bitmap, decoded.sourceX, decoded.sourceY, decoded.width, decoded.height, 0, 0, decoded.width, decoded.height);
+    if (typeof decoded.bitmap.close === "function") decoded.bitmap.close();
     releaseSample(layer.name);
     state.samples.set(layer.name, {
       canvas,
@@ -890,6 +889,20 @@ async function loadSample(layer, imageX = null, imageY = null) {
   })().finally(() => state.sampleLoads.delete(key));
   state.sampleLoads.set(key, load);
   return load;
+}
+
+async function decodeSampleBitmap(blob, crop) {
+  if (crop.full) {
+    const bitmap = await createImageBitmap(blob);
+    return { bitmap, sourceX: 0, sourceY: 0, width: bitmap.width, height: bitmap.height };
+  }
+  try {
+    const bitmap = await createImageBitmap(blob, crop.left, crop.top, crop.width, crop.height);
+    return { bitmap, sourceX: 0, sourceY: 0, width: bitmap.width, height: bitmap.height };
+  } catch {
+    const bitmap = await createImageBitmap(blob);
+    return { bitmap, sourceX: crop.left, sourceY: crop.top, width: crop.width, height: crop.height };
+  }
 }
 
 function sampleCropFor(layer, imageX, imageY) {
@@ -955,4 +968,5 @@ async function copyCoordinates(event) {
 
 function setStatus(message) {
   elements.status.value = message;
+  elements.status.textContent = message;
 }
