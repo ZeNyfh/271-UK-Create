@@ -68,6 +68,31 @@ button:active { background: var(--button-active); }
   text-align: right;
 }
 .zoom-hint { font-size: 12px; }
+.latlon-form {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.latlon-form label {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--muted);
+}
+.coord-input {
+  width: 86px;
+  min-height: 26px;
+  border: 1px solid #9f9f9f;
+  border-radius: 2px;
+  background: #ffffff;
+  color: var(--text);
+  padding: 2px 5px;
+}
+.coord-input::-webkit-outer-spin-button,
+.coord-input::-webkit-inner-spin-button {
+  margin: 0;
+  appearance: none;
+}
 .control-separator {
   align-self: stretch;
   width: 1px;

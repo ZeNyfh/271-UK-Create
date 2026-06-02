@@ -13,8 +13,6 @@ const MIN_MAP_ZOOM = 0.09;
 const MAX_DISPLAY_ZOOM_PERCENT = 500;
 const MAX_MAP_ZOOM = MIN_MAP_ZOOM + MAX_DISPLAY_ZOOM_PERCENT / 100;
 const WHEEL_DELTA_PER_ZOOM_STEP = 100;
-const PINCH_PIXELS_PER_ZOOM_STEP = 80;
-const PINCH_DISTANCE_DEADZONE_PIXELS = 10;
 const SAMPLE_CROP_SIZE = 512;
 const BACKGROUND_ORE_ATTEMPT_MULTIPLIER = 0.1;
 const ORE_AREA_ATTEMPT_MULTIPLIER = 3.0;
@@ -50,6 +48,9 @@ const elements = {
   zoomOut: document.querySelector("#zoom-out"),
   zoomFit: document.querySelector("#zoom-fit"),
   zoomLabel: document.querySelector("#zoom-label"),
+  latlonForm: document.querySelector("#latlon-form"),
+  latInput: document.querySelector("#lat-input"),
+  lonInput: document.querySelector("#lon-input"),
   scrollX: document.querySelector(".scrollbar-x span"),
   scrollY: document.querySelector(".scrollbar-y span"),
 };
@@ -93,7 +94,6 @@ const state = {
   pinchDistance: null,
   pinchCenterX: null,
   pinchCenterY: null,
-  pinchRemainder: 0,
   lastStatusPoint: null,
 };
 
@@ -116,6 +116,10 @@ elements.zoomLabel.addEventListener("wheel", (event) => {
   event.preventDefault();
   stepZoomAroundCentre(event.deltaY < 0 ? 1 : -1, event.shiftKey);
 }, { passive: false });
+elements.latlonForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  goToLatLon();
+});
 
 elements.viewer.addEventListener("contextmenu", (event) => event.preventDefault());
 elements.viewer.addEventListener("wheel", (event) => {
@@ -362,7 +366,6 @@ function beginPinch() {
   state.pinchDistance = gesture.distance;
   state.pinchCenterX = gesture.centerX;
   state.pinchCenterY = gesture.centerY;
-  state.pinchRemainder = 0;
 }
 
 function updatePinchGesture() {
@@ -372,28 +375,16 @@ function updatePinchGesture() {
     beginPinch();
     return;
   }
-  state.offsetX += gesture.centerX - state.pinchCenterX;
-  state.offsetY += gesture.centerY - state.pinchCenterY;
+  const rect = elements.viewer.getBoundingClientRect();
+  const imageX = (state.pinchCenterX - rect.left - state.offsetX) / state.zoom;
+  const imageY = (state.pinchCenterY - rect.top - state.offsetY) / state.zoom;
+  const distanceRatio = gesture.distance / Math.max(1, state.pinchDistance);
+  state.zoom = clampZoom(state.zoom * distanceRatio);
+  state.offsetX = gesture.centerX - rect.left - imageX * state.zoom;
+  state.offsetY = gesture.centerY - rect.top - imageY * state.zoom;
   state.pinchCenterX = gesture.centerX;
   state.pinchCenterY = gesture.centerY;
-  const distanceDelta = gesture.distance - state.pinchDistance;
   state.pinchDistance = gesture.distance;
-  if (Math.abs(distanceDelta) >= PINCH_DISTANCE_DEADZONE_PIXELS) {
-    state.pinchRemainder += distanceDelta;
-  } else {
-    state.pinchRemainder = 0;
-  }
-  const steps = Math.trunc(state.pinchRemainder / PINCH_PIXELS_PER_ZOOM_STEP);
-  if (steps !== 0) {
-    state.pinchRemainder -= steps * PINCH_PIXELS_PER_ZOOM_STEP;
-    let percent = displayZoomPercent();
-    const direction = Math.sign(steps);
-    for (let i = 0; i < Math.abs(steps); i += 1) {
-      percent = nextZoomPercent(percent, direction, false);
-    }
-    setDisplayZoomAt(percent, gesture.centerX, gesture.centerY);
-    return;
-  }
   applyTransform();
 }
 
@@ -401,7 +392,6 @@ function resetPinch() {
   state.pinchDistance = null;
   state.pinchCenterX = null;
   state.pinchCenterY = null;
-  state.pinchRemainder = 0;
 }
 
 function pinchGesture() {
@@ -482,6 +472,134 @@ function parseZoomPercent(value) {
 
 function updateZoomInput() {
   elements.zoomLabel.value = `${displayZoomPercent()}%`;
+}
+
+function goToLatLon() {
+  if (!state.manifest) return;
+  const lon = Number.parseFloat(elements.lonInput.value);
+  const lat = Number.parseFloat(elements.latInput.value);
+  if (!Number.isFinite(lon) || !Number.isFinite(lat)) {
+    setStatus("Enter longitude and latitude as decimal degrees.");
+    return;
+  }
+  const bng = wgs84ToBritishNationalGrid(lat, lon);
+  const image = bngToImage(bng.easting, bng.northing);
+  if (!image) {
+    setStatus("This preview does not include BNG georeferencing.");
+    return;
+  }
+  centerImagePoint(image.x, image.y);
+  const inside = image.x >= 0 && image.y >= 0 && image.x < state.imageWidth && image.y < state.imageHeight;
+  setStatus(`Centered on lon ${lon.toFixed(6)}, lat ${lat.toFixed(6)} | BNG E ${bng.easting.toFixed(0)}, N ${bng.northing.toFixed(0)}${inside ? "" : " | outside generated world"}`);
+}
+
+function centerImagePoint(imageX, imageY) {
+  const rect = elements.viewer.getBoundingClientRect();
+  state.offsetX = rect.width / 2 - imageX * state.zoom;
+  state.offsetY = rect.height / 2 - imageY * state.zoom;
+  applyTransform();
+}
+
+function bngToImage(easting, northing) {
+  const geo = state.manifest.georeferencing || {};
+  const world = state.manifest.world || {};
+  const required = [geo.bng_min_easting, geo.bng_max_easting, geo.bng_min_northing, geo.bng_max_northing, world.width, world.depth];
+  if (required.some((value) => value === undefined)) return null;
+  const dataX = (easting - Number(geo.bng_min_easting)) * Number(world.width) / (Number(geo.bng_max_easting) - Number(geo.bng_min_easting)) - 0.5;
+  const dataZ = (Number(geo.bng_max_northing) - northing) * Number(world.depth) / (Number(geo.bng_max_northing) - Number(geo.bng_min_northing)) - 0.5;
+  const scale = Number(state.manifest.scale || 1);
+  return { x: dataX / scale, y: dataZ / scale };
+}
+
+function wgs84ToBritishNationalGrid(latDeg, lonDeg) {
+  const wgs84 = latLonToCartesian(latDeg, lonDeg, 6378137.0, 6356752.3141);
+  const osgb36 = helmertTransformWgs84ToOsgb36(wgs84);
+  const latLon = cartesianToLatLon(osgb36.x, osgb36.y, osgb36.z, 6377563.396, 6356256.909);
+  return osgb36LatLonToBng(latLon.lat, latLon.lon);
+}
+
+function latLonToCartesian(latDeg, lonDeg, a, b) {
+  const lat = degreesToRadians(latDeg);
+  const lon = degreesToRadians(lonDeg);
+  const e2 = 1 - (b * b) / (a * a);
+  const nu = a / Math.sqrt(1 - e2 * Math.sin(lat) ** 2);
+  return {
+    x: nu * Math.cos(lat) * Math.cos(lon),
+    y: nu * Math.cos(lat) * Math.sin(lon),
+    z: (nu * (1 - e2)) * Math.sin(lat),
+  };
+}
+
+function helmertTransformWgs84ToOsgb36(point) {
+  const tx = -446.448;
+  const ty = 125.157;
+  const tz = -542.060;
+  const scale = -20.4894e-6;
+  const rx = secondsToRadians(-0.1502);
+  const ry = secondsToRadians(-0.2470);
+  const rz = secondsToRadians(-0.8421);
+  return {
+    x: tx + (1 + scale) * point.x - rz * point.y + ry * point.z,
+    y: ty + rz * point.x + (1 + scale) * point.y - rx * point.z,
+    z: tz - ry * point.x + rx * point.y + (1 + scale) * point.z,
+  };
+}
+
+function cartesianToLatLon(x, y, z, a, b) {
+  const e2 = 1 - (b * b) / (a * a);
+  const p = Math.hypot(x, y);
+  let lat = Math.atan2(z, p * (1 - e2));
+  let previous;
+  do {
+    previous = lat;
+    const nu = a / Math.sqrt(1 - e2 * Math.sin(lat) ** 2);
+    lat = Math.atan2(z + e2 * nu * Math.sin(lat), p);
+  } while (Math.abs(lat - previous) > 1e-12);
+  return { lat, lon: Math.atan2(y, x) };
+}
+
+function osgb36LatLonToBng(lat, lon) {
+  const a = 6377563.396;
+  const b = 6356256.909;
+  const f0 = 0.9996012717;
+  const lat0 = degreesToRadians(49);
+  const lon0 = degreesToRadians(-2);
+  const n0 = -100000;
+  const e0 = 400000;
+  const e2 = 1 - (b * b) / (a * a);
+  const n = (a - b) / (a + b);
+  const sinLat = Math.sin(lat);
+  const cosLat = Math.cos(lat);
+  const tanLat = Math.tan(lat);
+  const nu = a * f0 / Math.sqrt(1 - e2 * sinLat ** 2);
+  const rho = a * f0 * (1 - e2) / ((1 - e2 * sinLat ** 2) ** 1.5);
+  const eta2 = nu / rho - 1;
+  const m = b * f0 * (
+    (1 + n + 1.25 * n ** 2 + 1.25 * n ** 3) * (lat - lat0)
+    - (3 * n + 3 * n ** 2 + 2.625 * n ** 3) * Math.sin(lat - lat0) * Math.cos(lat + lat0)
+    + (1.875 * n ** 2 + 1.875 * n ** 3) * Math.sin(2 * (lat - lat0)) * Math.cos(2 * (lat + lat0))
+    - (35 / 24) * n ** 3 * Math.sin(3 * (lat - lat0)) * Math.cos(3 * (lat + lat0))
+  );
+  const dLon = lon - lon0;
+  const i = m + n0;
+  const ii = nu / 2 * sinLat * cosLat;
+  const iii = nu / 24 * sinLat * cosLat ** 3 * (5 - tanLat ** 2 + 9 * eta2);
+  const iiia = nu / 720 * sinLat * cosLat ** 5 * (61 - 58 * tanLat ** 2 + tanLat ** 4);
+  const iv = nu * cosLat;
+  const v = nu / 6 * cosLat ** 3 * (nu / rho - tanLat ** 2);
+  const vi = nu / 120 * cosLat ** 5 * (5 - 18 * tanLat ** 2 + tanLat ** 4 + 14 * eta2 - 58 * tanLat ** 2 * eta2);
+  return {
+    easting: e0 + iv * dLon + v * dLon ** 3 + vi * dLon ** 5,
+    northing: i + ii * dLon ** 2 + iii * dLon ** 4 + iiia * dLon ** 6,
+  };
+}
+
+function degreesToRadians(value) {
+  return value * Math.PI / 180;
+}
+
+function secondsToRadians(value) {
+  return degreesToRadians(value / 3600);
 }
 
 function applyTransform() {

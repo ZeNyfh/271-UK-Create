@@ -18,11 +18,17 @@
       <input id="zoom-label" class="zoom-label" type="text" value="100%" inputmode="numeric" aria-label="Zoom percentage" />
       <span class="zoom-hint">Shift: 1%</span>
       <span class="control-separator" aria-hidden="true"></span>
+      <span class="control-separator" aria-hidden="true"></span>
       <div id="layer-controls" class="control-list" aria-label="Layer toggles"></div>
       <details class="ore-menu">
         <summary>Ores ▾</summary>
         <div id="ore-controls" class="control-list ore-list" aria-label="Ore toggles"></div>
       </details>
+      <form id="latlon-form" class="latlon-form" aria-label="Go to longitude and latitude">
+        <label>Lon <input id="lon-input" class="coord-input" type="text" inputmode="decimal" autocomplete="off" /></label>
+        <label>Lat <input id="lat-input" class="coord-input" type="text" inputmode="decimal" autocomplete="off" /></label>
+        <button id="latlon-go" type="submit">Go</button>
+      </form>
     </header>
 
     <main class="map-frame">
