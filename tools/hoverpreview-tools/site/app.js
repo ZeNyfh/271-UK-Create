@@ -5,6 +5,9 @@ const DEFAULT_VISIBLE_OVERLAYS = new Set(["surface", "vegetation", "rivers"]);
 const DEFAULT_VISIBLE_ORES = new Set(["coal", "iron", "copper", "zinc", "gold"]);
 const MAX_DEVICE_PIXEL_RATIO = 2;
 const MIN_DECODE_PADDING_PIXELS = 192;
+const MIN_MAP_ZOOM = 0.09;
+const MAX_DISPLAY_ZOOM_PERCENT = 500;
+const MAX_MAP_ZOOM = MIN_MAP_ZOOM + MAX_DISPLAY_ZOOM_PERCENT / 100;
 
 const elements = {
   loadState: document.querySelector("#load-state"),
@@ -29,7 +32,6 @@ const state = {
   imageWidth: 0,
   imageHeight: 0,
   zoom: 1,
-  minZoom: 0.02,
   offsetX: 0,
   offsetY: 0,
   panPointerId: null,
@@ -235,7 +237,7 @@ function layerRegionCacheKey(layer, mip, region) {
 function fitView() {
   if (!state.manifest) return;
   const rect = elements.viewer.getBoundingClientRect();
-  state.zoom = Math.max(state.minZoom, Math.min(1, rect.width / state.imageWidth, rect.height / state.imageHeight));
+  state.zoom = clampZoom(Math.min(1, rect.width / state.imageWidth, rect.height / state.imageHeight));
   state.offsetX = 0;
   state.offsetY = 0;
   applyTransform();
@@ -250,10 +252,18 @@ function zoomAt(clientX, clientY, factor) {
   if (!state.manifest) return;
   const rect = elements.viewer.getBoundingClientRect();
   const before = screenToImage(clientX, clientY);
-  state.zoom = Math.max(state.minZoom, Math.min(64, state.zoom * factor));
+  state.zoom = clampZoom(state.zoom * factor);
   state.offsetX = clientX - rect.left - before.x * state.zoom;
   state.offsetY = clientY - rect.top - before.y * state.zoom;
   applyTransform();
+}
+
+function clampZoom(zoom) {
+  return Math.max(MIN_MAP_ZOOM, Math.min(MAX_MAP_ZOOM, zoom));
+}
+
+function displayZoomPercent() {
+  return Math.max(0, Math.min(MAX_DISPLAY_ZOOM_PERCENT, Math.round((state.zoom - MIN_MAP_ZOOM) * 100)));
 }
 
 function applyTransform() {
@@ -264,7 +274,7 @@ function applyTransform() {
   const minY = Math.min(0, rect.height - scaledHeight);
   state.offsetX = Math.min(0, Math.max(minX, state.offsetX));
   state.offsetY = Math.min(0, Math.max(minY, state.offsetY));
-  elements.zoomLabel.textContent = `${Math.round(state.zoom * 100)}%`;
+  elements.zoomLabel.textContent = `${displayZoomPercent()}%`;
   updateScrollbars(rect, scaledWidth, scaledHeight);
   updateMeasurementOverlay();
   scheduleRender();
