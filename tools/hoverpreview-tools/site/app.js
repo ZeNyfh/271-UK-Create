@@ -9,8 +9,8 @@ const MIN_MAP_ZOOM = 0.09;
 const MAX_DISPLAY_ZOOM_PERCENT = 500;
 const MAX_MAP_ZOOM = MIN_MAP_ZOOM + MAX_DISPLAY_ZOOM_PERCENT / 100;
 const WHEEL_DELTA_PER_ZOOM_STEP = 100;
-const PINCH_PIXELS_PER_ZOOM_STEP = 36;
-const PINCH_DISTANCE_DEADZONE_PIXELS = 4;
+const PINCH_PIXELS_PER_ZOOM_STEP = 80;
+const PINCH_DISTANCE_DEADZONE_PIXELS = 10;
 
 const elements = {
   loadState: document.querySelector("#load-state"),
@@ -334,6 +334,8 @@ function updatePinchGesture() {
   state.pinchDistance = gesture.distance;
   if (Math.abs(distanceDelta) >= PINCH_DISTANCE_DEADZONE_PIXELS) {
     state.pinchRemainder += distanceDelta;
+  } else {
+    state.pinchRemainder = 0;
   }
   const steps = Math.trunc(state.pinchRemainder / PINCH_PIXELS_PER_ZOOM_STEP);
   if (steps !== 0) {
