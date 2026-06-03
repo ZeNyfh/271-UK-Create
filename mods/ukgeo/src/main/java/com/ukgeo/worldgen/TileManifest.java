@@ -34,6 +34,9 @@ public final class TileManifest {
     public final int vegetationCellBlocks;
     public final Map<Integer, VegetationClass> vegetationClasses;
     public final String riversPath;
+    public final String riverOrderPath;
+    public final String riverHalfWidthPath;
+    public final int maxRiverHalfWidth;
 
     private TileManifest(Path root, JsonObject json) {
         this.root = root;
@@ -93,7 +96,17 @@ public final class TileManifest {
             this.vegetationCellBlocks = 1;
         }
         JsonObject rivers = json.getAsJsonObject("rivers");
-        this.riversPath = rivers == null ? null : rivers.get("path").getAsString();
+        if (rivers == null) {
+            this.riversPath = null;
+            this.riverOrderPath = null;
+            this.riverHalfWidthPath = null;
+            this.maxRiverHalfWidth = 0;
+        } else {
+            this.riversPath = rivers.get("path").getAsString();
+            this.riverOrderPath = rivers.has("order_path") ? rivers.get("order_path").getAsString() : null;
+            this.riverHalfWidthPath = rivers.has("half_width_path") ? rivers.get("half_width_path").getAsString() : null;
+            this.maxRiverHalfWidth = rivers.has("max_half_width") ? Math.max(0, rivers.get("max_half_width").getAsInt()) : 0;
+        }
         this.orePaths = new LinkedHashMap<>();
         JsonObject ores = json.getAsJsonObject("ore_layers");
         if (ores != null) {

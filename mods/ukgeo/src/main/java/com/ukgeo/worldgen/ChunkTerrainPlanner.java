@@ -71,9 +71,11 @@ final class ChunkTerrainPlanner {
         int minBuildY = chunk.getMinBuildHeight();
         int chunkMinX = chunk.getPos().getMinBlockX();
         int chunkMinZ = chunk.getPos().getMinBlockZ();
+        WaterProtection[] waterProtections = waterProtections(plan);
         for (int localZ = 0; localZ < CHUNK_SIZE; localZ++) {
             for (int localX = 0; localX < CHUNK_SIZE; localX++) {
                 ColumnPlan column = plan.columns[localZ * CHUNK_SIZE + localX];
+                WaterProtection protection = waterProtections[localZ * CHUNK_SIZE + localX];
                 int vanillaTop = caveMask.usesDelegate() ? surface.getHighestTaken(localX, localZ) : minBuildY;
                 fillColumn(
                     chunk,
@@ -86,12 +88,73 @@ final class ChunkTerrainPlanner {
                     chunkMinZ + localZ,
                     minBuildY,
                     column,
+                    protection,
                     plan.seaLevelY(),
                     caveMask,
                     vanillaTop
                 );
             }
         }
+    }
+
+    static void enforceWaterColumns(Plan plan, ChunkAccess chunk) {
+        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+        Heightmap ocean = chunk.getOrCreateHeightmapUnprimed(Heightmap.Types.OCEAN_FLOOR_WG);
+        Heightmap surface = chunk.getOrCreateHeightmapUnprimed(Heightmap.Types.WORLD_SURFACE_WG);
+        int minBuildY = chunk.getMinBuildHeight();
+        for (int localZ = 0; localZ < CHUNK_SIZE; localZ++) {
+            for (int localX = 0; localX < CHUNK_SIZE; localX++) {
+                ColumnPlan column = plan.columns[localZ * CHUNK_SIZE + localX];
+                int waterSurfaceY = plannedWaterSurfaceY(column, plan.seaLevelY());
+                if (waterSurfaceY == Integer.MIN_VALUE) {
+                    clearUnplannedSurfaceWater(chunk, cursor, localX, localZ, column.terrainTop());
+                    continue;
+                }
+                for (int y = Math.max(minBuildY, column.terrainTop()); y <= waterSurfaceY; y++) {
+                    BlockState state = enforcedWaterColumnState(y, column, minBuildY, plan.seaLevelY());
+                    setBlock(chunk, cursor, ocean, surface, localX, y, localZ, state);
+                }
+                clearWaterAboveSurface(chunk, cursor, localX, localZ, waterSurfaceY);
+            }
+        }
+    }
+
+    private static void clearUnplannedSurfaceWater(ChunkAccess chunk, BlockPos.MutableBlockPos cursor, int localX, int localZ, int terrainTop) {
+        int fromY = Math.max(chunk.getMinBuildHeight(), terrainTop + 1);
+        int toY = Math.min(chunk.getMaxBuildHeight() - 1, terrainTop + 4);
+        for (int y = fromY; y <= toY; y++) {
+            if (chunk.getBlockState(cursor.set(localX, y, localZ)).is(Blocks.WATER)) {
+                chunk.setBlockState(cursor, Blocks.AIR.defaultBlockState(), false);
+            }
+        }
+    }
+
+    private static void clearWaterAboveSurface(ChunkAccess chunk, BlockPos.MutableBlockPos cursor, int localX, int localZ, int waterSurfaceY) {
+        int fromY = Math.max(chunk.getMinBuildHeight(), waterSurfaceY + 1);
+        int toY = Math.min(chunk.getMaxBuildHeight() - 1, waterSurfaceY + 3);
+        for (int y = fromY; y <= toY; y++) {
+            if (chunk.getBlockState(cursor.set(localX, y, localZ)).is(Blocks.WATER)) {
+                chunk.setBlockState(cursor, Blocks.AIR.defaultBlockState(), false);
+            }
+        }
+    }
+
+    private static BlockState enforcedWaterColumnState(int y, ColumnPlan column, int minBuildY, int seaLevelY) {
+        int floorY = column.terrainTop();
+        if (y > floorY) {
+            return Blocks.WATER.defaultBlockState();
+        }
+        return columnStateFor(
+            y,
+            floorY,
+            minBuildY,
+            column.surfaceRock(),
+            column.steep(),
+            column.river(),
+            column.originalSurfaceY(),
+            column.vegetationClass(),
+            seaLevelY
+        );
     }
 
     static void applyOres(Plan plan, ChunkAccess chunk) {
@@ -143,6 +206,7 @@ final class ChunkTerrainPlanner {
         int worldZ,
         int minBuildY,
         ColumnPlan column,
+        WaterProtection protection,
         int seaLevelY,
         CaveMask caveMask,
         int vanillaTop
@@ -161,15 +225,15 @@ final class ChunkTerrainPlanner {
         for (int y = minBuildY + 1; y < stoneTop; y++) {
             CaveState caveState = caveState(chunk, cursor, caveMask, localX, y, localZ, worldX, worldZ, vanillaTop, terrainTop);
             if (caveState == CaveState.AIR) {
-                if (isProtectedWaterCave(column, y, seaLevelY)) {
-                    setBlock(chunk, cursor, ocean, surface, localX, y, localZ, protectedWaterState(column, y, minBuildY, surfaceRock, steep, river, originalSurfaceY, vegetationClass, seaLevelY));
+                if (isProtectedWaterCave(protection, y)) {
+                    setBlock(chunk, cursor, ocean, surface, localX, y, localZ, protectedWaterState(column, protection, y, minBuildY, surfaceRock, steep, river, originalSurfaceY, vegetationClass, seaLevelY));
                     continue;
                 }
                 setBlock(chunk, cursor, ocean, surface, localX, y, localZ, Blocks.AIR.defaultBlockState());
                 continue;
             } else if (caveState == CaveState.LAVA) {
-                if (isProtectedWaterCave(column, y, seaLevelY)) {
-                    setBlock(chunk, cursor, ocean, surface, localX, y, localZ, protectedWaterState(column, y, minBuildY, surfaceRock, steep, river, originalSurfaceY, vegetationClass, seaLevelY));
+                if (isProtectedWaterCave(protection, y)) {
+                    setBlock(chunk, cursor, ocean, surface, localX, y, localZ, protectedWaterState(column, protection, y, minBuildY, surfaceRock, steep, river, originalSurfaceY, vegetationClass, seaLevelY));
                     continue;
                 }
                 setBlock(chunk, cursor, ocean, surface, localX, y, localZ, Blocks.LAVA.defaultBlockState());
@@ -180,17 +244,15 @@ final class ChunkTerrainPlanner {
         for (int y = stoneTop; y <= clearTop; y++) {
             CaveState caveState = caveState(chunk, cursor, caveMask, localX, y, localZ, worldX, worldZ, vanillaTop, terrainTop);
             if (caveState == CaveState.AIR) {
-                if (isProtectedWaterCave(column, y, seaLevelY)) {
-                    BlockState state = columnStateFor(y, terrainTop, minBuildY, surfaceRock, steep, river, originalSurfaceY, vegetationClass, seaLevelY);
-                    setBlock(chunk, cursor, ocean, surface, localX, y, localZ, state.isAir() ? Blocks.WATER.defaultBlockState() : state);
+                if (isProtectedWaterCave(protection, y)) {
+                    setBlock(chunk, cursor, ocean, surface, localX, y, localZ, protectedWaterState(column, protection, y, minBuildY, surfaceRock, steep, river, originalSurfaceY, vegetationClass, seaLevelY));
                     continue;
                 }
                 setBlock(chunk, cursor, ocean, surface, localX, y, localZ, Blocks.AIR.defaultBlockState());
                 continue;
             } else if (caveState == CaveState.LAVA) {
-                if (isProtectedWaterCave(column, y, seaLevelY)) {
-                    BlockState state = columnStateFor(y, terrainTop, minBuildY, surfaceRock, steep, river, originalSurfaceY, vegetationClass, seaLevelY);
-                    setBlock(chunk, cursor, ocean, surface, localX, y, localZ, state.isAir() ? Blocks.WATER.defaultBlockState() : state);
+                if (isProtectedWaterCave(protection, y)) {
+                    setBlock(chunk, cursor, ocean, surface, localX, y, localZ, protectedWaterState(column, protection, y, minBuildY, surfaceRock, steep, river, originalSurfaceY, vegetationClass, seaLevelY));
                     continue;
                 }
                 setBlock(chunk, cursor, ocean, surface, localX, y, localZ, Blocks.LAVA.defaultBlockState());
@@ -201,8 +263,8 @@ final class ChunkTerrainPlanner {
         }
     }
 
-    private static boolean isProtectedWaterCave(ColumnPlan column, int y, int seaLevelY) {
-        return isProtectedWaterColumn(column, y, seaLevelY);
+    private static boolean isProtectedWaterCave(WaterProtection protection, int y) {
+        return protection.hasWater() && y <= protection.waterSurfaceY() && y >= protection.floorY() - WATERBED_PROTECTION_DEPTH;
     }
 
     private static boolean isProtectedWaterColumn(ColumnPlan column, int y, int seaLevelY) {
@@ -216,6 +278,7 @@ final class ChunkTerrainPlanner {
 
     private static BlockState protectedWaterState(
         ColumnPlan column,
+        WaterProtection protection,
         int y,
         int minBuildY,
         BlockState surfaceRock,
@@ -229,7 +292,7 @@ final class ChunkTerrainPlanner {
         if (!planned.isAir()) {
             return planned;
         }
-        return y <= plannedWaterSurfaceY(column, seaLevelY) ? Blocks.WATER.defaultBlockState() : Blocks.STONE.defaultBlockState();
+        return y > protection.floorY() && y <= protection.waterSurfaceY() ? Blocks.WATER.defaultBlockState() : Blocks.STONE.defaultBlockState();
     }
 
     private static boolean isPlannedWaterVolume(ColumnPlan column, int y, int seaLevelY) {
@@ -245,6 +308,38 @@ final class ChunkTerrainPlanner {
             return seaLevelY;
         }
         return Integer.MIN_VALUE;
+    }
+
+    private static WaterProtection[] waterProtections(Plan plan) {
+        WaterProtection[] protections = new WaterProtection[CHUNK_SIZE * CHUNK_SIZE];
+        for (int localZ = 0; localZ < CHUNK_SIZE; localZ++) {
+            for (int localX = 0; localX < CHUNK_SIZE; localX++) {
+                ColumnPlan column = plan.columns[localZ * CHUNK_SIZE + localX];
+                int ownSurface = plannedWaterSurfaceY(column, plan.seaLevelY());
+                boolean foundWater = ownSurface != Integer.MIN_VALUE;
+                int waterSurfaceY = foundWater ? ownSurface : Integer.MIN_VALUE;
+                int floorY = foundWater ? column.terrainTop() : Integer.MIN_VALUE;
+                for (int dz = -1; dz <= 1; dz++) {
+                    for (int dx = -1; dx <= 1; dx++) {
+                        int nx = localX + dx;
+                        int nz = localZ + dz;
+                        if (nx < 0 || nz < 0 || nx >= CHUNK_SIZE || nz >= CHUNK_SIZE) {
+                            continue;
+                        }
+                        ColumnPlan neighbor = plan.columns[nz * CHUNK_SIZE + nx];
+                        int neighborSurface = plannedWaterSurfaceY(neighbor, plan.seaLevelY());
+                        if (neighborSurface == Integer.MIN_VALUE) {
+                            continue;
+                        }
+                        foundWater = true;
+                        waterSurfaceY = Math.max(waterSurfaceY, neighborSurface);
+                        floorY = Math.max(floorY, neighbor.terrainTop());
+                    }
+                }
+                protections[localZ * CHUNK_SIZE + localX] = foundWater ? new WaterProtection(true, waterSurfaceY, floorY) : WaterProtection.none();
+            }
+        }
+        return protections;
     }
 
     private static CaveState caveState(
@@ -364,6 +459,12 @@ final class ChunkTerrainPlanner {
     }
 
     record Plan(ColumnPlan[] columns, OrePlacement[] orePlacements, int seaLevelY) {
+    }
+
+    private record WaterProtection(boolean hasWater, int waterSurfaceY, int floorY) {
+        static WaterProtection none() {
+            return new WaterProtection(false, Integer.MIN_VALUE, Integer.MIN_VALUE);
+        }
     }
 
     enum CaveState {

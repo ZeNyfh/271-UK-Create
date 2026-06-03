@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from collections import defaultdict, deque
 import math
 
 import geopandas as gpd
@@ -14,9 +15,12 @@ from tqdm import tqdm
 
 from .bgs import resolve_gpkg
 from .manifest import read_manifest, write_manifest
-from .tiles import write_u8_tile
+from .tiles import HEIGHT_NODATA, read_r16_tile, write_u8_tile
 
 console = Console()
+
+MAX_RIVER_HALFWIDTH = 40
+MIN_RIVER_HALFWIDTH_BY_ORDER = {1: 2, 2: 3, 3: 5}
 
 
 def make_river_tiles(
@@ -53,30 +57,67 @@ def make_river_tiles(
         if frame.empty:
             console.print("[yellow]No river features intersect the manifest extent.[/yellow]")
             arr = np.zeros((depth, width), dtype=np.uint8)
+        order_arr = np.zeros((depth, width), dtype=np.uint8)
+        half_width_arr = np.zeros((depth, width), dtype=np.uint8)
+        if frame.empty:
+            order_shapes = []
+            variable_shapes = []
         else:
             if frame.crs and str(frame.crs).upper() != "EPSG:27700":
                 frame = frame.to_crs("EPSG:27700")
+            lines = _extract_lines(frame.geometry)
+            strahler = _strahler_widths(lines, manifest, manifest_path.parent)
+            order_shapes = []
+            variable_shapes = []
             shapes = []
+            for edge in strahler.edges:
+                if edge.line.is_empty:
+                    continue
+                half_width = max(1, edge.half_width)
+                buffer_metres = half_width * _cell_metres(geo, width, depth)
+                buffered = edge.line.buffer(buffer_metres, cap_style="round", join_style="round")
+                shapes.append((buffered, 255))
+                variable_shapes.append((buffered, half_width))
+                order_shapes.append((buffered, min(255, max(1, edge.order))))
+            if not shapes:
+                shapes = []
+                variable_shapes = []
+                order_shapes = []
+            # Fall back to the old fixed-width raster if graph extraction produced no usable line edges.
+            fallback_fixed = not shapes
             for geom in tqdm(frame.geometry, desc="buffering rivers"):
                 if geom is None or geom.is_empty:
                     continue
                 if not isinstance(geom, (LineString, MultiLineString)):
                     continue
-                if width_metres > 0:
+                if width_metres > 0 and fallback_fixed:
                     buffered = geom.buffer(width_metres / 2.0, cap_style="round", join_style="round")
                     shapes.append((buffered, 255))
-                else:
+                    variable_shapes.append((buffered, max(1, int(round(width_metres / (2.0 * _cell_metres(geo, width, depth)))))))
+                    order_shapes.append((buffered, 1))
+                elif fallback_fixed:
                     shapes.append((geom, 255))
+                    variable_shapes.append((geom, 1))
+                    order_shapes.append((geom, 1))
             arr = rasterize(shapes, out_shape=(depth, width), transform=transform, fill=0, dtype=np.uint8, merge_alg=MergeAlg.replace, all_touched=True) if shapes else np.zeros((depth, width), dtype=np.uint8)
+            variable_shapes.sort(key=lambda item: item[1])
+            order_shapes.sort(key=lambda item: item[1])
+            half_width_arr = rasterize(variable_shapes, out_shape=(depth, width), transform=transform, fill=0, dtype=np.uint8, merge_alg=MergeAlg.replace, all_touched=True) if variable_shapes else half_width_arr
+            order_arr = rasterize(order_shapes, out_shape=(depth, width), transform=transform, fill=0, dtype=np.uint8, merge_alg=MergeAlg.replace, all_touched=True) if order_shapes else order_arr
         root = out / "water" / "rivers"
         _write_tiles(arr, root, tile_size)
+        _write_tiles(order_arr, out / "water" / "river_order", tile_size)
+        _write_tiles(half_width_arr, out / "water" / "river_half_width", tile_size)
         manifest["rivers"] = {
             "path": "water/rivers",
             "extension": ".u8.gz",
             "dtype": "uint8",
             "min": 0,
             "max": 255,
-            "note": "255 marks cells inside buffered river/watercourse vectors.",
+            "order_path": "water/river_order",
+            "half_width_path": "water/river_half_width",
+            "max_half_width": int(half_width_arr.max()) if half_width_arr.size else 0,
+            "note": "255 marks cells inside variable-width river/watercourse vectors. Widths are derived from approximate Strahler stream order.",
         }
         write_manifest(manifest_path, manifest)
         if debug_geotiff:
@@ -115,3 +156,196 @@ def _write_debug(path: Path, arr: np.ndarray, transform) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with rasterio.open(path, "w", driver="GTiff", height=arr.shape[0], width=arr.shape[1], count=1, dtype="uint8", crs="EPSG:27700", transform=transform) as dst:
         dst.write(arr, 1)
+
+
+def _extract_lines(geometries) -> list[LineString]:
+    lines: list[LineString] = []
+    for geom in geometries:
+        if geom is None or geom.is_empty:
+            continue
+        if isinstance(geom, LineString):
+            if len(geom.coords) >= 2:
+                lines.append(geom)
+        elif isinstance(geom, MultiLineString):
+            for part in geom.geoms:
+                if len(part.coords) >= 2:
+                    lines.append(part)
+    return lines
+
+
+def _cell_metres(geo: dict, width: int, depth: int) -> float:
+    x = (float(geo["bng_max_easting"]) - float(geo["bng_min_easting"])) / max(1, width)
+    z = (float(geo["bng_max_northing"]) - float(geo["bng_min_northing"])) / max(1, depth)
+    return (abs(x) + abs(z)) * 0.5
+
+
+class _HeightSampler:
+    def __init__(self, manifest: dict, root: Path):
+        self.manifest = manifest
+        self.root = root
+        self.tile_size = int(manifest["tile_size"])
+        self.geo = manifest["georeferencing"]
+        self.world = manifest["world"]
+        self.cache: dict[tuple[int, int], np.ndarray] = {}
+
+    def sample(self, easting: float, northing: float) -> float | None:
+        width = int(self.world["width"])
+        depth = int(self.world["depth"])
+        data_x = int(math.floor((easting - float(self.geo["bng_min_easting"])) * width / (float(self.geo["bng_max_easting"]) - float(self.geo["bng_min_easting"]))))
+        data_z = int(math.floor((float(self.geo["bng_max_northing"]) - northing) * depth / (float(self.geo["bng_max_northing"]) - float(self.geo["bng_min_northing"]))))
+        if data_x < 0 or data_z < 0 or data_x >= int(self.world["padded_width"]) or data_z >= int(self.world["padded_depth"]):
+            return None
+        tile_x = data_x // self.tile_size
+        tile_z = data_z // self.tile_size
+        tile = self.cache.get((tile_x, tile_z))
+        if tile is None:
+            path = self.root / self.manifest["height"]["path"] / f"{tile_x:03d}_{tile_z:03d}.r16.gz"
+            if not path.exists():
+                return None
+            tile = read_r16_tile(path, self.tile_size)
+            self.cache[(tile_x, tile_z)] = tile
+        value = int(tile[data_z % self.tile_size, data_x % self.tile_size])
+        return None if value == HEIGHT_NODATA else value / 10.0
+
+
+class _Edge:
+    def __init__(self, line: LineString, order: int, half_width: int):
+        self.line = line
+        self.order = order
+        self.half_width = half_width
+
+
+class _StrahlerResult:
+    def __init__(self, edges: list[_Edge]):
+        self.edges = edges
+
+
+def _strahler_widths(lines: list[LineString], manifest: dict, root: Path) -> _StrahlerResult:
+    if not lines:
+        return _StrahlerResult([])
+    sampler = _HeightSampler(manifest, root)
+    node_ids: dict[tuple[int, int], int] = {}
+    node_points: list[tuple[float, float]] = []
+
+    def node_id(point: tuple[float, float]) -> int:
+        key = (round(point[0]), round(point[1]))
+        found = node_ids.get(key)
+        if found is not None:
+            return found
+        found = len(node_points)
+        node_ids[key] = found
+        node_points.append((float(point[0]), float(point[1])))
+        return found
+
+    raw_edges: list[tuple[int, int, LineString]] = []
+    for line in lines:
+        coords = list(line.coords)
+        a = node_id((coords[0][0], coords[0][1]))
+        b = node_id((coords[-1][0], coords[-1][1]))
+        if a != b:
+            raw_edges.append((a, b, line))
+    if not raw_edges:
+        return _StrahlerResult([])
+
+    heights = [sampler.sample(e, n) for e, n in node_points]
+    downstream: dict[int, list[tuple[int, int]]] = defaultdict(list)
+    upstream_count: dict[int, int] = defaultdict(int)
+    oriented: list[tuple[int, int, LineString]] = []
+    for a, b, line in raw_edges:
+        ha = heights[a]
+        hb = heights[b]
+        if ha is not None and hb is not None and ha != hb:
+            src, dst = (a, b) if ha > hb else (b, a)
+        else:
+            # Deterministic coastal fallback: lower northing/southerly endpoint is treated as downstream.
+            na = node_points[a][1]
+            nb = node_points[b][1]
+            src, dst = (a, b) if (na > nb or (na == nb and a < b)) else (b, a)
+        downstream[src].append((dst, len(oriented)))
+        upstream_count[dst] += 1
+        upstream_count.setdefault(src, upstream_count.get(src, 0))
+        oriented.append((src, dst, line))
+
+    node_order = [1] * len(node_points)
+    incoming_orders: list[list[int]] = [[] for _ in node_points]
+    ready = deque(sorted(node for node in range(len(node_points)) if upstream_count.get(node, 0) == 0))
+    remaining = dict(upstream_count)
+    processed_edges: set[int] = set()
+
+    def combine(orders: list[int]) -> int:
+        if not orders:
+            return 1
+        highest = max(orders)
+        return highest + 1 if sum(1 for order in orders if order == highest) >= 2 else highest
+
+    while ready:
+        node = ready.popleft()
+        node_order[node] = max(node_order[node], combine(incoming_orders[node]))
+        for dst, edge_index in downstream.get(node, []):
+            processed_edges.add(edge_index)
+            incoming_orders[dst].append(node_order[node])
+            remaining[dst] = remaining.get(dst, 0) - 1
+            if remaining[dst] == 0:
+                ready.append(dst)
+
+    # Cycles/braids are collapsed deterministically by processing high-to-low elevation and carrying max incoming order.
+    unresolved = [i for i in range(len(oriented)) if i not in processed_edges]
+    for edge_index in sorted(unresolved, key=lambda i: (-(heights[oriented[i][0]] or -9999.0), oriented[i][0], oriented[i][1])):
+        src, dst, _ = oriented[edge_index]
+        node_order[src] = max(node_order[src], combine(incoming_orders[src]))
+        incoming_orders[dst].append(node_order[src])
+        node_order[dst] = max(node_order[dst], combine(incoming_orders[dst]))
+
+    edges = []
+    for src, dst, line in oriented:
+        order = max(1, node_order[src])
+        base_half_width = _half_width_for_order(order)
+        half_width = _scaled_half_width_for_order(order, base_half_width)
+        e0 = heights[src]
+        e1 = heights[dst]
+        if e0 is not None and e1 is not None:
+            slope = abs(e0 - e1) / max(1.0, line.length)
+            if slope > 0.018:
+                half_width = max(1, round(half_width * 0.75))
+            elif slope < 0.003 and min(e0, e1) < 90.0:
+                half_width = round(half_width * 1.2)
+        minimum = _minimum_half_width_for_order(order)
+        edges.append(_Edge(line, min(order, 255), min(MAX_RIVER_HALFWIDTH, max(minimum, half_width))))
+    return _StrahlerResult(edges)
+
+
+def _scaled_half_width_for_order(order: int, base_half_width: int) -> int:
+    scaled = math.ceil(base_half_width * _width_multiplier_for_order(order))
+    return max(_minimum_half_width_for_order(order), scaled)
+
+
+def _width_multiplier_for_order(order: int) -> float:
+    if order <= 1:
+        return 2.0
+    if order == 2:
+        return 1.8
+    return 1.5
+
+
+def _minimum_half_width_for_order(order: int) -> int:
+    if order <= 1:
+        return MIN_RIVER_HALFWIDTH_BY_ORDER[1]
+    if order == 2:
+        return MIN_RIVER_HALFWIDTH_BY_ORDER[2]
+    if order == 3:
+        return MIN_RIVER_HALFWIDTH_BY_ORDER[3]
+    return 1
+
+
+def _half_width_for_order(order: int) -> int:
+    if order <= 1:
+        return 1
+    if order == 2:
+        return 2
+    if order == 3:
+        return 4
+    if order == 4:
+        return 6
+    if order == 5:
+        return 9
+    return 12 + min(8, (order - 6) * 3)

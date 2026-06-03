@@ -383,6 +383,16 @@ def sample(root: Path, x: int = typer.Option(..., "--x"), z: int = typer.Option(
         if path.exists():
             score = int(read_u8_tile(path, manifest["tile_size"])[lz, lx])
             console.print(f"river: {score}")
+        if "order_path" in river:
+            path = root / river["order_path"] / f"{tx:03d}_{tz:03d}.u8.gz"
+            if path.exists():
+                order = int(read_u8_tile(path, manifest["tile_size"])[lz, lx])
+                console.print(f"river_order: {order}")
+        if "half_width_path" in river:
+            path = root / river["half_width_path"] / f"{tx:03d}_{tz:03d}.u8.gz"
+            if path.exists():
+                half_width = int(read_u8_tile(path, manifest["tile_size"])[lz, lx])
+                console.print(f"river_half_width: {half_width}")
     if "vegetation" in manifest:
         vegetation = manifest["vegetation"]
         cell_blocks = int(vegetation.get("cell_blocks", 1))

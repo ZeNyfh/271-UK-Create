@@ -27,6 +27,10 @@ def validate_tiles(root: Path) -> list[str]:
     if "rivers" in manifest:
         rivers = manifest["rivers"]
         errors.extend(_check_layer(root / rivers["path"], rivers["extension"], tiles_x, tiles_z, tile_size * tile_size))
+        if "order_path" in rivers:
+            errors.extend(_check_layer(root / rivers["order_path"], rivers["extension"], tiles_x, tiles_z, tile_size * tile_size))
+        if "half_width_path" in rivers:
+            errors.extend(_check_layer(root / rivers["half_width_path"], rivers["extension"], tiles_x, tiles_z, tile_size * tile_size))
     if "vegetation" in manifest:
         vegetation = manifest["vegetation"]
         cell_blocks = int(vegetation.get("cell_blocks", 1))
@@ -72,6 +76,11 @@ def tile_summary(root: Path) -> dict[str, Any]:
         summary["surface"] = _categorical_summary(root / surface["path"], tiles_x, tiles_z, tile_size, surface.get("classes", {}))
     if "rivers" in manifest:
         summary["rivers"] = _u8_summary(root / manifest["rivers"]["path"], tiles_x, tiles_z, tile_size)
+        rivers = manifest["rivers"]
+        if "order_path" in rivers:
+            summary["river_order"] = _u8_summary(root / rivers["order_path"], tiles_x, tiles_z, tile_size)
+        if "half_width_path" in rivers:
+            summary["river_half_width"] = _u8_summary(root / rivers["half_width_path"], tiles_x, tiles_z, tile_size)
     if "vegetation" in manifest:
         vegetation = manifest["vegetation"]
         cell_blocks = int(vegetation.get("cell_blocks", 1))
