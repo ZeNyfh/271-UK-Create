@@ -6,6 +6,7 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.OptionalInt;
 import java.util.zip.GZIPInputStream;
 
@@ -34,10 +35,16 @@ public final class R16HeightTileLayer {
     }
 
     short[] readTile(TileCoord coord) throws IOException {
+        if (!isValidTile(coord)) {
+            return nodataTile();
+        }
         return cache.get(coord, this::load);
     }
 
     private short[] load(TileCoord coord) throws IOException {
+        if (!isValidTile(coord)) {
+            return nodataTile();
+        }
         Path path = manifest.root.resolve(manifest.heightPath).resolve(coord.fileStem() + ".r16.gz");
         byte[] data = readGzip(path, manifest.tileSize * manifest.tileSize * 2);
         short[] values = new short[manifest.tileSize * manifest.tileSize];
@@ -45,6 +52,16 @@ public final class R16HeightTileLayer {
         for (int i = 0; i < values.length; i++) {
             values[i] = buffer.getShort();
         }
+        return values;
+    }
+
+    private boolean isValidTile(TileCoord coord) {
+        return coord.tileX() >= 0 && coord.tileZ() >= 0 && coord.tileX() < manifest.tilesX() && coord.tileZ() < manifest.tilesZ();
+    }
+
+    private short[] nodataTile() {
+        short[] values = new short[manifest.tileSize * manifest.tileSize];
+        Arrays.fill(values, NODATA);
         return values;
     }
 
@@ -63,4 +80,3 @@ public final class R16HeightTileLayer {
         return cache.stats();
     }
 }
-

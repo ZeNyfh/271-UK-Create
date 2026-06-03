@@ -16,6 +16,7 @@ import net.minecraft.world.level.levelgen.synth.NormalNoise;
 final class ChunkTerrainPlanner {
     private static final int CHUNK_SIZE = 16;
     private static final int BORDER = 4;
+    private static final int WATERBED_PROTECTION_DEPTH = 6;
 
     private ChunkTerrainPlanner() {
     }
@@ -39,6 +40,7 @@ final class ChunkTerrainPlanner {
         }
 
         ColumnPlan[] columns = new ColumnPlan[CHUNK_SIZE * CHUNK_SIZE];
+        UkGeoChunkGenerator.WaterShapeCache waterShapeCache = new UkGeoChunkGenerator.WaterShapeCache();
         for (int localZ = 0; localZ < CHUNK_SIZE; localZ++) {
             for (int localX = 0; localX < CHUNK_SIZE; localX++) {
                 int worldX = chunkMinX + localX;
@@ -46,7 +48,8 @@ final class ChunkTerrainPlanner {
                 int index = localZ * CHUNK_SIZE + localX;
                 int surfaceY = surfaceGrid[(localZ + BORDER) * gridSize + (localX + BORDER)];
                 boolean steep = isSteep(surfaceGrid, gridSize, localX + BORDER, localZ + BORDER);
-                UkGeoChunkGenerator.RiverShape river = generator.computeRiverShape(data, heightWindow, worldX, worldZ, surfaceY, minBuildY);
+                int vegetationClass = generator.sampleVegetationClass(data, worldX, worldZ);
+                UkGeoChunkGenerator.RiverShape river = generator.computeSurfaceWaterShape(data, heightWindow, worldX, worldZ, surfaceY, minBuildY, vegetationClass, waterShapeCache);
                 int terrainTop = river.terrainSurfaceY();
                 int top = Math.clamp(surfaceY, minBuildY + 1, maxBuildY);
                 int columnTop = Math.clamp(
@@ -54,7 +57,6 @@ final class ChunkTerrainPlanner {
                     minBuildY,
                     maxBuildY
                 );
-                int vegetationClass = generator.sampleVegetationClass(data, worldX, worldZ);
                 BlockState surfaceRock = generator.sampleSurfaceRock(data, worldX, worldZ, terrainTop);
                 columns[index] = new ColumnPlan(top, terrainTop, columnTop, steep, river, vegetationClass, surfaceRock);
             }
@@ -95,6 +97,10 @@ final class ChunkTerrainPlanner {
     static void applyOres(Plan plan, ChunkAccess chunk) {
         BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
         for (OrePlacement placement : plan.orePlacements) {
+            ColumnPlan column = plan.columns[placement.localZ() * CHUNK_SIZE + placement.localX()];
+            if (isProtectedWaterColumn(column, placement.y(), plan.seaLevelY())) {
+                continue;
+            }
             BlockState current = chunk.getBlockState(cursor.set(placement.localX(), placement.y(), placement.localZ()));
             if (current.is(Blocks.STONE) || current.is(Blocks.DEEPSLATE)) {
                 chunk.setBlockState(cursor, placement.state(), false);
@@ -155,9 +161,17 @@ final class ChunkTerrainPlanner {
         for (int y = minBuildY + 1; y < stoneTop; y++) {
             CaveState caveState = caveState(chunk, cursor, caveMask, localX, y, localZ, worldX, worldZ, vanillaTop, terrainTop);
             if (caveState == CaveState.AIR) {
+                if (isProtectedWaterCave(column, y, seaLevelY)) {
+                    setBlock(chunk, cursor, ocean, surface, localX, y, localZ, protectedWaterState(column, y, minBuildY, surfaceRock, steep, river, originalSurfaceY, vegetationClass, seaLevelY));
+                    continue;
+                }
                 setBlock(chunk, cursor, ocean, surface, localX, y, localZ, Blocks.AIR.defaultBlockState());
                 continue;
             } else if (caveState == CaveState.LAVA) {
+                if (isProtectedWaterCave(column, y, seaLevelY)) {
+                    setBlock(chunk, cursor, ocean, surface, localX, y, localZ, protectedWaterState(column, y, minBuildY, surfaceRock, steep, river, originalSurfaceY, vegetationClass, seaLevelY));
+                    continue;
+                }
                 setBlock(chunk, cursor, ocean, surface, localX, y, localZ, Blocks.LAVA.defaultBlockState());
                 continue;
             }
@@ -166,15 +180,71 @@ final class ChunkTerrainPlanner {
         for (int y = stoneTop; y <= clearTop; y++) {
             CaveState caveState = caveState(chunk, cursor, caveMask, localX, y, localZ, worldX, worldZ, vanillaTop, terrainTop);
             if (caveState == CaveState.AIR) {
+                if (isProtectedWaterCave(column, y, seaLevelY)) {
+                    BlockState state = columnStateFor(y, terrainTop, minBuildY, surfaceRock, steep, river, originalSurfaceY, vegetationClass, seaLevelY);
+                    setBlock(chunk, cursor, ocean, surface, localX, y, localZ, state.isAir() ? Blocks.WATER.defaultBlockState() : state);
+                    continue;
+                }
                 setBlock(chunk, cursor, ocean, surface, localX, y, localZ, Blocks.AIR.defaultBlockState());
                 continue;
             } else if (caveState == CaveState.LAVA) {
+                if (isProtectedWaterCave(column, y, seaLevelY)) {
+                    BlockState state = columnStateFor(y, terrainTop, minBuildY, surfaceRock, steep, river, originalSurfaceY, vegetationClass, seaLevelY);
+                    setBlock(chunk, cursor, ocean, surface, localX, y, localZ, state.isAir() ? Blocks.WATER.defaultBlockState() : state);
+                    continue;
+                }
                 setBlock(chunk, cursor, ocean, surface, localX, y, localZ, Blocks.LAVA.defaultBlockState());
                 continue;
             }
             BlockState state = columnStateFor(y, terrainTop, minBuildY, surfaceRock, steep, river, originalSurfaceY, vegetationClass, seaLevelY);
             setBlock(chunk, cursor, ocean, surface, localX, y, localZ, state);
         }
+    }
+
+    private static boolean isProtectedWaterCave(ColumnPlan column, int y, int seaLevelY) {
+        return isProtectedWaterColumn(column, y, seaLevelY);
+    }
+
+    private static boolean isProtectedWaterColumn(ColumnPlan column, int y, int seaLevelY) {
+        int waterSurfaceY = plannedWaterSurfaceY(column, seaLevelY);
+        if (waterSurfaceY == Integer.MIN_VALUE || y > waterSurfaceY) {
+            return false;
+        }
+        int floorY = column.terrainTop();
+        return y >= floorY - WATERBED_PROTECTION_DEPTH;
+    }
+
+    private static BlockState protectedWaterState(
+        ColumnPlan column,
+        int y,
+        int minBuildY,
+        BlockState surfaceRock,
+        boolean steep,
+        UkGeoChunkGenerator.RiverShape river,
+        int originalSurfaceY,
+        int vegetationClass,
+        int seaLevelY
+    ) {
+        BlockState planned = columnStateFor(y, column.terrainTop(), minBuildY, surfaceRock, steep, river, originalSurfaceY, vegetationClass, seaLevelY);
+        if (!planned.isAir()) {
+            return planned;
+        }
+        return y <= plannedWaterSurfaceY(column, seaLevelY) ? Blocks.WATER.defaultBlockState() : Blocks.STONE.defaultBlockState();
+    }
+
+    private static boolean isPlannedWaterVolume(ColumnPlan column, int y, int seaLevelY) {
+        int waterSurfaceY = plannedWaterSurfaceY(column, seaLevelY);
+        return waterSurfaceY != Integer.MIN_VALUE && y > column.terrainTop() && y <= waterSurfaceY;
+    }
+
+    private static int plannedWaterSurfaceY(ColumnPlan column, int seaLevelY) {
+        if (column.river().hasWater()) {
+            return column.river().waterSurfaceY();
+        }
+        if (column.originalSurfaceY() < seaLevelY) {
+            return seaLevelY;
+        }
+        return Integer.MIN_VALUE;
     }
 
     private static CaveState caveState(
@@ -242,8 +312,8 @@ final class ChunkTerrainPlanner {
         if (y > surfaceY) {
             return y <= seaLevelY ? Blocks.WATER.defaultBlockState() : Blocks.AIR.defaultBlockState();
         }
-        if (river.influenced() && y >= surfaceY - 1) {
-            return Blocks.GRAVEL.defaultBlockState();
+        if (river.hasWater() && y >= surfaceY - 1 && y < river.waterSurfaceY()) {
+            return river.floorMaterial();
         }
         if (surfaceY <= seaLevelY + 2 && y >= surfaceY - 2) {
             return Blocks.SAND.defaultBlockState();

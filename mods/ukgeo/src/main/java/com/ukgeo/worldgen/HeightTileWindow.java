@@ -36,24 +36,32 @@ final class HeightTileWindow {
         java.util.Arrays.fill(samples, NODATA);
 
         int tileSize = manifest.tileSize;
-        int minTileX = floorDiv(minBlockX - manifest.minecraftMinX, tileSize);
-        int maxTileX = floorDiv(maxBlockX - manifest.minecraftMinX, tileSize);
-        int minTileZ = floorDiv(minBlockZ - manifest.minecraftMinZ, tileSize);
-        int maxTileZ = floorDiv(maxBlockZ - manifest.minecraftMinZ, tileSize);
+        int minTileX = Math.max(0, floorDiv(minBlockX - manifest.minecraftMinX, tileSize));
+        int maxTileX = Math.min(manifest.tilesX() - 1, floorDiv(maxBlockX - manifest.minecraftMinX, tileSize));
+        int minTileZ = Math.max(0, floorDiv(minBlockZ - manifest.minecraftMinZ, tileSize));
+        int maxTileZ = Math.min(manifest.tilesZ() - 1, floorDiv(maxBlockZ - manifest.minecraftMinZ, tileSize));
 
         Map<TileCoord, short[]> tiles = new HashMap<>();
-        for (int tileZ = minTileZ; tileZ <= maxTileZ; tileZ++) {
-            for (int tileX = minTileX; tileX <= maxTileX; tileX++) {
-                tiles.put(new TileCoord(tileX, tileZ), layer.readTile(new TileCoord(tileX, tileZ)));
+        if (minTileX <= maxTileX && minTileZ <= maxTileZ) {
+            for (int tileZ = minTileZ; tileZ <= maxTileZ; tileZ++) {
+                for (int tileX = minTileX; tileX <= maxTileX; tileX++) {
+                    tiles.put(new TileCoord(tileX, tileZ), layer.readTile(new TileCoord(tileX, tileZ)));
+                }
             }
         }
 
         for (int worldZ = minBlockZ; worldZ <= maxBlockZ; worldZ++) {
             int dataZ = worldZ - manifest.minecraftMinZ;
+            if (dataZ < 0 || dataZ >= manifest.paddedDepth) {
+                continue;
+            }
             int tileZ = floorDiv(dataZ, tileSize);
             int localZ = floorMod(dataZ, tileSize);
             for (int worldX = minBlockX; worldX <= maxBlockX; worldX++) {
                 int dataX = worldX - manifest.minecraftMinX;
+                if (dataX < 0 || dataX >= manifest.paddedWidth) {
+                    continue;
+                }
                 int tileX = floorDiv(dataX, tileSize);
                 int localX = floorMod(dataX, tileSize);
                 short[] tile = tiles.get(new TileCoord(tileX, tileZ));
