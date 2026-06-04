@@ -1,0 +1,20 @@
+{
+  "type": "neoforge:add_carvers",
+  "biomes": [
+    "ukgeo:acid_grassland",
+    "ukgeo:arable",
+    "ukgeo:broadleaf_woodland",
+    "ukgeo:calcareous_grassland",
+    "ukgeo:coastal_ocean",
+    "ukgeo:conifer_woodland",
+    "ukgeo:freshwater",
+    "ukgeo:heath",
+    "ukgeo:improved_grassland",
+    "ukgeo:neutral_grassland",
+    "ukgeo:rocky",
+    "ukgeo:urban",
+    "ukgeo:wetland"
+  ],
+  "carvers": "ukgeo:deep_cave",
+  "step": "air"
+}

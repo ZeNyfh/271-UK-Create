@@ -75,6 +75,7 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     private static final boolean DEBUG_CAVES = Boolean.getBoolean("ukgeo.debugCaves");
     private static final boolean PRESERVE_DELEGATE_NOISE_CAVES = Boolean.getBoolean("ukgeo.preserveDelegateNoiseCaves");
     private static final boolean ENABLE_VANILLA_CARVERS = !Boolean.getBoolean("ukgeo.disableVanillaCarvers");
+    private static final boolean ENABLE_DEEP_CARVERS = !Boolean.getBoolean("ukgeo.disableDeepCaves");
     private static final int DEBUG_WATER_X = Integer.getInteger("ukgeo.debugWaterX", 30);
     private static final int DEBUG_WATER_Z = Integer.getInteger("ukgeo.debugWaterZ", 72);
     private static final int DEBUG_WATER_Y = Integer.getInteger("ukgeo.debugWaterY", 67);
@@ -110,6 +111,10 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     private static final int SNOW_ICE_MIN_Y = 501;
     private static final int VANILLA_MIN_Y = -64;
     private static final int VANILLA_MAX_Y = 320;
+    private static final int DEEP_CAVE_MIN_Y = -120;
+    private static final int DEEP_CAVE_MAX_Y = -65;
+    private static final int DEEP_CAVE_BOTTOM_MARGIN = 8;
+    private static final int DEEP_CAVE_ORIGIN_CHUNK_RADIUS = 2;
     private static final int MAX_DEBUG_CARVER_BIOME_LOGS = 16;
     private static volatile boolean createDieselGeneratorsOilLookupAttempted;
     private static volatile Method createDieselGeneratorsSetOilAmount;
@@ -2503,12 +2508,156 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     ) {
         if (ENABLE_VANILLA_CARVERS) {
             if (DEBUG_CAVES) {
-                UkGeoMod.LOGGER.info("UKGeo cave debug applying vanilla delegate carvers chunk={} step={}", chunk.getPos(), carving);
+                UkGeoMod.LOGGER.info(
+                    "UKGeo cave debug applying vanilla delegate carvers chunk={} step={} chunkY={}..{} preserveDelegateNoiseCaves={} deepCarversEnabled={}",
+                    chunk.getPos(),
+                    carving,
+                    chunk.getMinBuildHeight(),
+                    chunk.getMaxBuildHeight() - 1,
+                    PRESERVE_DELEGATE_NOISE_CAVES,
+                    ENABLE_DEEP_CARVERS
+                );
             }
             caveDelegate.ifPresent(delegate -> delegate.applyCarvers(level, seed, random, biomeManager, structureManager, chunk, carving));
         } else if (DEBUG_CAVES) {
             UkGeoMod.LOGGER.info("UKGeo cave debug skipped vanilla delegate carvers chunk={} step={}", chunk.getPos(), carving);
         }
+        if (ENABLE_DEEP_CARVERS && carving == GenerationStep.Carving.AIR) {
+            applyDeepCaves(seed, chunk);
+        }
+    }
+
+    private static void applyDeepCaves(long seed, ChunkAccess chunk) {
+        int minY = Math.max(chunk.getMinBuildHeight() + DEEP_CAVE_BOTTOM_MARGIN, DEEP_CAVE_MIN_Y);
+        int maxY = Math.min(chunk.getMaxBuildHeight() - 1, DEEP_CAVE_MAX_Y);
+        if (minY > maxY) {
+            return;
+        }
+        ChunkPos chunkPos = chunk.getPos();
+        long startNanos = DEBUG_GEN_TIMINGS ? System.nanoTime() : 0L;
+        for (int dz = -DEEP_CAVE_ORIGIN_CHUNK_RADIUS; dz <= DEEP_CAVE_ORIGIN_CHUNK_RADIUS; dz++) {
+            for (int dx = -DEEP_CAVE_ORIGIN_CHUNK_RADIUS; dx <= DEEP_CAVE_ORIGIN_CHUNK_RADIUS; dx++) {
+                carveDeepCavesFromOrigin(seed, chunk, chunkPos.x + dx, chunkPos.z + dz, minY, maxY);
+            }
+        }
+        if (DEBUG_CAVES) {
+            UkGeoMod.LOGGER.info(
+                "UKGeo cave debug applied bounded deep carvers chunk={} range={}..{} delegateNoisePreserved={}",
+                chunkPos,
+                minY,
+                maxY,
+                PRESERVE_DELEGATE_NOISE_CAVES
+            );
+        }
+        logTiming("applyDeepCaves", chunkPos, startNanos);
+    }
+
+    private static void carveDeepCavesFromOrigin(long seed, ChunkAccess targetChunk, int originChunkX, int originChunkZ, int minY, int maxY) {
+        WorldgenRandom random = new WorldgenRandom(new XoroshiroRandomSource(deepCaveSeed(seed, originChunkX, originChunkZ)));
+        if (random.nextDouble() > 0.24) {
+            return;
+        }
+        int tunnelCount = 1 + (random.nextDouble() < 0.18 ? 1 : 0);
+        for (int tunnel = 0; tunnel < tunnelCount; tunnel++) {
+            double x = originChunkX * 16.0 + random.nextDouble() * 16.0;
+            double y = minY + random.nextDouble() * Math.max(1, maxY - minY + 1);
+            double z = originChunkZ * 16.0 + random.nextDouble() * 16.0;
+            double yaw = random.nextDouble() * Math.PI * 2.0;
+            double pitch = (random.nextDouble() - 0.5) * 0.34;
+            int length = 32 + random.nextInt(36);
+            double baseRadius = 1.35 + random.nextDouble() * 1.65;
+            for (int step = 0; step < length; step++) {
+                double progress = (double) step / Math.max(1, length - 1);
+                double taper = Math.sin(Math.PI * progress);
+                double wobble = Math.sin(progress * Math.PI * 3.0 + random.nextDouble() * 0.25) * 0.25;
+                double horizontalRadius = Math.max(0.75, baseRadius * (0.65 + taper * 0.75) + wobble);
+                double verticalRadius = Math.max(0.55, horizontalRadius * (0.48 + random.nextDouble() * 0.16));
+                carveDeepCaveEllipsoid(targetChunk, x, y, z, horizontalRadius, verticalRadius, minY, maxY);
+                yaw += (random.nextDouble() - 0.5) * 0.22;
+                pitch = pitch * 0.72 + (random.nextDouble() - 0.5) * 0.12;
+                pitch = clamp(pitch, -0.45, 0.45);
+                x += Math.cos(yaw) * Math.cos(pitch) * 1.6;
+                z += Math.sin(yaw) * Math.cos(pitch) * 1.6;
+                y += Math.sin(pitch) * 1.1;
+                if (y < minY + 1 || y > maxY - 1) {
+                    pitch = -pitch * 0.65;
+                    y = clamp(y, minY + 1, maxY - 1);
+                }
+            }
+        }
+    }
+
+    private static long deepCaveSeed(long seed, int chunkX, int chunkZ) {
+        long hash = seed ^ 0x6a09e667f3bcc909L;
+        hash ^= (long) chunkX * 0xbf58476d1ce4e5b9L;
+        hash ^= (long) chunkZ * 0x94d049bb133111ebL;
+        hash ^= hash >>> 30;
+        hash *= 0xbf58476d1ce4e5b9L;
+        hash ^= hash >>> 27;
+        hash *= 0x94d049bb133111ebL;
+        return hash ^ (hash >>> 31);
+    }
+
+    private static double clamp(double value, double min, double max) {
+        return Math.max(min, Math.min(max, value));
+    }
+
+    private static void carveDeepCaveEllipsoid(
+        ChunkAccess chunk,
+        double centerX,
+        double centerY,
+        double centerZ,
+        double horizontalRadius,
+        double verticalRadius,
+        int minY,
+        int maxY
+    ) {
+        ChunkPos chunkPos = chunk.getPos();
+        int chunkMinX = chunkPos.getMinBlockX();
+        int chunkMinZ = chunkPos.getMinBlockZ();
+        int minWorldX = Math.max(chunkMinX, (int) Math.floor(centerX - horizontalRadius - 1.0));
+        int maxWorldX = Math.min(chunkMinX + 15, (int) Math.ceil(centerX + horizontalRadius + 1.0));
+        int minWorldZ = Math.max(chunkMinZ, (int) Math.floor(centerZ - horizontalRadius - 1.0));
+        int maxWorldZ = Math.min(chunkMinZ + 15, (int) Math.ceil(centerZ + horizontalRadius + 1.0));
+        int minCarveY = Math.max(minY, (int) Math.floor(centerY - verticalRadius - 1.0));
+        int maxCarveY = Math.min(maxY, (int) Math.ceil(centerY + verticalRadius + 1.0));
+        if (minWorldX > maxWorldX || minWorldZ > maxWorldZ || minCarveY > maxCarveY) {
+            return;
+        }
+        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+        double invHorizontal = 1.0 / Math.max(0.001, horizontalRadius);
+        double invVertical = 1.0 / Math.max(0.001, verticalRadius);
+        for (int worldZ = minWorldZ; worldZ <= maxWorldZ; worldZ++) {
+            double dz = (worldZ + 0.5 - centerZ) * invHorizontal;
+            double dz2 = dz * dz;
+            for (int worldX = minWorldX; worldX <= maxWorldX; worldX++) {
+                double dx = (worldX + 0.5 - centerX) * invHorizontal;
+                double horizontal = dx * dx + dz2;
+                if (horizontal >= 1.0) {
+                    continue;
+                }
+                int localX = worldX - chunkMinX;
+                int localZ = worldZ - chunkMinZ;
+                for (int y = minCarveY; y <= maxCarveY; y++) {
+                    double dy = (y + 0.5 - centerY) * invVertical;
+                    if (horizontal + dy * dy >= 1.0) {
+                        continue;
+                    }
+                    cursor.set(localX, y, localZ);
+                    BlockState existing = chunk.getBlockState(cursor);
+                    if (isDeepCarverReplaceable(existing)) {
+                        chunk.setBlockState(cursor, Blocks.AIR.defaultBlockState(), false);
+                    }
+                }
+            }
+        }
+    }
+
+    private static boolean isDeepCarverReplaceable(BlockState state) {
+        return !state.isAir()
+            && !state.is(Blocks.WATER)
+            && !state.is(Blocks.LAVA)
+            && !state.is(Blocks.BEDROCK);
     }
 
     @Override
