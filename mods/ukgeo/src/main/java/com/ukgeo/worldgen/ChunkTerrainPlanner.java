@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.util.Optional;
 import java.util.OptionalInt;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.ChunkAccess;
@@ -55,6 +56,7 @@ final class ChunkTerrainPlanner {
                 int index = localZ * CHUNK_SIZE + localX;
                 int surfaceY = surfaceGrid[(localZ + BORDER) * gridSize + (localX + BORDER)];
                 boolean steep = isSteep(surfaceGrid, gridSize, localX + BORDER, localZ + BORDER);
+                boolean coastalBeach = isCoastalBeach(surfaceGrid, gridSize, localX + BORDER, localZ + BORDER, generator.seaLevel());
                 int vegetationClass = generator.sampleVegetationClass(data, worldX, worldZ);
                 UkGeoChunkGenerator.RiverShape river = generator.computeSurfaceWaterShape(data, heightWindow, worldX, worldZ, surfaceY, minBuildY, vegetationClass, waterShapeCache);
                 int terrainTop = river.terrainSurfaceY();
@@ -65,7 +67,8 @@ final class ChunkTerrainPlanner {
                     maxBuildY
                 );
                 BlockState surfaceRock = generator.sampleSurfaceRock(data, worldX, worldZ, terrainTop);
-                columns[index] = new ColumnPlan(top, terrainTop, columnTop, steep, river, vegetationClass, surfaceRock);
+                BlockState exposedSurfaceRock = exposedSurfaceRock(worldX, worldZ, surfaceRock);
+                columns[index] = new ColumnPlan(top, terrainTop, columnTop, steep, coastalBeach, river, vegetationClass, surfaceRock, exposedSurfaceRock);
             }
         }
         logTiming("ChunkTerrainPlanner.waterPlanning", chunk, waterStartNanos);
@@ -168,9 +171,11 @@ final class ChunkTerrainPlanner {
             floorY,
             minBuildY,
             column.surfaceRock(),
+            column.exposedSurfaceRock(),
             column.steep(),
             column.river(),
             column.originalSurfaceY(),
+            column.coastalBeach(),
             column.vegetationClass(),
             seaLevelY
         );
@@ -211,6 +216,28 @@ final class ChunkTerrainPlanner {
         return max - min >= 6;
     }
 
+    private static boolean isCoastalBeach(int[] surfaceGrid, int gridSize, int gx, int gz, int seaLevelY) {
+        int surfaceY = surfaceGrid[gz * gridSize + gx];
+        if (surfaceY < seaLevelY || surfaceY > seaLevelY + 2) {
+            return false;
+        }
+        int radius = 3;
+        int radiusSquared = radius * radius;
+        for (int dz = -radius; dz <= radius; dz++) {
+            for (int dx = -radius; dx <= radius; dx++) {
+                int nx = gx + dx;
+                int nz = gz + dz;
+                if (nx < 0 || nz < 0 || nx >= gridSize || nz >= gridSize || dx * dx + dz * dz > radiusSquared) {
+                    continue;
+                }
+                if (surfaceGrid[nz * gridSize + nx] < seaLevelY) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     private static double smoothstep(double value) {
         double t = Math.clamp(value, 0.0, 1.0);
         return t * t * (3.0 - 2.0 * t);
@@ -235,8 +262,10 @@ final class ChunkTerrainPlanner {
         int clearTop = caveMask.usesDelegate() ? Math.max(columnTop, vanillaTop) : columnTop;
         UkGeoChunkGenerator.RiverShape river = column.river();
         BlockState surfaceRock = column.surfaceRock();
+        BlockState exposedSurfaceRock = column.exposedSurfaceRock();
         boolean steep = column.steep();
         int originalSurfaceY = column.originalSurfaceY();
+        boolean coastalBeach = column.coastalBeach();
         int vegetationClass = column.vegetationClass();
 
         setBlock(chunk, cursor, localX, minBuildY, localZ, Blocks.BEDROCK.defaultBlockState());
@@ -281,7 +310,7 @@ final class ChunkTerrainPlanner {
                 setBlock(chunk, cursor, localX, y, localZ, Blocks.LAVA.defaultBlockState());
                 continue;
             }
-            BlockState state = columnStateFor(y, terrainTop, minBuildY, surfaceRock, steep, river, originalSurfaceY, vegetationClass, seaLevelY);
+            BlockState state = columnStateFor(y, terrainTop, minBuildY, surfaceRock, exposedSurfaceRock, steep, river, originalSurfaceY, coastalBeach, vegetationClass, seaLevelY);
             setBlock(chunk, cursor, localX, y, localZ, state);
         }
     }
@@ -311,7 +340,7 @@ final class ChunkTerrainPlanner {
         int vegetationClass,
         int seaLevelY
     ) {
-        BlockState planned = columnStateFor(y, column.terrainTop(), minBuildY, surfaceRock, steep, river, originalSurfaceY, vegetationClass, seaLevelY);
+        BlockState planned = columnStateFor(y, column.terrainTop(), minBuildY, surfaceRock, column.exposedSurfaceRock(), steep, river, originalSurfaceY, column.coastalBeach(), vegetationClass, seaLevelY);
         if (!planned.isAir()) {
             return planned;
         }
@@ -415,9 +444,11 @@ final class ChunkTerrainPlanner {
         int surfaceY,
         int minBuildY,
         BlockState surfaceRock,
+        BlockState exposedSurfaceRock,
         boolean steep,
         UkGeoChunkGenerator.RiverShape river,
         int originalSurfaceY,
+        boolean coastalBeach,
         int vegetationClass,
         int seaLevelY
     ) {
@@ -433,8 +464,11 @@ final class ChunkTerrainPlanner {
         if (river.hasWater() && y >= surfaceY - 1 && y < river.waterSurfaceY()) {
             return river.floorMaterial();
         }
-        if (surfaceY <= seaLevelY + 2 && y >= surfaceY - 2) {
+        if (!river.hasWater() && (originalSurfaceY < seaLevelY || coastalBeach) && surfaceY <= seaLevelY + 2 && y >= surfaceY - 2) {
             return Blocks.SAND.defaultBlockState();
+        }
+        if (steep && y == surfaceY) {
+            return exposedSurfaceRock;
         }
         if (steep && y >= surfaceY - 4) {
             return surfaceRock;
@@ -450,6 +484,46 @@ final class ChunkTerrainPlanner {
             return surfaceRock;
         }
         return y < 0 ? Blocks.DEEPSLATE.defaultBlockState() : Blocks.STONE.defaultBlockState();
+    }
+
+    static BlockState exposedSurfaceRock(int worldX, int worldZ, BlockState surfaceRock) {
+        if (!isRestrictedSurfaceOre(surfaceRock) || allowRareExposedSurfaceOre(worldX, worldZ, surfaceRock)) {
+            return surfaceRock;
+        }
+        return Blocks.GRASS_BLOCK.defaultBlockState();
+    }
+
+    private static boolean isRestrictedSurfaceOre(BlockState state) {
+        String id = BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString();
+        return switch (id) {
+            case "minecraft:andesite",
+                 "minecraft:diorite",
+                 "minecraft:granite",
+                 "create:ochrum",
+                 "minecraft:calcite",
+                 "create:scoria",
+                 "minecraft:tuff",
+                 "create:crimsite",
+                 "create:limestone",
+                 "create:asurine",
+                 "create:veridium",
+                 "minecraft:smooth_basalt" -> true;
+            default -> false;
+        };
+    }
+
+    private static boolean allowRareExposedSurfaceOre(int worldX, int worldZ, BlockState state) {
+        String id = BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString();
+        long hash = 0x9e3779b97f4a7c15L;
+        hash ^= (long) worldX * 0xbf58476d1ce4e5b9L;
+        hash ^= (long) worldZ * 0x94d049bb133111ebL;
+        hash ^= (long) id.hashCode() * 0x632be59bd9b4e019L;
+        hash ^= hash >>> 30;
+        hash *= 0xbf58476d1ce4e5b9L;
+        hash ^= hash >>> 27;
+        hash *= 0x94d049bb133111ebL;
+        hash ^= hash >>> 31;
+        return Math.floorMod(hash, 100) < 5;
     }
 
     private static void setBlock(
@@ -478,9 +552,11 @@ final class ChunkTerrainPlanner {
         int terrainTop,
         int columnTop,
         boolean steep,
+        boolean coastalBeach,
         UkGeoChunkGenerator.RiverShape river,
         int vegetationClass,
-        BlockState surfaceRock
+        BlockState surfaceRock,
+        BlockState exposedSurfaceRock
     ) {
     }
 

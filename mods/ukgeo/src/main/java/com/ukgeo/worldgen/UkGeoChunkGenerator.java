@@ -1261,7 +1261,7 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     private record BaseQueryKey(int x, int z, int minBuildY) {
     }
 
-    private record BaseColumnPlan(int surfaceY, int vegetationClass, RiverShape river, BlockState surfaceRock) {
+    private record BaseColumnPlan(int surfaceY, int vegetationClass, RiverShape river, BlockState surfaceRock, BlockState exposedSurfaceRock) {
     }
 
     int sampleVegetationClass(RuntimeData data, int x, int z) {
@@ -2542,7 +2542,7 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         BlockState[] states = new BlockState[height.getHeight()];
         for (int i = 0; i < states.length; i++) {
             int y = minBuildY + i;
-            states[i] = ChunkTerrainPlanner.columnStateFor(y, plan.river().terrainSurfaceY(), minBuildY, plan.surfaceRock(), steep, plan.river(), plan.surfaceY(), plan.vegetationClass(), seaLevelY);
+            states[i] = ChunkTerrainPlanner.columnStateFor(y, plan.river().terrainSurfaceY(), minBuildY, plan.surfaceRock(), plan.exposedSurfaceRock(), steep, plan.river(), plan.surfaceY(), false, plan.vegetationClass(), seaLevelY);
         }
         logTiming("getBaseColumn", new ChunkPos(Math.floorDiv(x, 16), Math.floorDiv(z, 16)), startNanos);
         return new NoiseColumn(minBuildY, states);
@@ -2559,7 +2559,8 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         int vegetation = runtime == null ? 0 : sampleVegetationClass(runtime, x, z);
         RiverShape river = runtime == null ? RiverShape.none(surface) : computeSurfaceWaterShape(runtime, null, x, z, surface, minBuildY, vegetation);
         BlockState surfaceRock = runtime == null ? Blocks.STONE.defaultBlockState() : sampleSurfaceRock(runtime, x, z, surface);
-        BaseColumnPlan plan = new BaseColumnPlan(surface, vegetation, river, surfaceRock);
+        BlockState exposedSurfaceRock = ChunkTerrainPlanner.exposedSurfaceRock(x, z, surfaceRock);
+        BaseColumnPlan plan = new BaseColumnPlan(surface, vegetation, river, surfaceRock, exposedSurfaceRock);
         if (baseColumnCache.size() > 8192) {
             baseColumnCache.clear();
         }
