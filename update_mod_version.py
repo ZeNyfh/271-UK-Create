@@ -5,9 +5,10 @@ from pathlib import Path
 import re
 import sys
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parent
+UKGEO_ROOT = ROOT / "mods" / "ukgeo"
 VERSION_FILES = [
-    ROOT / "gradle.properties",
+    UKGEO_ROOT / "gradle.properties",
 ]
 VERSION_RE = re.compile(r"(?m)^(mod_version\s*=\s*)([^\s#]+)(.*)$")
 
