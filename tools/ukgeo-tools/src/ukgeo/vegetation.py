@@ -14,7 +14,7 @@ from rich.console import Console
 from tqdm import tqdm
 
 from .manifest import read_manifest, write_manifest
-from .tiles import write_u8_tile
+from .tiles import read_u8_tile, write_u8_tile
 
 console = Console()
 
@@ -57,6 +57,7 @@ def make_vegetation_tiles(
     out: Path,
     band: int = 1,
     cell_metres: float = 50.0,
+    vegetation_smoothing: str = "none",
     debug_geotiff: Path | None = None,
     jobs: int = 1,
 ) -> None:
@@ -113,6 +114,15 @@ def make_vegetation_tiles(
             for _ in tqdm(executor.map(_write_vegetation_tile_row, tasks), total=len(tasks), desc="vegetation tile rows"):
                 pass
 
+    smoothing = vegetation_smoothing.lower()
+    if smoothing not in {"none", "light", "medium"}:
+        raise ValueError("vegetation_smoothing must be none, light, or medium")
+    if smoothing != "none":
+        console.print(f"Cleaning vegetation speckles with {smoothing} non-freshwater smoothing.")
+        vegetation_grid = _read_vegetation_grid(root, tiles_x, tiles_z, tile_size, width_cells, depth_cells)
+        vegetation_grid = clean_vegetation_grid(vegetation_grid, smoothing=smoothing)
+        _write_vegetation_grid(root, vegetation_grid, tiles_x, tiles_z, tile_size)
+
     manifest["vegetation"] = {
         "path": "vegetation",
         "extension": ".u8.gz",
@@ -123,6 +133,11 @@ def make_vegetation_tiles(
         "depth_cells": depth_cells,
         "source": str(landcover),
         "source_band": band,
+        "smoothing": {
+            "mode": smoothing,
+            "freshwater_preserved": True,
+            "freshwater_class": 10,
+        },
         "classes": {str(class_id): meta for class_id, meta in VEGETATION_CLASSES.items()},
         "source_classes": {
             "1": "Broadleaved woodland",
@@ -186,6 +201,88 @@ def resample_blocks_to_cells(block_data: np.ndarray, cell_blocks: int) -> np.nda
             counts = np.bincount(patch.ravel(), minlength=256)
             cells[cell_z, cell_x] = np.uint8(counts.argmax())
     return cells
+
+
+def clean_vegetation_grid(grid: np.ndarray, *, smoothing: str = "light", freshwater_class: int = 10) -> np.ndarray:
+    """Remove obvious non-freshwater vegetation speckles while preserving freshwater exactly."""
+    mode = smoothing.lower()
+    if mode == "none":
+        return grid.astype(np.uint8, copy=True)
+    if mode not in {"light", "medium"}:
+        raise ValueError("smoothing must be none, light, or medium")
+    passes = 1 if mode == "light" else 2
+    result = grid.astype(np.uint8, copy=True)
+    for _ in range(passes):
+        result = _majority_smooth_nonfreshwater(result, freshwater_class=freshwater_class)
+    result[grid == freshwater_class] = np.uint8(freshwater_class)
+    return result
+
+
+def _majority_smooth_nonfreshwater(grid: np.ndarray, *, freshwater_class: int) -> np.ndarray:
+    height, width = grid.shape
+    output = grid.copy()
+    if height == 0 or width == 0:
+        return output
+    stripe_rows = 2048
+    for z0 in range(0, height, stripe_rows):
+        z1 = min(height, z0 + stripe_rows)
+        source_z0 = max(0, z0 - 1)
+        source_z1 = min(height, z1 + 1)
+        stripe = grid[source_z0:source_z1]
+        padded = np.pad(stripe, ((1, 1), (1, 1)), mode="edge")
+        local_z0 = z0 - source_z0 + 1
+        local_z1 = local_z0 + (z1 - z0)
+        current = padded[local_z0:local_z1, 1 : width + 1]
+        best_class = current.copy()
+        best_count = np.zeros_like(current, dtype=np.uint8)
+        nonfresh_neighbour_count = np.zeros_like(current, dtype=np.uint8)
+        for class_id in VEGETATION_CLASSES:
+            if class_id == freshwater_class:
+                continue
+            count = np.zeros_like(current, dtype=np.uint8)
+            for dz in (-1, 0, 1):
+                for dx in (-1, 0, 1):
+                    if dx == 0 and dz == 0:
+                        continue
+                    neighbour = padded[local_z0 + dz : local_z1 + dz, 1 + dx : width + 1 + dx]
+                    count += neighbour == class_id
+            nonfresh_neighbour_count += count
+            replace_best = count > best_count
+            best_count[replace_best] = count[replace_best]
+            best_class[replace_best] = np.uint8(class_id)
+        mutable = current != freshwater_class
+        strong_majority = (best_count >= 5) & (best_count * 10 >= nonfresh_neighbour_count * 7)
+        replace = mutable & strong_majority & (best_class != current)
+        output[z0:z1][replace] = best_class[replace]
+    return output
+
+
+def _read_vegetation_grid(tile_root: Path, tiles_x: int, tiles_z: int, tile_size: int, width_cells: int, depth_cells: int) -> np.ndarray:
+    grid = np.zeros((depth_cells, width_cells), dtype=np.uint8)
+    for tile_z in tqdm(range(tiles_z), desc="read vegetation tiles"):
+        for tile_x in range(tiles_x):
+            tile = read_u8_tile(tile_root / f"{tile_x:03d}_{tile_z:03d}.u8.gz", tile_size)
+            y0 = tile_z * tile_size
+            x0 = tile_x * tile_size
+            y1 = min(depth_cells, y0 + tile_size)
+            x1 = min(width_cells, x0 + tile_size)
+            if y0 < depth_cells and x0 < width_cells:
+                grid[y0:y1, x0:x1] = tile[: y1 - y0, : x1 - x0]
+    return grid
+
+
+def _write_vegetation_grid(tile_root: Path, grid: np.ndarray, tiles_x: int, tiles_z: int, tile_size: int) -> None:
+    height, width = grid.shape
+    for tile_z in tqdm(range(tiles_z), desc="write cleaned vegetation tiles"):
+        for tile_x in range(tiles_x):
+            tile = np.zeros((tile_size, tile_size), dtype=np.uint8)
+            y0 = tile_z * tile_size
+            x0 = tile_x * tile_size
+            y1 = min(height, y0 + tile_size)
+            x1 = min(width, x0 + tile_size)
+            if y0 < height and x0 < width:
+                tile[: y1 - y0, : x1 - x0] = grid[y0:y1, x0:x1]
+            write_u8_tile(tile_root / f"{tile_x:03d}_{tile_z:03d}.u8.gz", tile, tile_size)
 
 
 def _write_vegetation_tile_row(task: tuple) -> int:

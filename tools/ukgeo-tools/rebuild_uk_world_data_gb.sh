@@ -147,6 +147,7 @@ fi
   --manifest "$TMP_ROOT/manifest.json" \
   --out "$TMP_ROOT" \
   --cell-metres 50 \
+  --vegetation-smoothing light \
   --jobs "$VEGETATION_JOBS"
 
 "$UKGEO" validate-tiles "$TMP_ROOT"

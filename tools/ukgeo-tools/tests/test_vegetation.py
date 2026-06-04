@@ -1,4 +1,4 @@
-from ukgeo.vegetation import LCM_TO_VEGETATION, VEGETATION_CLASSES, cell_blocks_for_metres, resample_blocks_to_cells
+from ukgeo.vegetation import LCM_TO_VEGETATION, VEGETATION_CLASSES, cell_blocks_for_metres, clean_vegetation_grid, resample_blocks_to_cells
 import numpy as np
 
 
@@ -46,3 +46,41 @@ def test_resample_blocks_to_cells_uses_majority_class():
     )
     cells = resample_blocks_to_cells(blocks, 2)
     assert cells.tolist() == [[1, 2], [3, 3]]
+
+
+def test_clean_vegetation_grid_absorbs_single_nonfreshwater_speckle():
+    grid = np.full((5, 5), 4, dtype=np.uint8)
+    grid[2, 2] = 7
+    cleaned = clean_vegetation_grid(grid, smoothing="light")
+    assert int(cleaned[2, 2]) == 4
+
+
+def test_clean_vegetation_grid_preserves_freshwater_and_excludes_it_as_replacement():
+    grid = np.array(
+        [
+            [10, 10, 10, 10, 10],
+            [10, 4, 4, 4, 10],
+            [10, 4, 7, 4, 10],
+            [10, 4, 4, 4, 10],
+            [10, 10, 10, 10, 10],
+        ],
+        dtype=np.uint8,
+    )
+    cleaned = clean_vegetation_grid(grid, smoothing="light")
+    assert np.array_equal(cleaned[grid == 10], grid[grid == 10])
+    assert int(cleaned[2, 2]) == 4
+    assert not np.any((grid != 10) & (cleaned == 10))
+
+
+def test_clean_vegetation_grid_keeps_unclear_boundaries():
+    grid = np.array(
+        [
+            [4, 4, 7, 7],
+            [4, 4, 7, 7],
+            [5, 5, 6, 6],
+            [5, 5, 6, 6],
+        ],
+        dtype=np.uint8,
+    )
+    cleaned = clean_vegetation_grid(grid, smoothing="light")
+    assert np.array_equal(cleaned, grid)

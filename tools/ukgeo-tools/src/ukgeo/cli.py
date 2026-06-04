@@ -249,6 +249,7 @@ def make_vegetation_tiles(
     out: Path = typer.Option(..., "--out"),
     band: int = typer.Option(1, "--band"),
     cell_metres: float = typer.Option(50.0, "--cell-metres", help="Raster cell size in metres (default 50 m)."),
+    vegetation_smoothing: str = typer.Option("none", "--vegetation-smoothing", help="none, light, or medium. Freshwater is preserved exactly."),
     debug_geotiff: Path | None = typer.Option(None, "--debug-geotiff"),
     jobs: int = typer.Option(1, "--jobs", help="Vegetation tile rows to process in parallel."),
 ) -> None:
@@ -258,6 +259,7 @@ def make_vegetation_tiles(
         out=out,
         band=band,
         cell_metres=cell_metres,
+        vegetation_smoothing=vegetation_smoothing,
         debug_geotiff=debug_geotiff,
         jobs=jobs,
     )
