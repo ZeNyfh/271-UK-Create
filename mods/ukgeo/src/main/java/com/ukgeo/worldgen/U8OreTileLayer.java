@@ -40,6 +40,18 @@ public final class U8OreTileLayer {
         }).map(OptionalInt::of).orElseGet(OptionalInt::empty);
     }
 
+    public int sampleOrDefault(int x, int z, int defaultValue) {
+        return grid.locate(x, z, cellBlocks, paddedWidth, paddedDepth).map(cell -> {
+            try {
+                byte[] tile = cache.get(cell.coord(), this::load);
+                return Byte.toUnsignedInt(tile[cell.localZ() * manifest.tileSize + cell.localX()]);
+            } catch (IOException ex) {
+                UkGeoMod.LOGGER.warn("Could not read ore tile {} {}: {}", oreName, cell.coord().fileStem(), ex.getMessage());
+                return defaultValue;
+            }
+        }).orElse(defaultValue);
+    }
+
     private byte[] load(TileCoord coord) throws IOException {
         Path tilePath = manifest.root.resolve(path).resolve(coord.fileStem() + ".u8.gz");
         return R16HeightTileLayer.readGzip(tilePath, manifest.tileSize * manifest.tileSize);
@@ -49,4 +61,3 @@ public final class U8OreTileLayer {
         return oreName + ":" + cache.stats();
     }
 }
-

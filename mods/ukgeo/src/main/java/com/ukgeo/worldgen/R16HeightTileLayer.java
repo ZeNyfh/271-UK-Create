@@ -34,6 +34,18 @@ public final class R16HeightTileLayer {
         }).map(OptionalInt::of).orElseGet(OptionalInt::empty);
     }
 
+    public int sampleDecimetresOrNodata(int x, int z) {
+        return grid.locate(x, z).map(cell -> {
+            try {
+                short[] tile = cache.get(cell.coord(), this::load);
+                return (int) tile[cell.localZ() * manifest.tileSize + cell.localX()];
+            } catch (IOException ex) {
+                UkGeoMod.LOGGER.warn("Could not read height tile {}: {}", cell.coord().fileStem(), ex.getMessage());
+                return (int) NODATA;
+            }
+        }).orElse((int) NODATA);
+    }
+
     short[] readTile(TileCoord coord) throws IOException {
         if (!isValidTile(coord)) {
             return nodataTile();

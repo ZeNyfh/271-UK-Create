@@ -115,10 +115,10 @@ public final class UkGeoVegetationBiomeSource extends BiomeSource {
         if (data == null) {
             return fallback;
         }
-        if (data.riverLayer != null && data.riverLayer.sample(blockX, blockZ).orElse(0) > 0) {
+        if (data.riverLayer != null && data.riverLayer.sampleOrDefault(blockX, blockZ, 0) > 0) {
             return river;
         }
-        int vegetationClass = data.vegetationLayer == null ? -1 : data.vegetationLayer.sample(blockX, blockZ).orElse(-1);
+        int vegetationClass = data.vegetationLayer == null ? -1 : data.vegetationLayer.sampleOrDefault(blockX, blockZ, -1);
         return biomeForVegetationClass(vegetationClass);
     }
 

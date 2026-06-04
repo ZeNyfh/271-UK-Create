@@ -1,13 +1,16 @@
 package com.ukgeo.worldgen;
 
 import java.io.IOException;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
 import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.function.Function;
 
 public final class TileCache<K, V> {
     private final int maxEntries;
     private final LinkedHashMap<K, V> cache;
+    private final ConcurrentHashMap<K, CompletableFuture<V>> inFlightLoads = new ConcurrentHashMap<>();
     private long hits;
     private long misses;
 
@@ -31,15 +34,47 @@ public final class TileCache<K, V> {
             misses++;
         }
 
-        V loaded = loader.load(key);
+        CompletableFuture<V> loadFuture = new CompletableFuture<>();
+        CompletableFuture<V> existingFuture = inFlightLoads.putIfAbsent(key, loadFuture);
+        if (existingFuture != null) {
+            return awaitLoad(key, existingFuture);
+        }
 
-        synchronized (this) {
-            V existing = cache.get(key);
-            if (existing != null) {
-                return existing;
+        try {
+            V loaded = loader.load(key);
+            synchronized (this) {
+                V existing = cache.get(key);
+                if (existing != null) {
+                    loadFuture.complete(existing);
+                    return existing;
+                }
+                cache.put(key, loaded);
+                loadFuture.complete(loaded);
+                return loaded;
             }
-            cache.put(key, loaded);
-            return loaded;
+        } catch (IOException | RuntimeException ex) {
+            loadFuture.completeExceptionally(ex);
+            throw ex;
+        } finally {
+            inFlightLoads.remove(key, loadFuture);
+        }
+    }
+
+    private V awaitLoad(K key, CompletableFuture<V> future) throws IOException {
+        try {
+            return future.get();
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            throw new IOException("Interrupted while loading tile " + key, ex);
+        } catch (ExecutionException ex) {
+            Throwable cause = ex.getCause();
+            if (cause instanceof IOException io) {
+                throw io;
+            }
+            if (cause instanceof RuntimeException runtime) {
+                throw runtime;
+            }
+            throw new IOException("Failed to load tile " + key, cause);
         }
     }
 

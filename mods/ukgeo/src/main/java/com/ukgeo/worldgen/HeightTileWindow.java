@@ -83,6 +83,15 @@ final class HeightTileWindow {
         return value == NODATA ? OptionalInt.empty() : OptionalInt.of(value);
     }
 
+    int decimetresOrNodata(int worldX, int worldZ) {
+        int localX = worldX - originBlockX;
+        int localZ = worldZ - originBlockZ;
+        if (localX < 0 || localZ < 0 || localX >= sizeX || localZ >= sizeZ) {
+            return NODATA;
+        }
+        return samples[localZ * sizeX + localX];
+    }
+
     private static int floorDiv(int a, int b) {
         int result = a / b;
         if ((a ^ b) < 0 && result * b != a) {

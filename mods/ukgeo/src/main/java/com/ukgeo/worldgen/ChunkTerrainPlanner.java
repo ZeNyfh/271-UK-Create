@@ -79,7 +79,6 @@ final class ChunkTerrainPlanner {
     static void apply(Plan plan, ChunkAccess chunk, CaveMask caveMask) {
         long startNanos = System.nanoTime();
         BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
-        Heightmap ocean = chunk.getOrCreateHeightmapUnprimed(Heightmap.Types.OCEAN_FLOOR_WG);
         Heightmap surface = chunk.getOrCreateHeightmapUnprimed(Heightmap.Types.WORLD_SURFACE_WG);
         int minBuildY = chunk.getMinBuildHeight();
         int chunkMinX = chunk.getPos().getMinBlockX();
@@ -95,8 +94,6 @@ final class ChunkTerrainPlanner {
                 fillColumn(
                     chunk,
                     cursor,
-                    ocean,
-                    surface,
                     localX,
                     localZ,
                     chunkMinX + localX,
@@ -122,8 +119,6 @@ final class ChunkTerrainPlanner {
     static void enforceWaterColumns(Plan plan, ChunkAccess chunk) {
         long startNanos = System.nanoTime();
         BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
-        Heightmap ocean = chunk.getOrCreateHeightmapUnprimed(Heightmap.Types.OCEAN_FLOOR_WG);
-        Heightmap surface = chunk.getOrCreateHeightmapUnprimed(Heightmap.Types.WORLD_SURFACE_WG);
         int minBuildY = chunk.getMinBuildHeight();
         for (int localZ = 0; localZ < CHUNK_SIZE; localZ++) {
             for (int localX = 0; localX < CHUNK_SIZE; localX++) {
@@ -135,7 +130,7 @@ final class ChunkTerrainPlanner {
                 }
                 for (int y = Math.max(minBuildY, column.terrainTop()); y <= waterSurfaceY; y++) {
                     BlockState state = enforcedWaterColumnState(y, column, minBuildY, plan.seaLevelY());
-                    setBlock(chunk, cursor, ocean, surface, localX, y, localZ, state);
+                    setBlock(chunk, cursor, localX, y, localZ, state);
                 }
                 clearWaterAboveSurface(chunk, cursor, localX, localZ, waterSurfaceY);
             }
@@ -224,8 +219,6 @@ final class ChunkTerrainPlanner {
     private static void fillColumn(
         ChunkAccess chunk,
         BlockPos.MutableBlockPos cursor,
-        Heightmap ocean,
-        Heightmap surface,
         int localX,
         int localZ,
         int worldX,
@@ -246,7 +239,7 @@ final class ChunkTerrainPlanner {
         int originalSurfaceY = column.originalSurfaceY();
         int vegetationClass = column.vegetationClass();
 
-        setBlock(chunk, cursor, ocean, surface, localX, minBuildY, localZ, Blocks.BEDROCK.defaultBlockState());
+        setBlock(chunk, cursor, localX, minBuildY, localZ, Blocks.BEDROCK.defaultBlockState());
         int stoneTop = Math.max(minBuildY + 1, terrainTop - 12);
         for (int y = minBuildY + 1; y < stoneTop; y++) {
             CaveState caveState = y <= terrainTop && caveMask.mayCarveAtY(y, vanillaTop)
@@ -254,20 +247,20 @@ final class ChunkTerrainPlanner {
                 : CaveState.SOLID;
             if (caveState == CaveState.AIR) {
                 if (isProtectedWaterCave(protection, y)) {
-                    setBlock(chunk, cursor, ocean, surface, localX, y, localZ, protectedWaterState(column, protection, y, minBuildY, surfaceRock, steep, river, originalSurfaceY, vegetationClass, seaLevelY));
+                    setBlock(chunk, cursor, localX, y, localZ, protectedWaterState(column, protection, y, minBuildY, surfaceRock, steep, river, originalSurfaceY, vegetationClass, seaLevelY));
                     continue;
                 }
-                setBlock(chunk, cursor, ocean, surface, localX, y, localZ, Blocks.AIR.defaultBlockState());
+                setBlock(chunk, cursor, localX, y, localZ, Blocks.AIR.defaultBlockState());
                 continue;
             } else if (caveState == CaveState.LAVA) {
                 if (isProtectedWaterCave(protection, y)) {
-                    setBlock(chunk, cursor, ocean, surface, localX, y, localZ, protectedWaterState(column, protection, y, minBuildY, surfaceRock, steep, river, originalSurfaceY, vegetationClass, seaLevelY));
+                    setBlock(chunk, cursor, localX, y, localZ, protectedWaterState(column, protection, y, minBuildY, surfaceRock, steep, river, originalSurfaceY, vegetationClass, seaLevelY));
                     continue;
                 }
-                setBlock(chunk, cursor, ocean, surface, localX, y, localZ, Blocks.LAVA.defaultBlockState());
+                setBlock(chunk, cursor, localX, y, localZ, Blocks.LAVA.defaultBlockState());
                 continue;
             }
-            setBlock(chunk, cursor, ocean, surface, localX, y, localZ, y < 0 ? Blocks.DEEPSLATE.defaultBlockState() : Blocks.STONE.defaultBlockState());
+            setBlock(chunk, cursor, localX, y, localZ, y < 0 ? Blocks.DEEPSLATE.defaultBlockState() : Blocks.STONE.defaultBlockState());
         }
         for (int y = stoneTop; y <= clearTop; y++) {
             CaveState caveState = y <= terrainTop && caveMask.mayCarveAtY(y, vanillaTop)
@@ -275,21 +268,21 @@ final class ChunkTerrainPlanner {
                 : CaveState.SOLID;
             if (caveState == CaveState.AIR) {
                 if (isProtectedWaterCave(protection, y)) {
-                    setBlock(chunk, cursor, ocean, surface, localX, y, localZ, protectedWaterState(column, protection, y, minBuildY, surfaceRock, steep, river, originalSurfaceY, vegetationClass, seaLevelY));
+                    setBlock(chunk, cursor, localX, y, localZ, protectedWaterState(column, protection, y, minBuildY, surfaceRock, steep, river, originalSurfaceY, vegetationClass, seaLevelY));
                     continue;
                 }
-                setBlock(chunk, cursor, ocean, surface, localX, y, localZ, Blocks.AIR.defaultBlockState());
+                setBlock(chunk, cursor, localX, y, localZ, Blocks.AIR.defaultBlockState());
                 continue;
             } else if (caveState == CaveState.LAVA) {
                 if (isProtectedWaterCave(protection, y)) {
-                    setBlock(chunk, cursor, ocean, surface, localX, y, localZ, protectedWaterState(column, protection, y, minBuildY, surfaceRock, steep, river, originalSurfaceY, vegetationClass, seaLevelY));
+                    setBlock(chunk, cursor, localX, y, localZ, protectedWaterState(column, protection, y, minBuildY, surfaceRock, steep, river, originalSurfaceY, vegetationClass, seaLevelY));
                     continue;
                 }
-                setBlock(chunk, cursor, ocean, surface, localX, y, localZ, Blocks.LAVA.defaultBlockState());
+                setBlock(chunk, cursor, localX, y, localZ, Blocks.LAVA.defaultBlockState());
                 continue;
             }
             BlockState state = columnStateFor(y, terrainTop, minBuildY, surfaceRock, steep, river, originalSurfaceY, vegetationClass, seaLevelY);
-            setBlock(chunk, cursor, ocean, surface, localX, y, localZ, state);
+            setBlock(chunk, cursor, localX, y, localZ, state);
         }
     }
 
@@ -462,16 +455,12 @@ final class ChunkTerrainPlanner {
     private static void setBlock(
         ChunkAccess chunk,
         BlockPos.MutableBlockPos cursor,
-        Heightmap ocean,
-        Heightmap surface,
         int localX,
         int y,
         int localZ,
         BlockState state
     ) {
         chunk.setBlockState(cursor.set(localX, y, localZ), state, false);
-        ocean.update(localX, y, localZ, state);
-        surface.update(localX, y, localZ, state);
     }
 
     private static void logTiming(String label, ChunkAccess chunk, long startNanos) {
