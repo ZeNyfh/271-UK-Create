@@ -8,8 +8,6 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.ChunkAccess;
-import net.minecraft.world.level.levelgen.Heightmap;
-import net.minecraft.world.level.levelgen.synth.NormalNoise;
 
 /**
  * Precomputes per-column terrain for one chunk on a background thread, then applies blocks in bulk.
@@ -19,6 +17,10 @@ final class ChunkTerrainPlanner {
     private static final int BORDER = 4;
     private static final int WATERBED_PROTECTION_DEPTH = 6;
     private static final boolean DEBUG_GEN_TIMINGS = Boolean.getBoolean("ukgeo.debugGenTimings");
+    private static final boolean DEBUG_CAVES = Boolean.getBoolean("ukgeo.debugCaves");
+    private static final int DEBUG_CAVE_X = Integer.getInteger("ukgeo.debugCaveX", 0);
+    private static final int DEBUG_CAVE_Z = Integer.getInteger("ukgeo.debugCaveZ", 0);
+    private static final int DEBUG_CAVE_RADIUS = Integer.getInteger("ukgeo.debugCaveRadius", 0);
 
     private ChunkTerrainPlanner() {
     }
@@ -82,7 +84,6 @@ final class ChunkTerrainPlanner {
     static void apply(Plan plan, ChunkAccess chunk, CaveMask caveMask) {
         long startNanos = System.nanoTime();
         BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
-        Heightmap surface = chunk.getOrCreateHeightmapUnprimed(Heightmap.Types.WORLD_SURFACE_WG);
         int minBuildY = chunk.getMinBuildHeight();
         int chunkMinX = chunk.getPos().getMinBlockX();
         int chunkMinZ = chunk.getPos().getMinBlockZ();
@@ -92,7 +93,7 @@ final class ChunkTerrainPlanner {
             for (int localX = 0; localX < CHUNK_SIZE; localX++) {
                 ColumnPlan column = plan.columns[localZ * CHUNK_SIZE + localX];
                 WaterProtection protection = waterProtections[localZ * CHUNK_SIZE + localX];
-                int vanillaTop = caveMask.usesDelegate() ? surface.getHighestTaken(localX, localZ) : minBuildY;
+                int vanillaTop = caveMask.usesDelegate() ? reliableDelegateTop(chunk, cursor, localX, localZ, caveMask.delegateMinY(), caveMask.delegateMaxY()) : minBuildY;
                 long fillStartNanos = DEBUG_GEN_TIMINGS ? System.nanoTime() : 0L;
                 fillColumn(
                     chunk,
@@ -117,6 +118,23 @@ final class ChunkTerrainPlanner {
             UkGeoMod.LOGGER.info("UKGeo timing chunk {} ChunkTerrainPlanner.fillColumn total={}ms", chunk.getPos(), nanosToMillis(fillNanos));
         }
         logTiming("ChunkTerrainPlanner.apply", chunk, startNanos);
+    }
+
+    private static int reliableDelegateTop(
+        ChunkAccess chunk,
+        BlockPos.MutableBlockPos cursor,
+        int localX,
+        int localZ,
+        int delegateMinY,
+        int delegateMaxY
+    ) {
+        for (int y = delegateMaxY; y >= delegateMinY; y--) {
+            BlockState state = chunk.getBlockState(cursor.set(localX, y, localZ));
+            if (!state.isAir() && !state.is(Blocks.WATER) && !state.is(Blocks.LAVA)) {
+                return y;
+            }
+        }
+        return delegateMinY - 1;
     }
 
     static void enforceWaterColumns(Plan plan, ChunkAccess chunk) {
@@ -259,7 +277,7 @@ final class ChunkTerrainPlanner {
     ) {
         int terrainTop = column.terrainTop();
         int columnTop = column.columnTop();
-        int clearTop = caveMask.usesDelegate() ? Math.max(columnTop, vanillaTop) : columnTop;
+        int clearTop = caveMask.usesDelegate() ? Math.max(columnTop, Math.min(vanillaTop, caveMask.delegateMaxY())) : columnTop;
         UkGeoChunkGenerator.RiverShape river = column.river();
         BlockState surfaceRock = column.surfaceRock();
         BlockState exposedSurfaceRock = column.exposedSurfaceRock();
@@ -409,34 +427,45 @@ final class ChunkTerrainPlanner {
         if (y > terrainTop) {
             return CaveState.SOLID;
         }
-        /*
-         * Vertical cave split:
-         * - the vanilla delegate is sampled only in its valid Y range, from delegateMinY upward;
-         * - an overlap around delegateMinY combines delegate cave air with the custom deep mask;
-         * - the custom deep mask owns world Y below delegateMinY down to the real world min Y;
-         * - delegate water/lava is ignored as fluid, while custom lava is placed later and is relative
-         *   to the actual world min Y instead of vanilla's old hardcoded lava level.
-         */
+        if (!caveMask.usesDelegate()) {
+            debugCave(worldX, y, worldZ, terrainTop, vanillaTop, caveMask, false);
+            return CaveState.SOLID;
+        }
         boolean delegateCave = false;
         if (caveMask.canSampleDelegate(y) && y <= vanillaTop) {
             BlockState existing = chunk.getBlockState(cursor.set(localX, y, localZ));
             delegateCave = existing.isAir() || existing.is(Blocks.LAVA);
         }
+        debugCave(worldX, y, worldZ, terrainTop, vanillaTop, caveMask, delegateCave);
+        return delegateCave ? CaveState.AIR : CaveState.SOLID;
+    }
 
-        boolean deepCave = caveMask.isDeepCave(worldX, y, worldZ);
-        boolean carve = switch (caveMask.mode(y)) {
-            case DELEGATE -> delegateCave;
-            case TRANSITION -> deepCave || (delegateCave && caveMask.keepDelegateTransitionCave(worldX, y, worldZ));
-            case DEEP -> deepCave;
-            case SOLID -> false;
-        };
-        if (!carve) {
-            return CaveState.SOLID;
+    private static void debugCave(
+        int worldX,
+        int y,
+        int worldZ,
+        int terrainTop,
+        int vanillaTop,
+        CaveMask caveMask,
+        boolean delegateCave
+    ) {
+        if (!DEBUG_CAVES || Math.abs(worldX - DEBUG_CAVE_X) > DEBUG_CAVE_RADIUS || Math.abs(worldZ - DEBUG_CAVE_Z) > DEBUG_CAVE_RADIUS || Math.floorMod(y, 16) != 0) {
+            return;
         }
-        if (deepCave && caveMask.isDeepLavaFloor(chunk, cursor, localX, y, localZ, worldX, worldZ)) {
-            return CaveState.LAVA;
-        }
-        return CaveState.AIR;
+        UkGeoMod.LOGGER.info(
+            "UKGeo cave debug x={} y={} z={} terrainTop={} surfaceDepth={} vanillaTop={} delegateRange={}..{} mode={} canDelegate={} delegateCave={}",
+            worldX,
+            y,
+            worldZ,
+            terrainTop,
+            terrainTop - y,
+            vanillaTop,
+            caveMask.delegateMinY(),
+            caveMask.delegateMaxY(),
+            caveMask.mode(y),
+            caveMask.canSampleDelegate(y),
+            delegateCave
+        );
     }
 
     static BlockState columnStateFor(
@@ -580,106 +609,29 @@ final class ChunkTerrainPlanner {
 
     enum CaveMode {
         DELEGATE,
-        TRANSITION,
-        DEEP,
         SOLID
     }
 
     record CaveMask(
         boolean usesDelegate,
         int delegateMinY,
-        int transitionStartY,
-        int transitionEndY,
-        int deepCaveMinY,
-        int deepCaveMaxY,
-        int deepLavaMaxY,
-        NormalNoise caveCheese,
-        NormalNoise caveLayer,
-        NormalNoise tunnelA,
-        NormalNoise tunnelB,
-        NormalNoise rarity,
-        NormalNoise lavaNoise
+        int delegateMaxY
     ) {
+        static CaveMask none() {
+            return new CaveMask(false, 0, -1);
+        }
+
         boolean canSampleDelegate(int y) {
-            return usesDelegate && y >= delegateMinY;
+            return usesDelegate && y >= delegateMinY && y <= delegateMaxY;
         }
 
         CaveMode mode(int y) {
-            if (usesDelegate && y >= transitionStartY && y <= transitionEndY) {
-                return CaveMode.TRANSITION;
-            }
-            if (usesDelegate && y > transitionEndY) {
-                return CaveMode.DELEGATE;
-            }
-            if (y >= deepCaveMinY && y <= deepCaveMaxY) {
-                return CaveMode.DEEP;
-            }
-            return CaveMode.SOLID;
+            return canSampleDelegate(y) ? CaveMode.DELEGATE : CaveMode.SOLID;
         }
 
         boolean mayCarveAtY(int y, int vanillaTop) {
-            return switch (mode(y)) {
-                case SOLID -> false;
-                case DELEGATE -> usesDelegate && y <= vanillaTop && canSampleDelegate(y);
-                case TRANSITION, DEEP -> true;
-            };
-        }
-
-        boolean isDeepCave(int x, int y, int z) {
-            if (y < deepCaveMinY || y > deepCaveMaxY) {
-                return false;
-            }
-            double span = Math.max(1.0, deepCaveMaxY - deepCaveMinY);
-            double depth = (y - deepCaveMinY) / span;
-            double bedrockFade = ChunkTerrainPlanner.smoothstep((y - deepCaveMinY) / 5.0);
-            double connectorBoost = 1.0 - ChunkTerrainPlanner.smoothstep((deepCaveMaxY - y) / 12.0);
-
-            double region = rarity.getValue(x * 0.013, y * 0.018, z * 0.013);
-            double chamber = caveCheese.getValue(x * 0.031, y * 0.043, z * 0.031);
-            double layer = caveLayer.getValue(x * 0.018, y * 0.037, z * 0.018);
-            double density = chamber * 0.74 + layer * 0.34 + region * 0.18;
-            double chamberThreshold = 0.54 - connectorBoost * 0.14 + (1.0 - bedrockFade) * 0.28 - depth * 0.04;
-            boolean chamberCave = region > -0.55 && density > chamberThreshold;
-
-            double tubeA = Math.abs(tunnelA.getValue(x * 0.052, y * 0.046, z * 0.052));
-            double tubeB = Math.abs(tunnelB.getValue((x + 79) * 0.052, y * 0.046, (z - 53) * 0.052));
-            double tube = Math.min(tubeA, tubeB);
-            double tubeThreshold = 0.105 + connectorBoost * 0.035 + depth * 0.015;
-            boolean tunnelCave = region > -0.35 && tube < tubeThreshold && bedrockFade > 0.1;
-
-            return chamberCave || tunnelCave;
-        }
-
-        boolean keepDelegateTransitionCave(int x, int y, int z) {
-            if (!usesDelegate || y < delegateMinY) {
-                return false;
-            }
-            double transitionSpan = Math.max(1.0, transitionEndY - delegateMinY);
-            double delegateWeight = ChunkTerrainPlanner.smoothstep((y - delegateMinY) / transitionSpan);
-            if (delegateWeight >= 0.98) {
-                return true;
-            }
-            double chamber = caveCheese.getValue((x + 31) * 0.027, y * 0.039, (z - 17) * 0.027);
-            double layer = caveLayer.getValue(x * 0.015, y * 0.031, z * 0.015);
-            double tube = Math.abs(tunnelA.getValue((x - 43) * 0.049, y * 0.043, (z + 71) * 0.049));
-            double connector = chamber * 0.48 + layer * 0.32 + (0.18 - tube) * 0.9;
-            double threshold = 0.22 - delegateWeight * 0.32;
-            return connector > threshold;
-        }
-
-        boolean isDeepLavaFloor(ChunkAccess chunk, BlockPos.MutableBlockPos cursor, int localX, int y, int localZ, int worldX, int worldZ) {
-            if (y <= deepCaveMinY || y > deepLavaMaxY || !isDeepCave(worldX, y + 1, worldZ)) {
-                return false;
-            }
-            BlockState below = chunk.getBlockState(cursor.set(localX, y - 1, localZ));
-            if (below.isAir() || below.is(Blocks.LAVA) || below.is(Blocks.WATER)) {
-                return false;
-            }
-            double span = Math.max(1.0, deepLavaMaxY - deepCaveMinY);
-            double lowDepth = (deepLavaMaxY - y) / span;
-            double lava = lavaNoise.getValue(worldX * 0.041, y * 0.029, worldZ * 0.041);
-            double threshold = 0.56 - ChunkTerrainPlanner.smoothstep(lowDepth) * 0.16;
-            return lava > threshold;
+            return usesDelegate && y <= vanillaTop && canSampleDelegate(y);
         }
     }
+
 }

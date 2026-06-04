@@ -48,7 +48,6 @@ import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.ChunkGenerator;
 import net.minecraft.world.level.levelgen.GenerationStep;
 import net.minecraft.world.level.levelgen.Heightmap;
-import net.minecraft.world.level.levelgen.Noises;
 import net.minecraft.world.level.levelgen.NoiseBasedChunkGenerator;
 import net.minecraft.world.level.levelgen.NoiseGeneratorSettings;
 import net.minecraft.world.level.levelgen.RandomState;
@@ -58,7 +57,6 @@ import net.minecraft.world.level.levelgen.XoroshiroRandomSource;
 import net.minecraft.world.level.levelgen.blending.Blender;
 import net.minecraft.world.level.levelgen.carver.ConfiguredWorldCarver;
 import net.minecraft.world.level.levelgen.placement.PlacedFeature;
-import net.minecraft.world.level.levelgen.synth.NormalNoise;
 import net.minecraft.world.level.material.Fluids;
 import net.neoforged.fml.ModList;
 
@@ -73,7 +71,10 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     private static final boolean DEBUG_GEN_TIMINGS = Boolean.getBoolean("ukgeo.debugGenTimings");
     private static final boolean CLEAN_PLANNED_DELEGATE_FLUIDS = Boolean.getBoolean("ukgeo.cleanPlannedDelegateFluids");
     private static final boolean SCHEDULE_FULL_WATER_COLUMNS = Boolean.getBoolean("ukgeo.scheduleFullWaterColumns");
-    private static final boolean DISABLE_CREATE_DIESEL_OIL_INTEGRATION = Boolean.getBoolean("ukgeo.disableCreateDieselOilIntegration");
+    private static final boolean ENABLE_CREATE_DIESEL_OIL_INTEGRATION = Boolean.getBoolean("ukgeo.enableCreateDieselOilIntegration");
+    private static final boolean DEBUG_CAVES = Boolean.getBoolean("ukgeo.debugCaves");
+    private static final boolean PRESERVE_DELEGATE_NOISE_CAVES = Boolean.getBoolean("ukgeo.preserveDelegateNoiseCaves");
+    private static final boolean ENABLE_VANILLA_CARVERS = !Boolean.getBoolean("ukgeo.disableVanillaCarvers");
     private static final int DEBUG_WATER_X = Integer.getInteger("ukgeo.debugWaterX", 30);
     private static final int DEBUG_WATER_Z = Integer.getInteger("ukgeo.debugWaterZ", 72);
     private static final int DEBUG_WATER_Y = Integer.getInteger("ukgeo.debugWaterY", 67);
@@ -109,12 +110,11 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     private static final int SNOW_ICE_MIN_Y = 501;
     private static final int VANILLA_MIN_Y = -64;
     private static final int VANILLA_MAX_Y = 320;
-    private static final int BOTTOM_BEDROCK_THICKNESS = 1;
-    private static final int CAVE_TRANSITION_BELOW_DELEGATE = 12;
-    private static final int CAVE_TRANSITION_ABOVE_DELEGATE = 16;
+    private static final int MAX_DEBUG_CARVER_BIOME_LOGS = 16;
     private static volatile boolean createDieselGeneratorsOilLookupAttempted;
     private static volatile Method createDieselGeneratorsSetOilAmount;
     private static volatile boolean caveModeLogged;
+    private static final Set<String> debuggedCarverBiomes = ConcurrentHashMap.newKeySet();
     private static final List<ResourceKey<PlacedFeature>> VANILLA_TREE_FEATURES = List.of(
         VegetationPlacements.TREES_PLAINS,
         VegetationPlacements.TREES_BIRCH_AND_OAK,
@@ -219,6 +219,9 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
             }
             carvers.put(stage, HolderSet.direct(stageCarvers));
         }
+        if (DEBUG_CAVES) {
+            logBiomeCarvers(biome, original);
+        }
         List<HolderSet<PlacedFeature>> sanitized = new ArrayList<>();
         for (HolderSet<PlacedFeature> step : original.features()) {
             List<Holder<PlacedFeature>> kept = new ArrayList<>();
@@ -236,29 +239,51 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         return new BiomeGenerationSettings(carvers, List.copyOf(sanitized));
     }
 
+    private static void logBiomeCarvers(Holder<Biome> biome, BiomeGenerationSettings settings) {
+        String biomeId = biome.unwrapKey()
+            .map(key -> key.location().toString())
+            .orElse("<unregistered>");
+        if (debuggedCarverBiomes.size() >= MAX_DEBUG_CARVER_BIOME_LOGS || !debuggedCarverBiomes.add(biomeId)) {
+            return;
+        }
+        int total = 0;
+        StringBuilder stages = new StringBuilder();
+        for (GenerationStep.Carving stage : settings.getCarvingStages()) {
+            int count = 0;
+            for (Holder<ConfiguredWorldCarver<?>> ignored : settings.getCarvers(stage)) {
+                count++;
+            }
+            total += count;
+            if (!stages.isEmpty()) {
+                stages.append(", ");
+            }
+            stages.append(stage.getName()).append('=').append(count);
+        }
+        UkGeoMod.LOGGER.info("UKGeo cave debug biome={} totalCarvers={} stages=[{}]", biomeId, total, stages);
+    }
+
     private static void logCaveMode(ChunkTerrainPlanner.CaveMask caveMask, int worldMinY, int maxY, int seaLevel) {
         if (!caveModeLogged) {
             caveModeLogged = true;
             if (caveMask.usesDelegate()) {
-                UkGeoMod.LOGGER.info(
-                    "Using split UK cave mask; worldMinY={}, maxY={}, delegateMinY={}, transition={}..{}, deepCaveRange={}..{}, deepLavaRange={}..{}, seaLevel={}, delegateFluidsIgnored=true, unconditionalAirBand=false, unconditionalSolidSlab=false",
+                UkGeoMod.LOGGER.warn(
+                    "Preserving bounded vanilla delegate noise caves; worldMinY={}, maxY={}, delegateRange={}..{}, seaLevel={}, preserveDelegateNoiseCaves={}, vanillaCarversEnabled={}. This debug path may copy vanilla density voids.",
                     worldMinY,
                     maxY,
                     caveMask.delegateMinY(),
-                    caveMask.transitionStartY(),
-                    caveMask.transitionEndY(),
-                    caveMask.deepCaveMinY(),
-                    caveMask.deepCaveMaxY(),
-                    caveMask.deepCaveMinY() + 1,
-                    caveMask.deepLavaMaxY(),
-                    seaLevel
+                    caveMask.delegateMaxY(),
+                    seaLevel,
+                    PRESERVE_DELEGATE_NOISE_CAVES,
+                    ENABLE_VANILLA_CARVERS
                 );
             } else {
-                UkGeoMod.LOGGER.warn(
-                    "Using legacy carvers only; modern noise caves unavailable because cave_settings was not configured; worldMinY={}, maxY={}, deepCaveRange=none, deepLavaRange=none, seaLevel={}, delegateFluidsIgnored=true",
+                UkGeoMod.LOGGER.info(
+                    "Using solid UKGeo terrain with no delegate noise cave preservation; worldMinY={}, maxY={}, seaLevel={}, preserveDelegateNoiseCaves={}, vanillaCarversEnabled={}",
                     worldMinY,
                     maxY,
-                    seaLevel
+                    seaLevel,
+                    PRESERVE_DELEGATE_NOISE_CAVES,
+                    ENABLE_VANILLA_CARVERS
                 );
             }
         }
@@ -287,29 +312,36 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         long fillStartNanos = System.nanoTime();
         RuntimeData data = data();
         if (data == null) {
-            return caveDelegate
+            return PRESERVE_DELEGATE_NOISE_CAVES ? caveDelegate
                 .map(delegate -> delegate.fillFromNoise(blender, randomState, structureManager, chunk))
-                .orElseGet(() -> CompletableFuture.completedFuture(chunk));
+                .orElseGet(() -> CompletableFuture.completedFuture(chunk)) : CompletableFuture.completedFuture(chunk);
         }
         /*
-         * Pipeline: compute UK height/biome data, run vanilla noise only to obtain cave air shapes,
-         * overlay UK terrain/surface/water, prime heightmaps, then place ores/decorations later.
-         * Delegate aquifer water/lava is deliberately ignored; final fluids come from UK ocean/river
-         * rules, avoiding vanilla sea-level water sheets and hardcoded lava aquifers in this -128 minY world.
+         * Pipeline: compute UK height/biome data, overlay UK terrain/surface/water, prime
+         * heightmaps, then let the normal carver stage apply vanilla-style legacy carvers.
+         * Delegate noise caves are opt-in only because copying arbitrary delegate AIR can
+         * preserve broad density voids in this tall custom dimension.
          */
-        CompletableFuture<ChunkAccess> baseNoise = caveDelegate
+        boolean preserveVanillaCaves = PRESERVE_DELEGATE_NOISE_CAVES && caveDelegate.isPresent();
+        CompletableFuture<ChunkAccess> baseNoise = preserveVanillaCaves ? caveDelegate
             .map(delegate -> delegate.fillFromNoise(blender, randomState, structureManager, chunk))
-            .orElseGet(() -> CompletableFuture.completedFuture(chunk));
-        boolean preserveVanillaCaves = caveDelegate.isPresent();
+            .orElseGet(() -> CompletableFuture.completedFuture(chunk)) : CompletableFuture.completedFuture(chunk);
         int delegateMinY = caveDelegate.map(NoiseBasedChunkGenerator::getMinY).orElse(chunk.getMinBuildHeight());
-        ChunkTerrainPlanner.CaveMask caveMask = caveMask(
-            randomState,
-            chunk.getMinBuildHeight(),
-            chunk.getMaxBuildHeight() - 1,
-            delegateMinY,
-            preserveVanillaCaves
-        );
+        int delegateMaxY = caveDelegate.isPresent() ? Math.min(chunk.getMaxBuildHeight() - 1, VANILLA_MAX_Y) : chunk.getMinBuildHeight() - 1;
+        ChunkTerrainPlanner.CaveMask caveMask = preserveVanillaCaves ? caveMask(delegateMinY, delegateMaxY, true) : ChunkTerrainPlanner.CaveMask.none();
         logCaveMode(caveMask, chunk.getMinBuildHeight(), chunk.getMaxBuildHeight() - 1, this.seaLevelY);
+        if (DEBUG_CAVES) {
+            UkGeoMod.LOGGER.info(
+                "UKGeo cave debug chunk={} preserveDelegateNoiseCaves={} ranDelegateFillFromNoise={} caveMaskUsesDelegate={} delegateRange={}..{} vanillaCarversEnabled={}",
+                chunk.getPos(),
+                PRESERVE_DELEGATE_NOISE_CAVES,
+                preserveVanillaCaves,
+                caveMask.usesDelegate(),
+                delegateMinY,
+                delegateMaxY,
+                ENABLE_VANILLA_CARVERS
+            );
+        }
         return baseNoise.thenCompose(noiseChunk -> CompletableFuture
                 .supplyAsync(
                     Util.wrapThreadWithTaskName("ukgeo_plan", () -> {
@@ -331,42 +363,8 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
             }));
     }
 
-    private static ChunkTerrainPlanner.CaveMask caveMask(RandomState randomState, int worldMinY, int worldMaxY, int delegateMinY, boolean usingDelegate) {
-        int deepCaveMinY = deepCaveMinY(worldMinY);
-        int transitionStartY = usingDelegate ? Math.max(deepCaveMinY, delegateMinY - CAVE_TRANSITION_BELOW_DELEGATE) : worldMinY - 1;
-        int transitionEndY = usingDelegate ? Math.min(worldMaxY, delegateMinY + CAVE_TRANSITION_ABOVE_DELEGATE) : worldMinY - 1;
-        int deepCaveMaxY = usingDelegate ? transitionEndY : worldMinY - 1;
-        int deepLavaMaxY = usingDelegate ? deepLavaMaxY(worldMinY, delegateMinY) : worldMinY - 1;
-        NormalNoise caveCheese = randomState.getOrCreateNoise(Noises.CAVE_CHEESE);
-        NormalNoise caveLayer = randomState.getOrCreateNoise(Noises.CAVE_LAYER);
-        NormalNoise tunnelA = randomState.getOrCreateNoise(Noises.SPAGHETTI_3D_1);
-        NormalNoise tunnelB = randomState.getOrCreateNoise(Noises.SPAGHETTI_3D_2);
-        NormalNoise rarity = randomState.getOrCreateNoise(Noises.SPAGHETTI_3D_RARITY);
-        NormalNoise lavaNoise = randomState.getOrCreateNoise(Noises.SPAGHETTI_ROUGHNESS_MODULATOR);
-        return new ChunkTerrainPlanner.CaveMask(
-            usingDelegate,
-            delegateMinY,
-            transitionStartY,
-            transitionEndY,
-            deepCaveMinY,
-            deepCaveMaxY,
-            deepLavaMaxY,
-            caveCheese,
-            caveLayer,
-            tunnelA,
-            tunnelB,
-            rarity,
-            lavaNoise
-        );
-    }
-
-    private static int deepCaveMinY(int worldMinY) {
-        return worldMinY + BOTTOM_BEDROCK_THICKNESS;
-    }
-
-    private static int deepLavaMaxY(int worldMinY, int delegateMinY) {
-        int deepSpan = Math.max(1, delegateMinY - worldMinY);
-        return worldMinY + Math.max(1, Math.round(deepSpan / 3.0f));
+    private static ChunkTerrainPlanner.CaveMask caveMask(int delegateMinY, int delegateMaxY, boolean usingDelegate) {
+        return new ChunkTerrainPlanner.CaveMask(usingDelegate, delegateMinY, delegateMaxY);
     }
 
     int sampleMargin() {
@@ -2370,7 +2368,7 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     }
 
     private void populateCreateDieselGeneratorsOil(ServerLevel level, ChunkPos chunkPos) {
-        if (DISABLE_CREATE_DIESEL_OIL_INTEGRATION) {
+        if (!ENABLE_CREATE_DIESEL_OIL_INTEGRATION) {
             return;
         }
         RuntimeData data = data();
@@ -2503,9 +2501,14 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         ChunkAccess chunk,
         GenerationStep.Carving carving
     ) {
-        // Per-biome carvers are the legacy cave/ravine pass. Delegate to vanilla's implementation so
-        // biome JSON carvers run without duplicating its low-level carving loop in this generator.
-        caveDelegate.ifPresent(delegate -> delegate.applyCarvers(level, seed, random, biomeManager, structureManager, chunk, carving));
+        if (ENABLE_VANILLA_CARVERS) {
+            if (DEBUG_CAVES) {
+                UkGeoMod.LOGGER.info("UKGeo cave debug applying vanilla delegate carvers chunk={} step={}", chunk.getPos(), carving);
+            }
+            caveDelegate.ifPresent(delegate -> delegate.applyCarvers(level, seed, random, biomeManager, structureManager, chunk, carving));
+        } else if (DEBUG_CAVES) {
+            UkGeoMod.LOGGER.info("UKGeo cave debug skipped vanilla delegate carvers chunk={} step={}", chunk.getPos(), carving);
+        }
     }
 
     @Override
