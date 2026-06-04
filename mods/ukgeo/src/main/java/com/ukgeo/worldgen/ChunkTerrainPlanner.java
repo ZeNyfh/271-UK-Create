@@ -17,18 +17,23 @@ final class ChunkTerrainPlanner {
     private static final int CHUNK_SIZE = 16;
     private static final int BORDER = 4;
     private static final int WATERBED_PROTECTION_DEPTH = 6;
+    private static final boolean DEBUG_GEN_TIMINGS = Boolean.getBoolean("ukgeo.debugGenTimings");
 
     private ChunkTerrainPlanner() {
     }
 
     static Plan compute(UkGeoChunkGenerator generator, UkGeoChunkGenerator.RuntimeData data, ChunkAccess chunk) throws IOException {
+        long startNanos = System.nanoTime();
         int chunkMinX = chunk.getPos().getMinBlockX();
         int chunkMinZ = chunk.getPos().getMinBlockZ();
         int minBuildY = chunk.getMinBuildHeight();
         int maxBuildY = chunk.getMaxBuildHeight() - 1;
         int margin = Math.max(generator.sampleMargin(), BORDER);
+        long windowStartNanos = System.nanoTime();
         HeightTileWindow heightWindow = HeightTileWindow.forChunk(data.height(), data.manifest(), chunkMinX, chunkMinZ, margin);
+        logTiming("HeightTileWindow.forChunk", chunk, windowStartNanos);
 
+        long surfaceStartNanos = System.nanoTime();
         int gridSize = CHUNK_SIZE + BORDER * 2;
         int[] surfaceGrid = new int[gridSize * gridSize];
         for (int gz = 0; gz < gridSize; gz++) {
@@ -38,7 +43,9 @@ final class ChunkTerrainPlanner {
                 surfaceGrid[gz * gridSize + gx] = generator.computeSurfaceY(data, heightWindow, worldX, worldZ);
             }
         }
+        logTiming("ChunkTerrainPlanner.surfaceGrid", chunk, surfaceStartNanos);
 
+        long waterStartNanos = System.nanoTime();
         ColumnPlan[] columns = new ColumnPlan[CHUNK_SIZE * CHUNK_SIZE];
         UkGeoChunkGenerator.WaterShapeCache waterShapeCache = new UkGeoChunkGenerator.WaterShapeCache();
         for (int localZ = 0; localZ < CHUNK_SIZE; localZ++) {
@@ -61,10 +68,16 @@ final class ChunkTerrainPlanner {
                 columns[index] = new ColumnPlan(top, terrainTop, columnTop, steep, river, vegetationClass, surfaceRock);
             }
         }
-        return new Plan(columns, generator.buildOrePlacements(data, chunk, columns), generator.seaLevel());
+        logTiming("ChunkTerrainPlanner.waterPlanning", chunk, waterStartNanos);
+        long oreStartNanos = System.nanoTime();
+        Plan plan = new Plan(columns, generator.buildOrePlacements(data, chunk, columns), generator.seaLevel());
+        logTiming("ChunkTerrainPlanner.orePlanning", chunk, oreStartNanos);
+        logTiming("ChunkTerrainPlanner.compute", chunk, startNanos);
+        return plan;
     }
 
     static void apply(Plan plan, ChunkAccess chunk, CaveMask caveMask) {
+        long startNanos = System.nanoTime();
         BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
         Heightmap ocean = chunk.getOrCreateHeightmapUnprimed(Heightmap.Types.OCEAN_FLOOR_WG);
         Heightmap surface = chunk.getOrCreateHeightmapUnprimed(Heightmap.Types.WORLD_SURFACE_WG);
@@ -72,11 +85,13 @@ final class ChunkTerrainPlanner {
         int chunkMinX = chunk.getPos().getMinBlockX();
         int chunkMinZ = chunk.getPos().getMinBlockZ();
         WaterProtection[] waterProtections = waterProtections(plan);
+        long fillNanos = 0L;
         for (int localZ = 0; localZ < CHUNK_SIZE; localZ++) {
             for (int localX = 0; localX < CHUNK_SIZE; localX++) {
                 ColumnPlan column = plan.columns[localZ * CHUNK_SIZE + localX];
                 WaterProtection protection = waterProtections[localZ * CHUNK_SIZE + localX];
                 int vanillaTop = caveMask.usesDelegate() ? surface.getHighestTaken(localX, localZ) : minBuildY;
+                long fillStartNanos = DEBUG_GEN_TIMINGS ? System.nanoTime() : 0L;
                 fillColumn(
                     chunk,
                     cursor,
@@ -93,11 +108,19 @@ final class ChunkTerrainPlanner {
                     caveMask,
                     vanillaTop
                 );
+                if (DEBUG_GEN_TIMINGS) {
+                    fillNanos += System.nanoTime() - fillStartNanos;
+                }
             }
         }
+        if (DEBUG_GEN_TIMINGS) {
+            UkGeoMod.LOGGER.info("UKGeo timing chunk {} ChunkTerrainPlanner.fillColumn total={}ms", chunk.getPos(), nanosToMillis(fillNanos));
+        }
+        logTiming("ChunkTerrainPlanner.apply", chunk, startNanos);
     }
 
     static void enforceWaterColumns(Plan plan, ChunkAccess chunk) {
+        long startNanos = System.nanoTime();
         BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
         Heightmap ocean = chunk.getOrCreateHeightmapUnprimed(Heightmap.Types.OCEAN_FLOOR_WG);
         Heightmap surface = chunk.getOrCreateHeightmapUnprimed(Heightmap.Types.WORLD_SURFACE_WG);
@@ -117,6 +140,7 @@ final class ChunkTerrainPlanner {
                 clearWaterAboveSurface(chunk, cursor, localX, localZ, waterSurfaceY);
             }
         }
+        logTiming("ChunkTerrainPlanner.enforceWaterColumns", chunk, startNanos);
     }
 
     private static void clearUnplannedSurfaceWater(ChunkAccess chunk, BlockPos.MutableBlockPos cursor, int localX, int localZ, int terrainTop) {
@@ -158,6 +182,7 @@ final class ChunkTerrainPlanner {
     }
 
     static void applyOres(Plan plan, ChunkAccess chunk) {
+        long startNanos = System.nanoTime();
         BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
         for (OrePlacement placement : plan.orePlacements) {
             ColumnPlan column = plan.columns[placement.localZ() * CHUNK_SIZE + placement.localX()];
@@ -169,6 +194,7 @@ final class ChunkTerrainPlanner {
                 chunk.setBlockState(cursor, placement.state(), false);
             }
         }
+        logTiming("ChunkTerrainPlanner.applyOres", chunk, startNanos);
     }
 
     private static boolean isSteep(int[] surfaceGrid, int gridSize, int gx, int gz) {
@@ -223,7 +249,9 @@ final class ChunkTerrainPlanner {
         setBlock(chunk, cursor, ocean, surface, localX, minBuildY, localZ, Blocks.BEDROCK.defaultBlockState());
         int stoneTop = Math.max(minBuildY + 1, terrainTop - 12);
         for (int y = minBuildY + 1; y < stoneTop; y++) {
-            CaveState caveState = caveState(chunk, cursor, caveMask, localX, y, localZ, worldX, worldZ, vanillaTop, terrainTop);
+            CaveState caveState = y <= terrainTop && caveMask.mayCarveAtY(y, vanillaTop)
+                ? caveState(chunk, cursor, caveMask, localX, y, localZ, worldX, worldZ, vanillaTop, terrainTop)
+                : CaveState.SOLID;
             if (caveState == CaveState.AIR) {
                 if (isProtectedWaterCave(protection, y)) {
                     setBlock(chunk, cursor, ocean, surface, localX, y, localZ, protectedWaterState(column, protection, y, minBuildY, surfaceRock, steep, river, originalSurfaceY, vegetationClass, seaLevelY));
@@ -242,7 +270,9 @@ final class ChunkTerrainPlanner {
             setBlock(chunk, cursor, ocean, surface, localX, y, localZ, y < 0 ? Blocks.DEEPSLATE.defaultBlockState() : Blocks.STONE.defaultBlockState());
         }
         for (int y = stoneTop; y <= clearTop; y++) {
-            CaveState caveState = caveState(chunk, cursor, caveMask, localX, y, localZ, worldX, worldZ, vanillaTop, terrainTop);
+            CaveState caveState = y <= terrainTop && caveMask.mayCarveAtY(y, vanillaTop)
+                ? caveState(chunk, cursor, caveMask, localX, y, localZ, worldX, worldZ, vanillaTop, terrainTop)
+                : CaveState.SOLID;
             if (caveState == CaveState.AIR) {
                 if (isProtectedWaterCave(protection, y)) {
                     setBlock(chunk, cursor, ocean, surface, localX, y, localZ, protectedWaterState(column, protection, y, minBuildY, surfaceRock, steep, river, originalSurfaceY, vegetationClass, seaLevelY));
@@ -444,6 +474,16 @@ final class ChunkTerrainPlanner {
         surface.update(localX, y, localZ, state);
     }
 
+    private static void logTiming(String label, ChunkAccess chunk, long startNanos) {
+        if (DEBUG_GEN_TIMINGS) {
+            UkGeoMod.LOGGER.info("UKGeo timing chunk {} {}={}ms", chunk.getPos(), label, nanosToMillis(System.nanoTime() - startNanos));
+        }
+    }
+
+    private static double nanosToMillis(long nanos) {
+        return nanos / 1_000_000.0;
+    }
+
     record ColumnPlan(
         int originalSurfaceY,
         int terrainTop,
@@ -510,6 +550,14 @@ final class ChunkTerrainPlanner {
                 return CaveMode.DEEP;
             }
             return CaveMode.SOLID;
+        }
+
+        boolean mayCarveAtY(int y, int vanillaTop) {
+            return switch (mode(y)) {
+                case SOLID -> false;
+                case DELEGATE -> usesDelegate && y <= vanillaTop && canSampleDelegate(y);
+                case TRANSITION, DEEP -> true;
+            };
         }
 
         boolean isDeepCave(int x, int y, int z) {

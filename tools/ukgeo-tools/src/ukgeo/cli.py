@@ -91,7 +91,10 @@ def make_height_tiles(
     minecraft_min_x: int = typer.Option(DEFAULT_MINECRAFT_MIN_X, "--minecraft-min-x"),
     minecraft_min_z: int = typer.Option(DEFAULT_MINECRAFT_MIN_Z, "--minecraft-min-z"),
     sea_level_y: int = typer.Option(64, "--sea-level-y"),
-    debug_geotiff: Path | None = typer.Option(None, "--debug-geotiff"),
+    height_resampling: str = typer.Option("nearest", "--height-resampling", help="nearest or bilinear"),
+    height_smoothing: str = typer.Option("none", "--height-smoothing", help="none, light, or medium"),
+    height_deterrace: bool = typer.Option(False, "--height-deterrace/--no-height-deterrace"),
+    debug_geotiff: Path | None = typer.Option(None, "--debug-geotiff", "--height-debug-geotiff"),
 ) -> None:
     make_height_tiles_impl(
         os_zip=os_zip,
@@ -106,6 +109,9 @@ def make_height_tiles(
         minecraft_min_x=minecraft_min_x,
         minecraft_min_z=minecraft_min_z,
         sea_level_y=sea_level_y,
+        height_resampling=height_resampling,
+        height_smoothing=height_smoothing,
+        height_deterrace=height_deterrace,
         debug_geotiff=debug_geotiff,
     )
 

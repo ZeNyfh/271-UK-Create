@@ -81,7 +81,10 @@ echo "Rebuilding GB runtime tiles into: $TMP_ROOT"
   --world-depth 50000 \
   --minecraft-min-x -17588 \
   --minecraft-min-z -36925 \
-  --sea-level-y 64
+  --sea-level-y 64 \
+  --height-resampling bilinear \
+  --height-smoothing light \
+  --height-deterrace
 
 "$UKGEO" add-osni-height-tiles \
   --osni-dtm "$OSNI_DTM_ZIP" \
