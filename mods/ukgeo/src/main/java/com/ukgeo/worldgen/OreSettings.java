@@ -2,6 +2,8 @@ package com.ukgeo.worldgen;
 
 import java.util.List;
 
+import com.ukgeo.worldgen.OreDefinition.OreHeightProfile;
+
 public final class OreSettings {
     private static final String BACKGROUND_ONLY = "";
 
@@ -10,15 +12,15 @@ public final class OreSettings {
 
     public static List<OreDefinition> defaults() {
         return List.of(
-            new OreDefinition("coal", "coal", "minecraft:coal_ore", "minecraft:deepslate_coal_ore", 1, 14, -64, 320, 17),
-            new OreDefinition("iron", "iron", "minecraft:iron_ore", "minecraft:deepslate_iron_ore", 1, 10, -64, 72, 9),
-            new OreDefinition("copper", "copper", "minecraft:copper_ore", "minecraft:deepslate_copper_ore", 1, 10, -16, 112, 10),
-            new OreDefinition("zinc", "zinc", "create:zinc_ore", "create:deepslate_zinc_ore", 1, 14, -64, 200, 12),
-            new OreDefinition("gold", "gold", "minecraft:gold_ore", "minecraft:deepslate_gold_ore", 0, 5, -64, 32, 5),
+            new OreDefinition("coal", "coal", "minecraft:coal_ore", "minecraft:deepslate_coal_ore", 1, 14, 0, 320, OreHeightProfile.TRIANGLE, 136, 0, 17),
+            new OreDefinition("iron", "iron", "minecraft:iron_ore", "minecraft:deepslate_iron_ore", 1, 10, -64, 320, OreHeightProfile.TWO_PEAKS, 16, 232, 9),
+            new OreDefinition("copper", "copper", "minecraft:copper_ore", "minecraft:deepslate_copper_ore", 1, 10, -16, 112, OreHeightProfile.TRIANGLE, 48, 0, 10),
+            new OreDefinition("zinc", "zinc", "create:zinc_ore", "create:deepslate_zinc_ore", 1, 14, -63, 70, OreHeightProfile.TRIANGLE, 16, 0, 12),
+            new OreDefinition("gold", "gold", "minecraft:gold_ore", "minecraft:deepslate_gold_ore", 0, 5, -64, 32, OreHeightProfile.TRIANGLE, -16, 0, 5),
             new OreDefinition("redstone", BACKGROUND_ONLY, "minecraft:redstone_ore", "minecraft:deepslate_redstone_ore", 8, 0, -96, 64, 8),
             new OreDefinition("lapis", BACKGROUND_ONLY, "minecraft:lapis_ore", "minecraft:deepslate_lapis_ore", 2, 0, -64, 64, 7),
-            // 1% diamond spawns
-            new OreDefinition("diamond", BACKGROUND_ONLY, "minecraft:diamond_ore", "minecraft:deepslate_diamond_ore", 1, 0, -64, 16, 6),
+            // 0.1 raw background attempts * 0.1 background multiplier = 0.01 effective attempts per chunk.
+            new OreDefinition("diamond", BACKGROUND_ONLY, "minecraft:diamond_ore", "minecraft:deepslate_diamond_ore", 0.1, 0, -64, 16, OreHeightProfile.DEEP_BIASED, -64, 0, 6),
             new OreDefinition("emerald", BACKGROUND_ONLY, "minecraft:emerald_ore", "minecraft:deepslate_emerald_ore", 2, 0, -16, 320, 3),
             new OreDefinition("andesite", "andesite", "minecraft:andesite", "minecraft:andesite", 0, 18, -64, 320, 28),
             new OreDefinition("diorite", "diorite", "minecraft:diorite", "minecraft:diorite", 0, 14, -64, 320, 24),
