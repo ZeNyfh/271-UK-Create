@@ -20,6 +20,10 @@ from ukgeo.tiles import HEIGHT_NODATA
 HOVER_PREVIEW_FORMAT = "ukgeo-hoverpreviews-v1"
 HOVER_PREVIEW_INDEX = "hover_manifest.json"
 VISUAL_TILE_SIZE = 256
+PREVIEW_RIVER_WIDTH_SCALE = 0.18
+PREVIEW_RIVER_MIN_RADIUS = 1
+PREVIEW_RIVER_MAX_RADIUS = 6
+PREVIEW_RIVER_COLOR = (65, 145, 230)
 _CUPY_MODULE: Any | None | bool = None
 
 
@@ -135,19 +139,22 @@ def export_hover_previews(
     if "rivers" in manifest and (root / manifest["rivers"]["path"]).exists():
         report("rivers")
         values = _read_u8_preview(root, manifest["rivers"]["path"], tiles_x, tiles_z, tile_size, scale, missing_ok=False)
-        visual = _fit_image(_mask_overlay_image(values, (65, 145, 230)), base_size)
+        width_values, width_metadata = _read_river_width_preview(root, manifest, tiles_x, tiles_z, tile_size, scale)
+        visual = _fit_image(_river_overlay_image(values, width_values, width_metadata["source"]), base_size)
         sample = _fit_image(Image.fromarray(values, mode="L"), base_size)
         mips = _save_visual_layer(out, visual, "layers/rivers.png")
         sample.save(out / "samples" / "rivers_u8.png")
-        layers.append({
+        layer_entry = {
             "name": "rivers",
             "kind": "overlay",
             "file": "layers/rivers.png",
             "mips": mips,
             "sample_file": "samples/rivers_u8.png",
             "sample_tiles": _save_sample_tiles(out, sample, "samples/rivers_u8.png"),
-        })
-        del values, visual, sample
+            "preview": width_metadata,
+        }
+        layers.append(layer_entry)
+        del values, width_values, visual, sample
         gc.collect()
 
     ore_dir = out / "layers" / "ores"
@@ -197,6 +204,12 @@ def export_hover_previews(
         "minecraft_origin": _minecraft_origin(manifest),
         "surface_geology": manifest.get("surface_geology", {}),
         "vegetation": manifest.get("vegetation", {}),
+        "preview": {
+            "river_width_source": next((layer["preview"]["source"] for layer in layers if layer["name"] == "rivers"), None),
+            "river_width_scale": PREVIEW_RIVER_WIDTH_SCALE,
+            "river_min_radius": PREVIEW_RIVER_MIN_RADIUS,
+            "river_max_radius": PREVIEW_RIVER_MAX_RADIUS,
+        },
         "layers": layers,
     }
     with (out / HOVER_PREVIEW_INDEX).open("w", encoding="utf-8") as fh:
@@ -428,6 +441,142 @@ def _categorical_overlay_image(values: np.ndarray, classes: dict, *, alpha: int,
         rgba[mask, :3] = _hex_color(meta.get("color", "#777777"))
         rgba[mask, 3] = alpha
     return Image.fromarray(rgba, mode="RGBA")
+
+
+def _read_river_width_preview(
+    root: Path,
+    manifest: dict[str, Any],
+    tiles_x: int,
+    tiles_z: int,
+    tile_size: int,
+    scale: int,
+) -> tuple[np.ndarray | None, dict[str, Any]]:
+    rivers = manifest.get("rivers", {})
+    candidates = (
+        ("river_half_width", rivers.get("half_width_path") or rivers.get("river_half_width_path")),
+        ("river_order", rivers.get("order_path") or rivers.get("river_order_path")),
+    )
+    metadata: dict[str, Any] = {
+        "source": "river_mask",
+        "river_half_width_available": False,
+        "river_order_available": False,
+        "river_width_scale": PREVIEW_RIVER_WIDTH_SCALE,
+        "river_min_radius": PREVIEW_RIVER_MIN_RADIUS,
+        "river_max_radius": PREVIEW_RIVER_MAX_RADIUS,
+    }
+    available_layers: list[tuple[str, str]] = []
+    for source, layer_path in candidates:
+        if not layer_path:
+            continue
+        available = (root / str(layer_path)).exists()
+        if source == "river_half_width":
+            metadata["river_half_width_available"] = available
+        elif source == "river_order":
+            metadata["river_order_available"] = available
+        if not available:
+            continue
+        available_layers.append((source, str(layer_path)))
+    if available_layers:
+        source, layer_path = available_layers[0]
+        values = _read_u8_preview(root, layer_path, tiles_x, tiles_z, tile_size, scale, missing_ok=True)
+        metadata["source"] = source
+        metadata["path"] = layer_path
+        metadata["max_value"] = int(values.max()) if values.size else 0
+        return values, metadata
+    return None, metadata
+
+
+def _river_overlay_image(river_mask: np.ndarray, width_values: np.ndarray | None, width_source: str) -> Image.Image:
+    radii = _river_preview_radii(river_mask, width_values, width_source)
+    if not np.any(radii > 0):
+        return Image.fromarray(np.zeros((*river_mask.shape, 4), dtype=np.uint8), mode="RGBA")
+    alpha = _dilate_river_radii(radii)
+    rgba = np.zeros((*river_mask.shape, 4), dtype=np.uint8)
+    rgba[:, :, :3] = np.array(PREVIEW_RIVER_COLOR, dtype=np.uint8)
+    rgba[:, :, 3] = alpha
+    return Image.fromarray(rgba, mode="RGBA")
+
+
+def _river_preview_radii(river_mask: np.ndarray, width_values: np.ndarray | None, width_source: str) -> np.ndarray:
+    river = river_mask > 0
+    radii = np.zeros(river_mask.shape, dtype=np.uint8)
+    if width_values is None or width_source == "river_mask":
+        radii[river] = PREVIEW_RIVER_MIN_RADIUS
+        return radii
+
+    values = _fit_array(width_values, river_mask.shape)
+    if width_source == "river_half_width":
+        scaled = np.rint(values.astype(np.float32) * PREVIEW_RIVER_WIDTH_SCALE).astype(np.int16)
+    elif width_source == "river_order":
+        scaled = _river_order_radii(values)
+    else:
+        scaled = np.where(values > 0, PREVIEW_RIVER_MIN_RADIUS, 0)
+    scaled = np.clip(scaled, PREVIEW_RIVER_MIN_RADIUS, PREVIEW_RIVER_MAX_RADIUS).astype(np.uint8)
+    radii[river] = scaled[river]
+    radii[river & (values == 0)] = PREVIEW_RIVER_MIN_RADIUS
+    return radii
+
+
+def _river_order_radii(order_values: np.ndarray) -> np.ndarray:
+    radii = np.zeros(order_values.shape, dtype=np.uint8)
+    radii[(order_values == 1) | (order_values == 2)] = 1
+    radii[order_values == 3] = 2
+    radii[order_values == 4] = 3
+    radii[order_values == 5] = 5
+    radii[order_values >= 6] = 6
+    return radii
+
+
+def _dilate_river_radii(radii: np.ndarray) -> np.ndarray:
+    alpha = np.zeros(radii.shape, dtype=np.uint8)
+    for radius in sorted(int(value) for value in np.unique(radii) if value > 0):
+        mask = radii == radius
+        if not np.any(mask):
+            continue
+        dilated = _dilate_mask(mask, radius)
+        alpha[dilated] = 228
+    return alpha
+
+
+def _dilate_mask(mask: np.ndarray, radius: int) -> np.ndarray:
+    if radius <= 0:
+        return mask.copy()
+    out = np.zeros(mask.shape, dtype=bool)
+    offsets = _circle_offsets(radius)
+    height, width = mask.shape
+    for dy, dx in offsets:
+        src_y0 = max(0, -dy)
+        src_y1 = min(height, height - dy)
+        src_x0 = max(0, -dx)
+        src_x1 = min(width, width - dx)
+        if src_y0 >= src_y1 or src_x0 >= src_x1:
+            continue
+        dst_y0 = src_y0 + dy
+        dst_y1 = src_y1 + dy
+        dst_x0 = src_x0 + dx
+        dst_x1 = src_x1 + dx
+        out[dst_y0:dst_y1, dst_x0:dst_x1] |= mask[src_y0:src_y1, src_x0:src_x1]
+    return out
+
+
+def _circle_offsets(radius: int) -> list[tuple[int, int]]:
+    radius_sq = radius * radius
+    return [
+        (dy, dx)
+        for dy in range(-radius, radius + 1)
+        for dx in range(-radius, radius + 1)
+        if dy * dy + dx * dx <= radius_sq
+    ]
+
+
+def _fit_array(values: np.ndarray, shape: tuple[int, int]) -> np.ndarray:
+    if values.shape == shape:
+        return values
+    out = np.zeros(shape, dtype=values.dtype)
+    height = min(shape[0], values.shape[0])
+    width = min(shape[1], values.shape[1])
+    out[:height, :width] = values[:height, :width]
+    return out
 
 
 def _mask_overlay_image(values: np.ndarray, color_value: tuple[int, int, int]) -> Image.Image:
