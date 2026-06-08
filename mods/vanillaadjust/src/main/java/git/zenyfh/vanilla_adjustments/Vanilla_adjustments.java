@@ -4,7 +4,9 @@ import net.minecraft.tags.ItemTags;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
+import net.neoforged.fml.ModContainer;
 import net.neoforged.bus.api.SubscribeEvent;
+import net.neoforged.fml.config.ModConfig;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.entity.living.LivingDeathEvent;
@@ -15,8 +17,10 @@ import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 public class Vanilla_adjustments {
     public static final String MODID = "vanilla_adjustments";
 
-    public Vanilla_adjustments() {
+    public Vanilla_adjustments(ModContainer modContainer) {
+        modContainer.registerConfig(ModConfig.Type.SERVER, VanillaAdjustConfig.SERVER_SPEC);
         NeoForge.EVENT_BUS.register(this);
+        NeoForge.EVENT_BUS.register(new EnderPearlRadiusLimiter());
     }
 
     @SubscribeEvent
