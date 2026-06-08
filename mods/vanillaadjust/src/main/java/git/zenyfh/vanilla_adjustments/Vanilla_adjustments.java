@@ -21,6 +21,7 @@ public class Vanilla_adjustments {
         modContainer.registerConfig(ModConfig.Type.SERVER, VanillaAdjustConfig.SERVER_SPEC);
         NeoForge.EVENT_BUS.register(this);
         NeoForge.EVENT_BUS.register(new EnderPearlRadiusLimiter());
+        NeoForge.EVENT_BUS.register(new DeepslateFluidGeneratorHandler());
     }
 
     @SubscribeEvent
