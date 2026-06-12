@@ -21,6 +21,8 @@ public final class VanillaAdjustConfig {
     public static final ModConfigSpec.BooleanValue DISABLE_DRIPSTONE_LAVA_GENERATION;
     public static final ModConfigSpec.BooleanValue DISABLE_DRIPSTONE_WATER_GENERATION;
     public static final ModConfigSpec.BooleanValue DEBUG_DRIPSTONE_CAULDRON_BLOCKING;
+    public static final ModConfigSpec.BooleanValue DISABLE_ELYTRA_ROCKET_BOOST;
+    public static final ModConfigSpec.BooleanValue DISABLE_ELYTRA_ROCKET_BOOST_SEND_MESSAGE;
 
     static {
         ModConfigSpec.Builder builder = new ModConfigSpec.Builder();
@@ -70,6 +72,15 @@ public final class VanillaAdjustConfig {
         DEBUG_PLAYER_PLACED_WATER_SOURCES = builder
                 .comment("When true, logs artificial water source tracking and blocked water source conversions.")
                 .define("debugPlayerPlacedWaterSources", false);
+        builder.pop();
+
+        builder.push("elytraRockets");
+        DISABLE_ELYTRA_ROCKET_BOOST = builder
+                .comment("When true, firework rockets cannot be used to boost while elytra-flying.")
+                .define("disableElytraRocketBoost", true);
+        DISABLE_ELYTRA_ROCKET_BOOST_SEND_MESSAGE = builder
+                .comment("When true, sends an actionbar message when an elytra rocket boost is blocked.")
+                .define("disableElytraRocketBoostSendMessage", true);
         builder.pop();
 
         builder.push("dripstoneLava");
