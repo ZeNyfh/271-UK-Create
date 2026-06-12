@@ -15,16 +15,14 @@ public class IceboxScreen extends AbstractContainerScreen<IceboxMenu> {
     private static final int SLOT_TEXTURE_X = 7;
     private static final int SLOT_TEXTURE_Y = 17;
 
-    private static final int SIMPLE_TOP_HEIGHT = 53;
-    private static final int ADVANCED_TOP_HEIGHT = 71;
-
     private static final int SIMPLE_IMAGE_HEIGHT = 149;
-    private static final int ADVANCED_IMAGE_HEIGHT = 167;
+    private static final int ADVANCED_IMAGE_HEIGHT = 177;
 
-    private static final int ICEBOX_BG = 0xFFC7EBF7;
-    private static final int BORDER_LIGHT = 0xFFE6FBFF;
-    private static final int BORDER_DARK = 0xFF6FAEC8;
-    private static final int PANEL_BG = 0xFFA9D2E6;
+    // Colours sampled from the user-provided UI reference strips.
+    private static final int ICEBOX_BG = 0xFF7BAAC6;
+    private static final int BORDER_LIGHT = 0xFF9EDBFF;
+    private static final int BORDER_DARK = 0xFF354955;
+    private static final int PANEL_BG = 0xFF88BAD9;
     private static final int PANEL_SHADOW = 0xFF5B8FA8;
 
     public IceboxScreen(IceboxMenu menu, Inventory playerInventory, Component title) {
@@ -35,7 +33,7 @@ public class IceboxScreen extends AbstractContainerScreen<IceboxMenu> {
                 ? SIMPLE_IMAGE_HEIGHT
                 : ADVANCED_IMAGE_HEIGHT;
 
-        this.inventoryLabelY = this.imageHeight - 94;
+        this.inventoryLabelY = menu.iceboxSlots() == IceboxMenu.SIMPLE_SLOTS ? 57 : 83;
         this.titleLabelX = 8;
     }
 
@@ -50,20 +48,11 @@ public class IceboxScreen extends AbstractContainerScreen<IceboxMenu> {
         int x = this.leftPos;
         int y = this.topPos;
 
-        int topHeight = this.menu.iceboxSlots() == IceboxMenu.SIMPLE_SLOTS
-                ? SIMPLE_TOP_HEIGHT
-                : ADVANCED_TOP_HEIGHT;
+        drawWindowFrame(graphics, x, y, this.imageWidth, this.imageHeight);
+        drawIceboxPanel(graphics, x, y);
 
         graphics.setColor(0.62F, 0.86F, 1.0F, 1.0F);
-
-        // Header strip and lower inventory section use the vanilla container texture.
-        graphics.blit(VANILLA_CONTAINER, x, y, 0, 0, this.imageWidth, 17);
-        drawIceboxMiddle(graphics, x, y, topHeight);
-        graphics.blit(VANILLA_CONTAINER, x, y + topHeight, 0, 126, this.imageWidth, 96);
-
-        // Draw only the custom icebox slot backgrounds.
-        for (int i = 0; i < this.menu.iceboxSlots(); i++) {
-            Slot slot = this.menu.slots.get(i);
+        for (Slot slot : this.menu.slots) {
             graphics.blit(
                     VANILLA_CONTAINER,
                     x + slot.x - 1,
@@ -74,22 +63,24 @@ public class IceboxScreen extends AbstractContainerScreen<IceboxMenu> {
                     18
             );
         }
-
         graphics.setColor(1.0F, 1.0F, 1.0F, 1.0F);
     }
 
-    private void drawIceboxMiddle(GuiGraphics graphics, int x, int y, int topHeight) {
-        int top = y + 17;
-        int bottom = y + topHeight;
-        int right = x + this.imageWidth;
+    private void drawWindowFrame(GuiGraphics graphics, int x, int y, int width, int height) {
+        graphics.fill(x + 1, y + 1, x + width - 1, y + height - 1, ICEBOX_BG);
 
-        // Main icebox body.
-        graphics.fill(x + 1, top, right - 1, bottom, ICEBOX_BG);
-        graphics.fill(x, top, x + 1, bottom, BORDER_LIGHT);
-        graphics.fill(right - 1, top, right, bottom, BORDER_DARK);
-        graphics.fill(x + 1, bottom - 1, right - 1, bottom, BORDER_DARK);
+        // Outer frame.
+        graphics.fill(x, y, x + width - 1, y + 1, BORDER_LIGHT);
+        graphics.fill(x, y, x + 1, y + height - 1, BORDER_LIGHT);
+        graphics.fill(x + width - 1, y + 1, x + width, y + height, BORDER_DARK);
+        graphics.fill(x + 1, y + height - 1, x + width, y + height, BORDER_DARK);
 
-        // Recessed slot panel so the top section no longer looks like one long blue bar.
+        // Clean up the top corners so the frame matches the desired rounded-ish vanilla corners.
+        graphics.fill(x, y + 1, x + 1, y + 2, BORDER_LIGHT);
+        graphics.fill(x + width - 2, y, x + width - 1, y + 1, BORDER_LIGHT);
+    }
+
+    private void drawIceboxPanel(GuiGraphics graphics, int x, int y) {
         int columns = this.menu.iceboxSlots() == IceboxMenu.SIMPLE_SLOTS ? 2 : 3;
         int rows = this.menu.iceboxSlots() == IceboxMenu.SIMPLE_SLOTS ? 2 : 3;
         int firstSlotX = this.menu.slots.get(0).x - 5;
@@ -97,10 +88,15 @@ public class IceboxScreen extends AbstractContainerScreen<IceboxMenu> {
         int panelWidth = columns * 18 + 10;
         int panelHeight = rows * 18 + 10;
 
-        graphics.fill(x + firstSlotX, y + firstSlotY, x + firstSlotX + panelWidth, y + firstSlotY + panelHeight, PANEL_BG);
-        graphics.fill(x + firstSlotX, y + firstSlotY, x + firstSlotX + panelWidth, y + firstSlotY + 1, BORDER_LIGHT);
-        graphics.fill(x + firstSlotX, y + firstSlotY, x + firstSlotX + 1, y + firstSlotY + panelHeight, BORDER_LIGHT);
-        graphics.fill(x + firstSlotX + panelWidth - 1, y + firstSlotY, x + firstSlotX + panelWidth, y + firstSlotY + panelHeight, PANEL_SHADOW);
-        graphics.fill(x + firstSlotX, y + firstSlotY + panelHeight - 1, x + firstSlotX + panelWidth, y + firstSlotY + panelHeight, PANEL_SHADOW);
+        int left = x + firstSlotX;
+        int top = y + firstSlotY;
+        int right = left + panelWidth;
+        int bottom = top + panelHeight;
+
+        graphics.fill(left, top, right, bottom, PANEL_BG);
+        graphics.fill(left, top, right, top + 1, BORDER_LIGHT);
+        graphics.fill(left, top, left + 1, bottom, BORDER_LIGHT);
+        graphics.fill(right - 1, top, right, bottom, PANEL_SHADOW);
+        graphics.fill(left, bottom - 1, right, bottom, PANEL_SHADOW);
     }
 }
