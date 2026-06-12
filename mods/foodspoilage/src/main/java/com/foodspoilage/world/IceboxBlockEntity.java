@@ -69,6 +69,7 @@ public class IceboxBlockEntity extends BlockEntity implements WorldlyContainer, 
         refreshSlot(slot);
         ItemStack removed = ContainerHelper.removeItem(this.items, slot, amount);
         if (!removed.isEmpty()) {
+            SpoilageManager.restoreBaseDuration(removed);
             this.setChanged();
         }
         return removed;
@@ -77,7 +78,9 @@ public class IceboxBlockEntity extends BlockEntity implements WorldlyContainer, 
     @Override
     public ItemStack removeItemNoUpdate(int slot) {
         refreshSlot(slot);
-        return ContainerHelper.takeItem(this.items, slot);
+        ItemStack removed = ContainerHelper.takeItem(this.items, slot);
+        SpoilageManager.restoreBaseDuration(removed);
+        return removed;
     }
 
     @Override
@@ -107,7 +110,7 @@ public class IceboxBlockEntity extends BlockEntity implements WorldlyContainer, 
 
     @Override
     public void clearContent() {
-        refreshContents();
+        restoreContentsToBaseDuration();
         this.items.clear();
         this.setChanged();
     }
@@ -169,6 +172,12 @@ public class IceboxBlockEntity extends BlockEntity implements WorldlyContainer, 
         double multiplier = preservationMultiplier();
         for (ItemStack stack : this.items) {
             SpoilageManager.refreshPreserved(stack, multiplier);
+        }
+    }
+
+    private void restoreContentsToBaseDuration() {
+        for (ItemStack stack : this.items) {
+            SpoilageManager.restoreBaseDuration(stack);
         }
     }
 }

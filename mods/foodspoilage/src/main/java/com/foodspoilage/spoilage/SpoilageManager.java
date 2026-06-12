@@ -101,19 +101,25 @@ public final class SpoilageManager {
         }
         FoodProfile profile = FoodClassificationManager.profile(stack);
         long duration = Math.max(1_000L, profile.durationMillis());
-        setDurationPreservingFreshness(stack, data, profile, duration);
+        setDurationPreservingFreshness(stack, data, profile, duration, true);
     }
 
     private static void setDurationPreservingFreshness(ItemStack stack, FoodStackData data, FoodProfile profile, long duration) {
+        setDurationPreservingFreshness(stack, data, profile, duration, false);
+    }
+
+    private static void setDurationPreservingFreshness(ItemStack stack, FoodStackData data, FoodProfile profile, long duration, boolean roundRemainingDown) {
         long now = now();
         double freshness = clamp(data.freshnessAt(now));
-        long remaining = Math.max(0L, Math.round(duration * freshness));
+        double scaledRemaining = duration * freshness;
+        long remaining = Math.max(0L, roundRemainingDown ? (long) Math.floor(scaledRemaining) : Math.round(scaledRemaining));
+        double storedFreshness = duration <= 0L ? 0.0D : clamp(remaining / (double) duration);
         stack.set(ModDataComponents.FOOD_STACK_DATA, new FoodStackData(
             data.creationTime(),
             now,
             now + remaining,
             duration,
-            freshness,
+            storedFreshness,
             profile.complexity(),
             profile.classification().name()
         ));
