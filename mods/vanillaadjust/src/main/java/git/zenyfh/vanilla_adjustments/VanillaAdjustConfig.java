@@ -23,6 +23,8 @@ public final class VanillaAdjustConfig {
     public static final ModConfigSpec.BooleanValue DEBUG_DRIPSTONE_CAULDRON_BLOCKING;
     public static final ModConfigSpec.BooleanValue DISABLE_ELYTRA_ROCKET_BOOST;
     public static final ModConfigSpec.BooleanValue DISABLE_ELYTRA_ROCKET_BOOST_SEND_MESSAGE;
+    public static final ModConfigSpec.BooleanValue DEATH_TIMER_DISPLAY_ENABLED;
+    public static final ModConfigSpec.IntValue DEATH_TIMER_TEXT_COLOR;
 
     static {
         ModConfigSpec.Builder builder = new ModConfigSpec.Builder();
@@ -93,6 +95,15 @@ public final class VanillaAdjustConfig {
         DEBUG_DRIPSTONE_CAULDRON_BLOCKING = builder
                 .comment("When true, logs blocked dripstone cauldron fluid generation.")
                 .define("debugDripstoneCauldronBlocking", false);
+        builder.pop();
+
+        builder.push("deathTimerDisplay");
+        DEATH_TIMER_DISPLAY_ENABLED = builder
+                .comment("When true, show a client-side respawn countdown on the death screen while dead.")
+                .define("deathTimerDisplayEnabled", true);
+        DEATH_TIMER_TEXT_COLOR = builder
+                .comment("RGB text colour for the death screen respawn countdown.")
+                .defineInRange("deathTimerTextColor", 0xFFFFFF, 0x000000, 0xFFFFFF);
         builder.pop();
         SERVER_SPEC = builder.build();
     }
