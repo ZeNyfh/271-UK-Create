@@ -18,6 +18,9 @@ public final class VanillaAdjustConfig {
     public static final ModConfigSpec.BooleanValue PLAYER_PLACED_WATER_SOURCE_LIMIT_ENABLED;
     public static final ModConfigSpec.BooleanValue TRACK_DISPENSER_PLACED_WATER_AS_ARTIFICIAL;
     public static final ModConfigSpec.BooleanValue DEBUG_PLAYER_PLACED_WATER_SOURCES;
+    public static final ModConfigSpec.BooleanValue DISABLE_DRIPSTONE_LAVA_GENERATION;
+    public static final ModConfigSpec.BooleanValue DISABLE_DRIPSTONE_WATER_GENERATION;
+    public static final ModConfigSpec.BooleanValue DEBUG_DRIPSTONE_CAULDRON_BLOCKING;
 
     static {
         ModConfigSpec.Builder builder = new ModConfigSpec.Builder();
@@ -67,6 +70,18 @@ public final class VanillaAdjustConfig {
         DEBUG_PLAYER_PLACED_WATER_SOURCES = builder
                 .comment("When true, logs artificial water source tracking and blocked water source conversions.")
                 .define("debugPlayerPlacedWaterSources", false);
+        builder.pop();
+
+        builder.push("dripstoneLava");
+        DISABLE_DRIPSTONE_LAVA_GENERATION = builder
+                .comment("When true, pointed dripstone cannot generate renewable lava by filling cauldrons.")
+                .define("disableDripstoneLavaGeneration", true);
+        DISABLE_DRIPSTONE_WATER_GENERATION = builder
+                .comment("When true, pointed dripstone also cannot fill cauldrons with water. Default false.")
+                .define("disableDripstoneWaterGeneration", false);
+        DEBUG_DRIPSTONE_CAULDRON_BLOCKING = builder
+                .comment("When true, logs blocked dripstone cauldron fluid generation.")
+                .define("debugDripstoneCauldronBlocking", false);
         builder.pop();
         SERVER_SPEC = builder.build();
     }
