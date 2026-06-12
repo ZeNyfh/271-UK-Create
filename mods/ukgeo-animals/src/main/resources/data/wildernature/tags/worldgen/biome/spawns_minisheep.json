@@ -1,0 +1,11 @@
+{
+  "replace": false,
+  "values": [
+    "ukgeo:improved_grassland",
+    "ukgeo:neutral_grassland",
+    "ukgeo:calcareous_grassland",
+    "ukgeo:acid_grassland",
+    "ukgeo:heath",
+    "ukgeo:rocky"
+  ]
+}

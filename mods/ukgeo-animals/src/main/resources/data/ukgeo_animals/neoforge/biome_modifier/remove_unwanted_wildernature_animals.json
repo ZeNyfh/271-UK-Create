@@ -1,0 +1,13 @@
+{
+  "type": "neoforge:remove_spawns",
+  "biomes": "#ukgeo_animals:all_ukgeo",
+  "entity_types": [
+    "wildernature:red_wolf",
+    "wildernature:raccoon",
+    "wildernature:penguin",
+    "wildernature:turkey",
+    "wildernature:pelican",
+    "wildernature:flamingo",
+    "wildernature:cassowary"
+  ]
+}
