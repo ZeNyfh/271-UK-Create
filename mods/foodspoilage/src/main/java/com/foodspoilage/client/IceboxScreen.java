@@ -15,7 +15,7 @@ public class IceboxScreen extends AbstractContainerScreen<IceboxMenu> {
     private static final int SLOT_TEXTURE_X = 7;
     private static final int SLOT_TEXTURE_Y = 17;
 
-    private static final int SIMPLE_IMAGE_HEIGHT = 149;
+    private static final int SIMPLE_IMAGE_HEIGHT = 163;
     private static final int ADVANCED_IMAGE_HEIGHT = 177;
 
     // Colours sampled from the user-provided UI reference strips.
@@ -33,7 +33,7 @@ public class IceboxScreen extends AbstractContainerScreen<IceboxMenu> {
                 ? SIMPLE_IMAGE_HEIGHT
                 : ADVANCED_IMAGE_HEIGHT;
 
-        this.inventoryLabelY = menu.iceboxSlots() == IceboxMenu.SIMPLE_SLOTS ? 57 : 83;
+        this.inventoryLabelY = menu.iceboxSlots() == IceboxMenu.SIMPLE_SLOTS ? IceboxMenu.SIMPLE_PLAYER_INVENTORY_Y - 10 : 83;
         this.titleLabelX = 8;
     }
 

@@ -16,6 +16,8 @@ import net.minecraft.world.item.ItemStack;
 public class IceboxMenu extends AbstractContainerMenu {
     public static final int SIMPLE_SLOTS = 4;
     public static final int ADVANCED_SLOTS = 9;
+    public static final int SIMPLE_PLAYER_INVENTORY_Y = 81;
+    public static final int ADVANCED_PLAYER_INVENTORY_Y = 95;
 
     private final Container container;
     private final ContainerLevelAccess access;
@@ -72,7 +74,7 @@ public class IceboxMenu extends AbstractContainerMenu {
 
     private void addPlayerInventory(Inventory playerInventory) {
         // Match vanilla inventory section alignment so the hotbar highlight and slot frames line up.
-        int inventoryY = this.iceboxSlots == SIMPLE_SLOTS ? 67 : 95;
+        int inventoryY = this.iceboxSlots == SIMPLE_SLOTS ? SIMPLE_PLAYER_INVENTORY_Y : ADVANCED_PLAYER_INVENTORY_Y;
 
         for (int row = 0; row < 3; row++) {
             for (int column = 0; column < 9; column++) {
