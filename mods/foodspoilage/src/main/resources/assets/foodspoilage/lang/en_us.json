@@ -5,6 +5,8 @@
   "item.foodspoilage.advanced_icebox": "Advanced Icebox",
   "item.foodspoilage.spoiled_raw_food": "Spoiled Raw Food",
   "item.foodspoilage.spoiled_cooked_food": "Spoiled Food",
+  "container.foodspoilage.simple_icebox": "Simple Icebox",
+  "container.foodspoilage.advanced_icebox": "Advanced Icebox",
   "tooltip.foodspoilage.state": "Freshness: %s",
   "tooltip.foodspoilage.freshness": "Spoil percentage: %s%% fresh",
   "tooltip.foodspoilage.remaining": "Remaining: %s",

@@ -24,6 +24,8 @@ public class IceboxScreen extends AbstractContainerScreen<IceboxMenu> {
     private static final int ICEBOX_BG = 0xFFC7EBF7;
     private static final int BORDER_LIGHT = 0xFFE6FBFF;
     private static final int BORDER_DARK = 0xFF6FAEC8;
+    private static final int PANEL_BG = 0xFFA9D2E6;
+    private static final int PANEL_SHADOW = 0xFF5B8FA8;
 
     public IceboxScreen(IceboxMenu menu, Inventory playerInventory, Component title) {
         super(menu, playerInventory, title);
@@ -34,6 +36,7 @@ public class IceboxScreen extends AbstractContainerScreen<IceboxMenu> {
                 : ADVANCED_IMAGE_HEIGHT;
 
         this.inventoryLabelY = this.imageHeight - 94;
+        this.titleLabelX = 8;
     }
 
     @Override
@@ -53,17 +56,12 @@ public class IceboxScreen extends AbstractContainerScreen<IceboxMenu> {
 
         graphics.setColor(0.62F, 0.86F, 1.0F, 1.0F);
 
-        // Top title/header strip.
+        // Header strip and lower inventory section use the vanilla container texture.
         graphics.blit(VANILLA_CONTAINER, x, y, 0, 0, this.imageWidth, 17);
-
-        // Custom blue icebox middle section.
         drawIceboxMiddle(graphics, x, y, topHeight);
-
-        // Vanilla lower player-inventory section, tinted blue.
         graphics.blit(VANILLA_CONTAINER, x, y + topHeight, 0, 126, this.imageWidth, 96);
 
-        // Draw only the icebox slot backgrounds.
-        // Player inventory slot backgrounds are already part of the lower texture above.
+        // Draw only the custom icebox slot backgrounds.
         for (int i = 0; i < this.menu.iceboxSlots(); i++) {
             Slot slot = this.menu.slots.get(i);
             graphics.blit(
@@ -85,10 +83,24 @@ public class IceboxScreen extends AbstractContainerScreen<IceboxMenu> {
         int bottom = y + topHeight;
         int right = x + this.imageWidth;
 
+        // Main icebox body.
         graphics.fill(x + 1, top, right - 1, bottom, ICEBOX_BG);
-
         graphics.fill(x, top, x + 1, bottom, BORDER_LIGHT);
         graphics.fill(right - 1, top, right, bottom, BORDER_DARK);
         graphics.fill(x + 1, bottom - 1, right - 1, bottom, BORDER_DARK);
+
+        // Recessed slot panel so the top section no longer looks like one long blue bar.
+        int columns = this.menu.iceboxSlots() == IceboxMenu.SIMPLE_SLOTS ? 2 : 3;
+        int rows = this.menu.iceboxSlots() == IceboxMenu.SIMPLE_SLOTS ? 2 : 3;
+        int firstSlotX = this.menu.slots.get(0).x - 5;
+        int firstSlotY = this.menu.slots.get(0).y - 5;
+        int panelWidth = columns * 18 + 10;
+        int panelHeight = rows * 18 + 10;
+
+        graphics.fill(x + firstSlotX, y + firstSlotY, x + firstSlotX + panelWidth, y + firstSlotY + panelHeight, PANEL_BG);
+        graphics.fill(x + firstSlotX, y + firstSlotY, x + firstSlotX + panelWidth, y + firstSlotY + 1, BORDER_LIGHT);
+        graphics.fill(x + firstSlotX, y + firstSlotY, x + firstSlotX + 1, y + firstSlotY + panelHeight, BORDER_LIGHT);
+        graphics.fill(x + firstSlotX + panelWidth - 1, y + firstSlotY, x + firstSlotX + panelWidth, y + firstSlotY + panelHeight, PANEL_SHADOW);
+        graphics.fill(x + firstSlotX, y + firstSlotY + panelHeight - 1, x + firstSlotX + panelWidth, y + firstSlotY + panelHeight, PANEL_SHADOW);
     }
 }

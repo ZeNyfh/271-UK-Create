@@ -71,7 +71,8 @@ public class IceboxMenu extends AbstractContainerMenu {
     }
 
     private void addPlayerInventory(Inventory playerInventory) {
-        int inventoryY = this.iceboxSlots == SIMPLE_SLOTS ? 70 : 88;
+        // Match vanilla inventory section alignment so the hotbar highlight and slot frames line up.
+        int inventoryY = this.iceboxSlots == SIMPLE_SLOTS ? 67 : 85;
 
         for (int row = 0; row < 3; row++) {
             for (int column = 0; column < 9; column++) {
