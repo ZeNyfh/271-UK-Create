@@ -44,7 +44,8 @@ public final class UkGeoCommands {
                                     ctx.getSource().sendFailure(Component.literal("Active generator is not ukgeo:heightmap"));
                                     return 0;
                                 }
-                                StringBuilder message = new StringBuilder("surfaceY=").append(generator.surfaceY(x, z))
+                                StringBuilder message = new StringBuilder("height=").append(generator.sampleHeightData(x, z))
+                                    .append(" surfaceY=").append(generator.surfaceY(x, z))
                                     .append(" surfaceGeology=").append(generator.sampleSurface(x, z))
                                     .append(" vegetation=").append(generator.sampleVegetation(x, z))
                                     .append(" river=").append(generator.sampleRiver(x, z))

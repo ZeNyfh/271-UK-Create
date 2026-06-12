@@ -57,10 +57,13 @@ final class ChunkTerrainPlanner {
                 int worldZ = chunkMinZ + localZ;
                 int index = localZ * CHUNK_SIZE + localX;
                 int surfaceY = surfaceGrid[(localZ + BORDER) * gridSize + (localX + BORDER)];
+                boolean hasHeightData = generator.hasHeightData(data, heightWindow, worldX, worldZ);
                 boolean steep = isSteep(surfaceGrid, gridSize, localX + BORDER, localZ + BORDER);
                 boolean coastalBeach = isCoastalBeach(surfaceGrid, gridSize, localX + BORDER, localZ + BORDER, generator.seaLevel());
-                int vegetationClass = generator.sampleVegetationClass(data, worldX, worldZ);
-                UkGeoChunkGenerator.RiverShape river = generator.computeSurfaceWaterShape(data, heightWindow, worldX, worldZ, surfaceY, minBuildY, vegetationClass, waterShapeCache);
+                int vegetationClass = hasHeightData ? generator.sampleVegetationClass(data, worldX, worldZ) : 0;
+                UkGeoChunkGenerator.RiverShape river = hasHeightData
+                    ? generator.computeSurfaceWaterShape(data, heightWindow, worldX, worldZ, surfaceY, minBuildY, vegetationClass, waterShapeCache)
+                    : UkGeoChunkGenerator.RiverShape.none(surfaceY);
                 int terrainTop = river.terrainSurfaceY();
                 int top = Math.clamp(surfaceY, minBuildY + 1, maxBuildY);
                 int columnTop = Math.clamp(
@@ -68,9 +71,9 @@ final class ChunkTerrainPlanner {
                     minBuildY,
                     maxBuildY
                 );
-                BlockState surfaceRock = generator.sampleSurfaceRock(data, worldX, worldZ, terrainTop);
+                BlockState surfaceRock = hasHeightData ? generator.sampleSurfaceRock(data, worldX, worldZ, terrainTop) : generator.defaultBaseRock(terrainTop);
                 BlockState exposedSurfaceRock = exposedSurfaceRock(worldX, worldZ, surfaceRock);
-                columns[index] = new ColumnPlan(top, terrainTop, columnTop, steep, coastalBeach, river, vegetationClass, surfaceRock, exposedSurfaceRock);
+                columns[index] = new ColumnPlan(top, terrainTop, columnTop, steep, coastalBeach, river, vegetationClass, surfaceRock, exposedSurfaceRock, hasHeightData);
             }
         }
         logTiming("ChunkTerrainPlanner.waterPlanning", chunk, waterStartNanos);
@@ -585,7 +588,8 @@ final class ChunkTerrainPlanner {
         UkGeoChunkGenerator.RiverShape river,
         int vegetationClass,
         BlockState surfaceRock,
-        BlockState exposedSurfaceRock
+        BlockState exposedSurfaceRock,
+        boolean hasHeightData
     ) {
     }
 

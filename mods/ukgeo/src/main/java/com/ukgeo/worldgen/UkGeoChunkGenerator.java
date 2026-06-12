@@ -18,6 +18,7 @@ import java.util.OptionalInt;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 import net.minecraft.Util;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
@@ -119,9 +120,12 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     private static final int DEEP_CAVE_ORIGIN_CHUNK_RADIUS = 2;
     private static final int MAX_DEBUG_CARVER_BIOME_LOGS = 16;
     private static final boolean DEBUG_ORE_PLACEMENT = Boolean.getBoolean("ukgeo.debugOrePlacement");
+    private static final boolean DEBUG_HEIGHT_BOUNDS = Boolean.getBoolean("ukgeo.debugHeightBounds");
+    private static final int MAX_DEBUG_HEIGHT_BOUNDS_LOGS = 32;
     private static volatile boolean createDieselGeneratorsOilLookupAttempted;
     private static volatile Method createDieselGeneratorsSetOilAmount;
     private static volatile boolean caveModeLogged;
+    private static final AtomicInteger debugHeightBoundsLogs = new AtomicInteger();
     private static final Set<String> debuggedOreHeights = ConcurrentHashMap.newKeySet();
     private static final Set<String> debuggedCarverBiomes = ConcurrentHashMap.newKeySet();
     private static final List<ResourceKey<PlacedFeature>> VANILLA_TREE_FEATURES = List.of(
@@ -510,6 +514,10 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     }
 
     RiverShape computeSurfaceWaterShape(RuntimeData data, HeightTileWindow heightWindow, int x, int z, int originalSurfaceY, int minBuildY, int vegetationClass, WaterShapeCache cache) {
+        if (!hasHeightData(data, heightWindow, x, z, cache)) {
+            logHeightBoundsSuppressed(x, z);
+            return RiverShape.none(originalSurfaceY);
+        }
         long key = cacheKey(x, z);
         if (cache != null) {
             RiverShape cached = cache.shapes.get(key);
@@ -1158,6 +1166,9 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         if (data.riverHalfWidthLayer == null) {
             return riverWidenRadius;
         }
+        if (!hasHeightData(data, null, x, z, cache)) {
+            return 0;
+        }
         long key = cacheKey(x, z);
         if (cache != null) {
             Integer cached = cache.riverHalfWidths.get(key);
@@ -1175,6 +1186,9 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     private int riverOrderValue(RuntimeData data, int x, int z, WaterShapeCache cache) {
         if (data.riverOrderLayer == null) {
             return 3;
+        }
+        if (!hasHeightData(data, null, x, z, cache)) {
+            return 0;
         }
         long key = cacheKey(x, z);
         if (cache != null) {
@@ -1210,6 +1224,9 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         if (data.riverLayer == null) {
             return 0;
         }
+        if (!hasHeightData(data, null, x, z, cache)) {
+            return 0;
+        }
         long key = cacheKey(x, z);
         if (cache != null) {
             Integer cached = cache.riverValues.get(key);
@@ -1232,7 +1249,7 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
                 return cached;
             }
         }
-        int value = sampleVegetationClass(data, x, z);
+        int value = hasHeightData(data, null, x, z, cache) ? sampleVegetationClass(data, x, z) : 0;
         if (cache != null) {
             cache.vegetationValues.put(key, value);
         }
@@ -1252,6 +1269,7 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         private final Map<Long, Integer> riverValues = new HashMap<>();
         private final Map<Long, Integer> riverHalfWidths = new HashMap<>();
         private final Map<Long, Integer> riverOrders = new HashMap<>();
+        private final Map<Long, Boolean> heightData = new HashMap<>();
         private final Map<Long, Boolean> riverArtifactFreshwater = new HashMap<>();
         private final Map<Long, Double> lakeEdgeDistances = new HashMap<>();
         private final Map<Long, Double> riverBankDistances = new HashMap<>();
@@ -1278,15 +1296,53 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         return data.vegetationLayer.sampleOrDefault(x, z, 0);
     }
 
+    boolean hasHeightData(RuntimeData data, HeightTileWindow heightWindow, int x, int z) {
+        return hasHeightData(data, heightWindow, x, z, null);
+    }
+
+    private boolean hasHeightData(RuntimeData data, HeightTileWindow heightWindow, int x, int z, WaterShapeCache cache) {
+        if (data == null || data.height == null) {
+            return false;
+        }
+        long key = cacheKey(x, z);
+        if (cache != null) {
+            Boolean cached = cache.heightData.get(key);
+            if (cached != null) {
+                return cached;
+            }
+        }
+        boolean valid = heightWindow != null
+            ? heightWindow.decimetresOrNodata(x, z) != HeightTileWindow.NODATA
+            : data.height.sampleDecimetresOrNodata(x, z) != R16HeightTileLayer.NODATA;
+        if (!valid) {
+            logHeightBoundsSuppressed(x, z);
+        }
+        if (cache != null) {
+            cache.heightData.put(key, valid);
+        }
+        return valid;
+    }
+
+    private static void logHeightBoundsSuppressed(int x, int z) {
+        if (!DEBUG_HEIGHT_BOUNDS || debugHeightBoundsLogs.getAndIncrement() >= MAX_DEBUG_HEIGHT_BOUNDS_LOGS) {
+            return;
+        }
+        UkGeoMod.LOGGER.info("UKGeo height-bounds debug x={} z={}: height=NODATA, surface/vegetation/river disabled, ores still allowed", x, z);
+    }
+
     BlockState sampleSurfaceRock(RuntimeData data, int x, int z, int y) {
         if (data.surfaceLayer == null) {
-            return y < 0 ? Blocks.DEEPSLATE.defaultBlockState() : Blocks.STONE.defaultBlockState();
+            return defaultBaseRock(y);
         }
         int classId = data.surfaceLayer.sampleOrDefault(x, z, 0);
         if (classId == 0) {
-            return y < 0 ? Blocks.DEEPSLATE.defaultBlockState() : Blocks.STONE.defaultBlockState();
+            return defaultBaseRock(y);
         }
         return surfaceBlockCache.computeIfAbsent(classId, id -> resolveSurfaceBlock(data, id, y));
+    }
+
+    BlockState defaultBaseRock(int y) {
+        return y < 0 ? Blocks.DEEPSLATE.defaultBlockState() : Blocks.STONE.defaultBlockState();
     }
 
     ChunkTerrainPlanner.OrePlacement[] buildOrePlacements(RuntimeData data, ChunkAccess chunk, ChunkTerrainPlanner.ColumnPlan[] columns) {
@@ -1851,15 +1907,33 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         if (data == null || data.surfaceLayer == null) {
             return "none";
         }
+        if (!hasHeightData(data, null, x, z)) {
+            return "none (no height data)";
+        }
         int classId = data.surfaceLayer.sampleOrDefault(x, z, 0);
         SurfaceGeologyClass surfaceClass = data.manifest.surfaceGeologyClasses.get(classId);
         return surfaceClass == null ? Integer.toString(classId) : surfaceClass.name() + "(" + classId + ")";
+    }
+
+    public String sampleHeightData(int x, int z) {
+        RuntimeData data = data();
+        if (data == null) {
+            return "none";
+        }
+        int decimetres = data.height.sampleDecimetresOrNodata(x, z);
+        if (decimetres == R16HeightTileLayer.NODATA) {
+            return "NODATA / outside bounds";
+        }
+        return "%.1fm".formatted(decimetres / 10.0);
     }
 
     public String sampleVegetation(int x, int z) {
         RuntimeData data = data();
         if (data == null || data.vegetationLayer == null) {
             return "none";
+        }
+        if (!hasHeightData(data, null, x, z)) {
+            return "none (no height data)";
         }
         int classId = data.vegetationLayer.sampleOrDefault(x, z, 0);
         VegetationClass vegetationClass = data.manifest.vegetationClasses.get(classId);
@@ -1869,6 +1943,9 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     public int sampleRiver(int x, int z) {
         RuntimeData data = data();
         if (data == null || data.riverLayer == null) {
+            return 0;
+        }
+        if (!hasHeightData(data, null, x, z)) {
             return 0;
         }
         return data.riverLayer.sampleOrDefault(x, z, 0);
@@ -2087,6 +2164,9 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
                     continue;
                 }
                 ChunkTerrainPlanner.ColumnPlan column = plan.columns()[localZ * 16 + localX];
+                if (!column.hasHeightData()) {
+                    continue;
+                }
                 int vegetationClass = column.vegetationClass();
                 if (vegetationClass == VEGETATION_URBAN || vegetationClass == VEGETATION_FRESHWATER) {
                     continue;
@@ -2130,6 +2210,9 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
             for (int localZ = 0; localZ < 16; localZ++) {
                 int worldZ = pos.getMinBlockZ() + localZ;
                 if (Math.floorMod(worldX, cellBlocks) != 0 || Math.floorMod(worldZ, cellBlocks) != 0) {
+                    continue;
+                }
+                if (!hasHeightData(data, null, worldX, worldZ)) {
                     continue;
                 }
                 int vegetationClass = data.vegetationLayer.sampleOrDefault(worldX, worldZ, 0);
@@ -2240,8 +2323,9 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
             for (int localX = 0; localX < 16; localX++) {
                 int worldX = pos.getMinBlockX() + localX;
                 int surface = surfaceY(worldX, worldZ);
-                int vegetationClass = sampleVegetationClass(runtime, worldX, worldZ);
-                RiverShape river = computeSurfaceWaterShape(runtime, null, worldX, worldZ, surface, minBuildY, vegetationClass);
+                boolean hasHeightData = hasHeightData(runtime, null, worldX, worldZ);
+                int vegetationClass = hasHeightData ? sampleVegetationClass(runtime, worldX, worldZ) : 0;
+                RiverShape river = hasHeightData ? computeSurfaceWaterShape(runtime, null, worldX, worldZ, surface, minBuildY, vegetationClass) : RiverShape.none(surface);
                 removeDelegateCaveFluids(chunk, cursor, localX, localZ, river.terrainSurfaceY(), true, river, surface, seaLevelY);
             }
         }
@@ -2518,8 +2602,9 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
                 int worldZ = chunkPos.getMinBlockZ() + localZ;
                 int top = Math.clamp(surfaceY(worldX, worldZ), minBuildY + 1, maxY);
                 RuntimeData runtime = data();
-                int vegetationClass = runtime == null ? 0 : sampleVegetationClass(runtime, worldX, worldZ);
-                RiverShape river = runtime == null ? RiverShape.none(top) : computeSurfaceWaterShape(runtime, null, worldX, worldZ, top, minBuildY, vegetationClass);
+                boolean hasHeightData = runtime != null && hasHeightData(runtime, null, worldX, worldZ);
+                int vegetationClass = hasHeightData ? sampleVegetationClass(runtime, worldX, worldZ) : 0;
+                RiverShape river = hasHeightData ? computeSurfaceWaterShape(runtime, null, worldX, worldZ, top, minBuildY, vegetationClass) : RiverShape.none(top);
                 if (river.hasWater()) {
                     scheduleWaterColumn(level, chunk, cursor, worldX, worldZ, river.terrainSurfaceY() + 1, Math.max(river.waterSurfaceY(), seaLevelY), waterTickDelay);
                 } else if (top < seaLevelY) {
@@ -2885,9 +2970,10 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         }
         RuntimeData runtime = data();
         int surface = surfaceY(x, z);
-        int vegetation = runtime == null ? 0 : sampleVegetationClass(runtime, x, z);
-        RiverShape river = runtime == null ? RiverShape.none(surface) : computeSurfaceWaterShape(runtime, null, x, z, surface, minBuildY, vegetation);
-        BlockState surfaceRock = runtime == null ? Blocks.STONE.defaultBlockState() : sampleSurfaceRock(runtime, x, z, surface);
+        boolean hasHeightData = runtime != null && hasHeightData(runtime, null, x, z);
+        int vegetation = hasHeightData ? sampleVegetationClass(runtime, x, z) : 0;
+        RiverShape river = hasHeightData ? computeSurfaceWaterShape(runtime, null, x, z, surface, minBuildY, vegetation) : RiverShape.none(surface);
+        BlockState surfaceRock = hasHeightData ? sampleSurfaceRock(runtime, x, z, surface) : defaultBaseRock(surface);
         BlockState exposedSurfaceRock = ChunkTerrainPlanner.exposedSurfaceRock(x, z, surfaceRock);
         BaseColumnPlan plan = new BaseColumnPlan(surface, vegetation, river, surfaceRock, exposedSurfaceRock);
         if (baseColumnCache.size() > 8192) {

@@ -115,6 +115,9 @@ public final class UkGeoVegetationBiomeSource extends BiomeSource {
         if (data == null) {
             return fallback;
         }
+        if (data.height.sampleDecimetresOrNodata(blockX, blockZ) == R16HeightTileLayer.NODATA) {
+            return fallback;
+        }
         if (data.riverLayer != null && data.riverLayer.sampleOrDefault(blockX, blockZ, 0) > 0) {
             return river;
         }
@@ -154,11 +157,12 @@ public final class UkGeoVegetationBiomeSource extends BiomeSource {
             Path root = UkGeoConfig.dataRoot(Path.of(".").toAbsolutePath().normalize());
             try {
                 TileManifest manifest = TileManifest.load(root);
+                R16HeightTileLayer height = new R16HeightTileLayer(manifest);
                 U8OreTileLayer vegetationLayer = manifest.vegetationPath == null
                     ? null
                     : new U8OreTileLayer(manifest, "vegetation", manifest.vegetationPath, manifest.vegetationCellBlocks, manifest.paddedWidth, manifest.paddedDepth);
                 U8OreTileLayer riverLayer = manifest.riversPath == null ? null : new U8OreTileLayer(manifest, "rivers", manifest.riversPath);
-                runtimeData = new RuntimeData(vegetationLayer, riverLayer);
+                runtimeData = new RuntimeData(height, vegetationLayer, riverLayer);
             } catch (IOException | RuntimeException ex) {
                 UkGeoMod.LOGGER.warn("UK vegetation biome data is missing or invalid; using fallback biome: {}", ex.getMessage());
                 runtimeData = null;
@@ -167,6 +171,6 @@ public final class UkGeoVegetationBiomeSource extends BiomeSource {
         }
     }
 
-    private record RuntimeData(U8OreTileLayer vegetationLayer, U8OreTileLayer riverLayer) {
+    private record RuntimeData(R16HeightTileLayer height, U8OreTileLayer vegetationLayer, U8OreTileLayer riverLayer) {
     }
 }
