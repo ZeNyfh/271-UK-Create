@@ -15,23 +15,9 @@ public final class VanillaAdjustConfig {
     public static final ModConfigSpec.BooleanValue REPLACE_STONE_GENERATORS_WITH_DEEPSLATE;
     public static final ModConfigSpec.BooleanValue REPLACE_BASALT_GENERATORS_WITH_DEEPSLATE;
     public static final ModConfigSpec.BooleanValue REPLACE_CREATE_DECORATIVE_STONE_GENERATORS_WITH_DEEPSLATE;
-    public static final ModConfigSpec.BooleanValue POLLUTION_ENABLED;
-    public static final ModConfigSpec.IntValue POLLUTION_SIMULATION_INTERVAL_TICKS;
-    public static final ModConfigSpec.IntValue POLLUTION_SOURCE_SCAN_INTERVAL_TICKS;
-    public static final ModConfigSpec.IntValue POLLUTION_SYNC_INTERVAL_TICKS;
-    public static final ModConfigSpec.DoubleValue POLLUTION_SPREAD_RATE;
-    public static final ModConfigSpec.DoubleValue POLLUTION_DECAY_RATE;
-    public static final ModConfigSpec.DoubleValue POLLUTION_MAX_PER_CHUNK;
-    public static final ModConfigSpec.DoubleValue POLLUTION_STORAGE_THRESHOLD;
-    public static final ModConfigSpec.IntValue POLLUTION_SOURCE_SCAN_RADIUS_CHUNKS;
-    public static final ModConfigSpec.BooleanValue POLLUTION_FOG_ENABLED;
-    public static final ModConfigSpec.DoubleValue POLLUTION_FOG_MAX;
-    public static final ModConfigSpec.DoubleValue POLLUTION_FOG_MIN_DISTANCE_MULTIPLIER;
-    public static final ModConfigSpec.BooleanValue POLLUTION_FOG_COLOR_TINT_ENABLED;
-    public static final ModConfigSpec.BooleanValue POLLUTION_GRASS_TINT_ENABLED;
-    public static final ModConfigSpec.DoubleValue POLLUTION_GRASS_TINT_MAX;
-    public static final ModConfigSpec.DoubleValue POLLUTION_GRASS_TINT_STRENGTH;
-    public static final ModConfigSpec.BooleanValue POLLUTION_FOLIAGE_TINT_ENABLED;
+    public static final ModConfigSpec.BooleanValue PLAYER_PLACED_WATER_SOURCE_LIMIT_ENABLED;
+    public static final ModConfigSpec.BooleanValue TRACK_DISPENSER_PLACED_WATER_AS_ARTIFICIAL;
+    public static final ModConfigSpec.BooleanValue DEBUG_PLAYER_PLACED_WATER_SOURCES;
 
     static {
         ModConfigSpec.Builder builder = new ModConfigSpec.Builder();
@@ -71,58 +57,16 @@ public final class VanillaAdjustConfig {
                 .define("replaceCreateDecorativeStoneGeneratorsWithDeepslate", true);
         builder.pop();
 
-        builder.push("pollution");
-        POLLUTION_ENABLED = builder
-                .comment("When true, active machines emit chunk-level pollution that spreads, decays, and affects local visuals.")
-                .define("pollutionEnabled", true);
-        POLLUTION_SIMULATION_INTERVAL_TICKS = builder
-                .comment("Ticks between pollution spread and decay simulation steps.")
-                .defineInRange("pollutionSimulationIntervalTicks", 100, 20, 20 * 60 * 10);
-        POLLUTION_SOURCE_SCAN_INTERVAL_TICKS = builder
-                .comment("Ticks between loaded-chunk block entity scans for active pollution sources.")
-                .defineInRange("pollutionSourceScanIntervalTicks", 100, 20, 20 * 60 * 10);
-        POLLUTION_SYNC_INTERVAL_TICKS = builder
-                .comment("Ticks between server-to-client local pollution syncs.")
-                .defineInRange("pollutionSyncIntervalTicks", 40, 10, 20 * 60);
-        POLLUTION_SPREAD_RATE = builder
-                .comment("Fraction of each polluted chunk's pollution spread to its four cardinal neighbours each simulation step.")
-                .defineInRange("pollutionSpreadRate", 0.08, 0.0, 0.45);
-        POLLUTION_DECAY_RATE = builder
-                .comment("Fraction of pollution naturally absorbed from each chunk each simulation step.")
-                .defineInRange("pollutionDecayRate", 0.015, 0.0, 0.5);
-        POLLUTION_MAX_PER_CHUNK = builder
-                .comment("Maximum pollution stored in one chunk.")
-                .defineInRange("pollutionMaxPerChunk", 10_000.0, 1.0, 1_000_000.0);
-        POLLUTION_STORAGE_THRESHOLD = builder
-                .comment("Pollution entries below this value are removed from saved data.")
-                .defineInRange("pollutionStorageThreshold", 0.01, 0.0, 100.0);
-        POLLUTION_SOURCE_SCAN_RADIUS_CHUNKS = builder
-                .comment("Loaded chunk radius around each player to inspect for active pollution-source block entities.")
-                .defineInRange("pollutionSourceScanRadiusChunks", 8, 1, 32);
-        POLLUTION_FOG_ENABLED = builder
-                .comment("When true, local pollution reduces fog distance on clients.")
-                .define("pollutionFogEnabled", true);
-        POLLUTION_FOG_MAX = builder
-                .comment("Pollution amount that corresponds to maximum fog strength.")
-                .defineInRange("pollutionFogMax", 1000.0, 1.0, 100_000.0);
-        POLLUTION_FOG_MIN_DISTANCE_MULTIPLIER = builder
-                .comment("Fog far distance multiplier at maximum pollution. Lower values mean denser smog.")
-                .defineInRange("pollutionFogMinDistanceMultiplier", 0.35, 0.05, 1.0);
-        POLLUTION_FOG_COLOR_TINT_ENABLED = builder
-                .comment("When true, high pollution subtly tints fog grey-brown.")
-                .define("pollutionFogColorTintEnabled", true);
-        POLLUTION_GRASS_TINT_ENABLED = builder
-                .comment("When true, local pollution desaturates grass toward a dead, dirty colour.")
-                .define("pollutionGrassTintEnabled", true);
-        POLLUTION_GRASS_TINT_MAX = builder
-                .comment("Pollution amount that corresponds to maximum grass tint strength.")
-                .defineInRange("pollutionGrassTintMax", 800.0, 1.0, 100_000.0);
-        POLLUTION_GRASS_TINT_STRENGTH = builder
-                .comment("Maximum fraction used when blending biome grass colour toward the dead-grass colour.")
-                .defineInRange("pollutionGrassTintStrength", 0.75, 0.0, 1.0);
-        POLLUTION_FOLIAGE_TINT_ENABLED = builder
-                .comment("When true, leaves and vines are also tinted by pollution. Disabled by default to keep the effect grass-focused.")
-                .define("pollutionFoliageTintEnabled", false);
+        builder.push("playerPlacedWaterSources");
+        PLAYER_PLACED_WATER_SOURCE_LIMIT_ENABLED = builder
+                .comment("When true, water sources placed by players cannot create infinite water sources. Natural water remains infinite.")
+                .define("playerPlacedWaterSourceLimitEnabled", true);
+        TRACK_DISPENSER_PLACED_WATER_AS_ARTIFICIAL = builder
+                .comment("When true, water placed by dispensers is also treated as artificial for infinite-source prevention. Currently reserved for future dispenser tracking.")
+                .define("trackDispenserPlacedWaterAsArtificial", false);
+        DEBUG_PLAYER_PLACED_WATER_SOURCES = builder
+                .comment("When true, logs artificial water source tracking and blocked water source conversions.")
+                .define("debugPlayerPlacedWaterSources", false);
         builder.pop();
         SERVER_SPEC = builder.build();
     }

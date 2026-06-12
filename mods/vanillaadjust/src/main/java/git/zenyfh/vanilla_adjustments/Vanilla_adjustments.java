@@ -12,17 +12,19 @@ import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.entity.living.LivingDeathEvent;
 import net.neoforged.neoforge.event.entity.living.LivingDropsEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 @Mod(Vanilla_adjustments.MODID)
 public class Vanilla_adjustments {
     public static final String MODID = "vanilla_adjustments";
+    public static final Logger LOGGER = LoggerFactory.getLogger(MODID);
 
     public Vanilla_adjustments(ModContainer modContainer) {
         modContainer.registerConfig(ModConfig.Type.SERVER, VanillaAdjustConfig.SERVER_SPEC);
         NeoForge.EVENT_BUS.register(this);
         NeoForge.EVENT_BUS.register(new EnderPearlRadiusLimiter());
         NeoForge.EVENT_BUS.register(new DeepslateFluidGeneratorHandler());
-        NeoForge.EVENT_BUS.register(new PollutionManager());
     }
 
     @SubscribeEvent
