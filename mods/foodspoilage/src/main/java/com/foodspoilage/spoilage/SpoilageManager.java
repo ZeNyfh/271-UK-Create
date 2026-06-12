@@ -76,6 +76,53 @@ public final class SpoilageManager {
         }
     }
 
+
+    public static void refreshPreserved(ItemStack stack, double preservationMultiplier) {
+        if (!FoodClassificationManager.isSpoilageEligible(stack)) {
+            return;
+        }
+        FoodStackData data = data(stack);
+        if (data == null) {
+            return;
+        }
+        FoodProfile profile = FoodClassificationManager.profile(stack);
+        long duration = Math.max(1_000L, Math.round(profile.durationMillis() * Math.max(1.0D, preservationMultiplier)));
+        setDurationPreservingFreshness(stack, data, profile, duration);
+    }
+
+    public static void restoreBaseDuration(ItemStack stack) {
+        if (!FoodClassificationManager.isSpoilageEligible(stack)) {
+            return;
+        }
+        FoodStackData data = stack.get(ModDataComponents.FOOD_STACK_DATA);
+        if (data == null) {
+            ensureInitialized(stack);
+            return;
+        }
+        FoodProfile profile = FoodClassificationManager.profile(stack);
+        long duration = Math.max(1_000L, profile.durationMillis());
+        setDurationPreservingFreshness(stack, data, profile, duration);
+    }
+
+    private static void setDurationPreservingFreshness(ItemStack stack, FoodStackData data, FoodProfile profile, long duration) {
+        long now = now();
+        double freshness = clamp(data.freshnessAt(now));
+        long remaining = Math.max(0L, Math.round(duration * freshness));
+        stack.set(ModDataComponents.FOOD_STACK_DATA, new FoodStackData(
+            data.creationTime(),
+            now,
+            now + remaining,
+            duration,
+            freshness,
+            profile.complexity(),
+            profile.classification().name()
+        ));
+    }
+
+    private static double clamp(double value) {
+        return Math.max(0.0D, Math.min(1.0D, value));
+    }
+
     public static ItemStack transformIfRotten(ItemStack stack) {
         if (!FoodClassificationManager.isSpoilageEligible(stack)) {
             return stack;

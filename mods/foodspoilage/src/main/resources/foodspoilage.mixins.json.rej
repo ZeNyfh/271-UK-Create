@@ -1,0 +1,10 @@
+--- src/main/resources/foodspoilage.mixins.json	2026-06-12 03:25:42.000000000 +0000
++++ /mnt/data/foodspoilage_work/src/main/resources/foodspoilage.mixins.json	2026-06-12 02:39:31.203215478 +0000
+@@ -5,7 +5,6 @@
+   "compatibilityLevel": "JAVA_21",
+   "mixins": [
+     "AbstractFurnaceBlockEntityMixin",
+-    "BrewingStandBlockEntityMixin",
+     "ItemStackMixin",
+     "PlayerInventoryMixin",
+     "RandomizableContainerBlockEntityMixin"

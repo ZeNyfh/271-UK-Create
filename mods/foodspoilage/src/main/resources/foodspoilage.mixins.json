@@ -4,7 +4,10 @@
   "package": "com.foodspoilage.mixin",
   "compatibilityLevel": "JAVA_21",
   "mixins": [
-    "ItemStackMixin"
+    "AbstractFurnaceBlockEntityMixin",
+    "ItemStackMixin",
+    "PlayerInventoryMixin",
+    "RandomizableContainerBlockEntityMixin"
   ],
   "injectors": {
     "defaultRequire": 1

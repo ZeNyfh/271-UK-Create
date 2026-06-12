@@ -5,6 +5,7 @@ import com.foodspoilage.spoilage.SpoiledFoodItem;
 import java.util.List;
 import java.util.Optional;
 import net.minecraft.world.food.FoodProperties;
+import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
 import net.neoforged.neoforge.registries.DeferredHolder;
 import net.neoforged.neoforge.registries.DeferredRegister;
@@ -16,6 +17,12 @@ public final class ModItems {
 
     public static final DeferredHolder<Item, Item> SPOILED_RAW_FOOD = REGISTRAR.register("spoiled_raw_food",
         () -> new SpoiledFoodItem(new Item.Properties().food(SPOILED_FOOD)));
+
+    public static final DeferredHolder<Item, BlockItem> SIMPLE_ICEBOX = REGISTRAR.register("simple_icebox",
+        () -> new BlockItem(ModBlocks.SIMPLE_ICEBOX.get(), new Item.Properties()));
+
+    public static final DeferredHolder<Item, BlockItem> ADVANCED_ICEBOX = REGISTRAR.register("advanced_icebox",
+        () -> new BlockItem(ModBlocks.ADVANCED_ICEBOX.get(), new Item.Properties()));
 
     public static final DeferredHolder<Item, Item> SPOILED_COOKED_FOOD = REGISTRAR.register("spoiled_cooked_food",
         () -> new SpoiledFoodItem(new Item.Properties().food(SPOILED_FOOD)));

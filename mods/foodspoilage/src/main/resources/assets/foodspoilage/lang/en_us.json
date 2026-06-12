@@ -1,4 +1,8 @@
 {
+  "block.foodspoilage.simple_icebox": "Simple Icebox",
+  "block.foodspoilage.advanced_icebox": "Advanced Icebox",
+  "item.foodspoilage.simple_icebox": "Simple Icebox",
+  "item.foodspoilage.advanced_icebox": "Advanced Icebox",
   "item.foodspoilage.spoiled_raw_food": "Spoiled Raw Food",
   "item.foodspoilage.spoiled_cooked_food": "Spoiled Food",
   "tooltip.foodspoilage.state": "Freshness: %s",

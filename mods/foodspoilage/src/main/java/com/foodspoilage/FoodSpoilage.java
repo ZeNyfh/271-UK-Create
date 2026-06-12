@@ -2,8 +2,11 @@ package com.foodspoilage;
 
 import com.foodspoilage.config.FoodSpoilageConfig;
 import com.foodspoilage.event.FoodSpoilageEvents;
+import com.foodspoilage.registry.ModBlockEntities;
+import com.foodspoilage.registry.ModBlocks;
 import com.foodspoilage.registry.ModDataComponents;
 import com.foodspoilage.registry.ModItems;
+import com.foodspoilage.registry.ModMenuTypes;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.ModContainer;
 import net.neoforged.fml.config.ModConfig;
@@ -19,7 +22,10 @@ public final class FoodSpoilage {
 
     public FoodSpoilage(IEventBus modBus, ModContainer modContainer) {
         ModDataComponents.REGISTRAR.register(modBus);
+        ModBlocks.REGISTRAR.register(modBus);
         ModItems.REGISTRAR.register(modBus);
+        ModBlockEntities.REGISTRAR.register(modBus);
+        ModMenuTypes.REGISTRAR.register(modBus);
         modContainer.registerConfig(ModConfig.Type.COMMON, FoodSpoilageConfig.SPEC);
 
         FoodSpoilageEvents.register(NeoForge.EVENT_BUS);

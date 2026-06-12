@@ -5,6 +5,7 @@ import com.foodspoilage.recipe.RecipeComplexityManager;
 import com.foodspoilage.config.FoodSpoilageConfig;
 import com.foodspoilage.spoilage.FoodClassificationManager;
 import com.foodspoilage.spoilage.FoodStackData;
+import com.foodspoilage.spoilage.InventorySpoilageHooks;
 import com.foodspoilage.spoilage.SpoilageManager;
 import com.foodspoilage.spoilage.SpoilageStage;
 import net.minecraft.core.component.DataComponents;
@@ -91,7 +92,7 @@ public final class FoodSpoilageEvents {
             if (transformed != slot.getItem()) {
                 slot.set(transformed);
             } else {
-                SpoilageManager.refresh(slot.getItem());
+                InventorySpoilageHooks.onStackEnteredInventory(slot.getItem());
             }
         }
     }
@@ -105,14 +106,21 @@ public final class FoodSpoilageEvents {
     }
 
     private static void onEntityTick(EntityTickEvent.Post event) {
-        if (!(event.getEntity() instanceof ItemEntity itemEntity) || itemEntity.level().isClientSide()) {
+        if (event.getEntity().level().isClientSide()) {
             return;
         }
-        if (itemEntity.tickCount % 100 != 0) {
+        if (event.getEntity() instanceof ItemEntity itemEntity) {
+            if (itemEntity.tickCount % 100 != 0) {
+                return;
+            }
+            itemEntity.setItem(SpoilageManager.transformIfRotten(itemEntity.getItem()));
+            SpoilageManager.refresh(itemEntity.getItem());
             return;
         }
-        itemEntity.setItem(SpoilageManager.transformIfRotten(itemEntity.getItem()));
-        SpoilageManager.refresh(itemEntity.getItem());
+        if (event.getEntity() instanceof Player player && player.tickCount % 20 == 0) {
+            InventorySpoilageHooks.scanPlayerInventory(player);
+            InventorySpoilageHooks.scanMenu(player.containerMenu);
+        }
     }
 
     private static void onPickup(ItemEntityPickupEvent.Pre event) {

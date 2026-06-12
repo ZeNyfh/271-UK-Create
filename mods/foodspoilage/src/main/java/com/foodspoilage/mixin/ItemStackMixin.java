@@ -35,7 +35,11 @@ public abstract class ItemStackMixin {
 
     @Inject(method = "grow", at = @At("HEAD"))
     private void foodspoilage$averageFreshnessOnGrow(int increment, CallbackInfo callback) {
-        SpoilageMergeTracker.tryApplyGrow((ItemStack) (Object) this, increment);
+        ItemStack stack = (ItemStack) (Object) this;
+        SpoilageMergeTracker.tryApplyGrow(stack, increment);
+        if (increment > 0) {
+            SpoilageManager.ensureInitialized(stack);
+        }
     }
 
     @Inject(method = "hashItemAndComponents", at = @At("HEAD"), cancellable = true)
