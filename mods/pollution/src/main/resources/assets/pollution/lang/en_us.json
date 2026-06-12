@@ -1,0 +1,6 @@
+{
+  "commands.pollution.get": "Pollution: chunk=%s visual=%s storedChunks=%s",
+  "commands.pollution.clear": "Cleared pollution in this dimension.",
+  "commands.pollution.set": "Set pollution in current chunk.",
+  "commands.pollution.sources": "Active pollution sources near players: %s, emission this scan: %s"
+}
