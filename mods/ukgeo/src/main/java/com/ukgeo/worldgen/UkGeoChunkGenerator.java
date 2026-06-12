@@ -1327,7 +1327,7 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         if (!DEBUG_HEIGHT_BOUNDS || debugHeightBoundsLogs.getAndIncrement() >= MAX_DEBUG_HEIGHT_BOUNDS_LOGS) {
             return;
         }
-        UkGeoMod.LOGGER.info("UKGeo height-bounds debug x={} z={}: height=NODATA, surface/vegetation/river disabled, ores still allowed", x, z);
+        UkGeoMod.LOGGER.info("UKGeo height-bounds debug x={} z={}: height=NODATA/ocean, surface/vegetation/river disabled, ores still allowed", x, z);
     }
 
     BlockState sampleSurfaceRock(RuntimeData data, int x, int z, int y) {
@@ -1922,7 +1922,7 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         }
         int decimetres = data.height.sampleDecimetresOrNodata(x, z);
         if (decimetres == R16HeightTileLayer.NODATA) {
-            return "NODATA / outside bounds";
+            return "NODATA / ocean / outside bounds";
         }
         return "%.1fm".formatted(decimetres / 10.0);
     }

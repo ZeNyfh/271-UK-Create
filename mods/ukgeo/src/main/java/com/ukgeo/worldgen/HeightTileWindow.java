@@ -79,7 +79,7 @@ final class HeightTileWindow {
         if (localX < 0 || localZ < 0 || localX >= sizeX || localZ >= sizeZ) {
             return OptionalInt.empty();
         }
-        short value = samples[localZ * sizeX + localX];
+        int value = R16HeightTileLayer.normalizeSample(samples[localZ * sizeX + localX]);
         return value == NODATA ? OptionalInt.empty() : OptionalInt.of(value);
     }
 
@@ -89,7 +89,7 @@ final class HeightTileWindow {
         if (localX < 0 || localZ < 0 || localX >= sizeX || localZ >= sizeZ) {
             return NODATA;
         }
-        return samples[localZ * sizeX + localX];
+        return R16HeightTileLayer.normalizeSample(samples[localZ * sizeX + localX]);
     }
 
     private static int floorDiv(int a, int b) {

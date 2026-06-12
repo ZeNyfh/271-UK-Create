@@ -25,8 +25,8 @@ public final class R16HeightTileLayer {
         return grid.locate(x, z).flatMap(cell -> {
             try {
                 short[] tile = cache.get(cell.coord(), this::load);
-                short value = tile[cell.localZ() * manifest.tileSize + cell.localX()];
-                return value == NODATA ? java.util.Optional.<Integer>empty() : java.util.Optional.of((int) value);
+                int value = normalizeSample(tile[cell.localZ() * manifest.tileSize + cell.localX()]);
+                return value == NODATA ? java.util.Optional.<Integer>empty() : java.util.Optional.of(value);
             } catch (IOException ex) {
                 UkGeoMod.LOGGER.warn("Could not read height tile {}: {}", cell.coord().fileStem(), ex.getMessage());
                 return java.util.Optional.empty();
@@ -38,12 +38,20 @@ public final class R16HeightTileLayer {
         return grid.locate(x, z).map(cell -> {
             try {
                 short[] tile = cache.get(cell.coord(), this::load);
-                return (int) tile[cell.localZ() * manifest.tileSize + cell.localX()];
+                return normalizeSample(tile[cell.localZ() * manifest.tileSize + cell.localX()]);
             } catch (IOException ex) {
                 UkGeoMod.LOGGER.warn("Could not read height tile {}: {}", cell.coord().fileStem(), ex.getMessage());
                 return (int) NODATA;
             }
         }).orElse((int) NODATA);
+    }
+
+    /**
+     * Treat negative source heights as ocean/no-data. The source raster can contain
+     * below-sea bathymetry, but UKGeo should not generate underwater terrain from it.
+     */
+    static int normalizeSample(short value) {
+        return value < 0 ? (int) NODATA : (int) value;
     }
 
     short[] readTile(TileCoord coord) throws IOException {
