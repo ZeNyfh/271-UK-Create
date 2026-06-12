@@ -112,11 +112,13 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     private static final int SNOW_ICE_MIN_Y = 501;
     private static final int VANILLA_MIN_Y = -64;
     private static final int VANILLA_MAX_Y = 320;
+    private static final int DEFAULT_EFFECTIVE_ORE_TERRAIN_MAX_Y = Integer.getInteger("ukgeo.effectiveOreTerrainMaxY", 280);
     private static final int DEEP_CAVE_MIN_Y = -120;
     private static final int DEEP_CAVE_MAX_Y = -65;
     private static final int DEEP_CAVE_BOTTOM_MARGIN = 8;
     private static final int DEEP_CAVE_ORIGIN_CHUNK_RADIUS = 2;
     private static final int MAX_DEBUG_CARVER_BIOME_LOGS = 16;
+    private static final boolean DEBUG_ORE_PLACEMENT = Boolean.getBoolean("ukgeo.debugOrePlacement");
     private static volatile boolean createDieselGeneratorsOilLookupAttempted;
     private static volatile Method createDieselGeneratorsSetOilAmount;
     private static volatile boolean caveModeLogged;
@@ -148,7 +150,7 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         Codec.INT.optionalFieldOf("river_widen_radius", 0).forGetter(generator -> generator.riverWidenRadius),
         Codec.INT.optionalFieldOf("river_carve_depth", 2).forGetter(generator -> generator.riverCarveDepth),
         Codec.INT.optionalFieldOf("min_y", -128).forGetter(generator -> generator.minY),
-        Codec.INT.optionalFieldOf("gen_depth", 1632).forGetter(generator -> generator.genDepth),
+        Codec.INT.optionalFieldOf("gen_depth", 512).forGetter(generator -> generator.genDepth),
         Codec.INT.optionalFieldOf("fallback_height", 72).forGetter(generator -> generator.fallbackHeight)
     ).apply(instance, UkGeoChunkGenerator::new));
 
@@ -1298,26 +1300,39 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
             if (states.isEmpty()) {
                 continue;
             }
+            int bandMin = scaledVanillaYFloor(ore.vanillaMinY(), chunk);
+            int bandMax = scaledVanillaYCeil(ore.vanillaMaxY(), chunk);
+            int scaledPeakY = switch (ore.heightProfile()) {
+                case UNIFORM, DEEP_BIASED -> Integer.MIN_VALUE;
+                case TRIANGLE, TWO_PEAKS -> scaledVanillaY(ore.vanillaPeakY(), chunk);
+            };
             int score = scoreLayer == null ? 0 : scoreLayer.sampleOrDefault(pos.getMinBlockX() + 8, pos.getMinBlockZ() + 8, 0);
             double normalAttempts = normalOreAttempts(ore, score);
             int attempts = scaledOreAttempts(normalAttempts, score > 0, random);
             logOreHeightProfile(ore, chunk, normalAttempts, score > 0);
+            int skippedBandMisses = 0;
+            int acceptedCenters = 0;
+            int plannedPlacements = 0;
+            int minTerrainTop = Integer.MAX_VALUE;
+            int maxTerrainTop = Integer.MIN_VALUE;
             for (int attempt = 0; attempt < attempts; attempt++) {
                 int localX = random.nextInt(16);
                 int localZ = random.nextInt(16);
                 ChunkTerrainPlanner.ColumnPlan column = columns[localZ * 16 + localX];
                 int top = column.terrainTop();
-                int bandMin = scaledVanillaYFloor(ore.vanillaMinY(), chunk);
-                int bandMax = scaledVanillaYCeil(ore.vanillaMaxY(), chunk);
+                minTerrainTop = Math.min(minTerrainTop, top);
+                maxTerrainTop = Math.max(maxTerrainTop, top);
                 int min = Math.max(chunk.getMinBuildHeight() + 1, bandMin);
                 int max = Math.min(top - 1, bandMax);
                 if (min > max) {
+                    skippedBandMisses++;
                     continue;
                 }
                 int y = min + random.nextInt(max - min + 1);
                 if (!acceptOreHeight(ore, y, bandMin, bandMax, chunk, random)) {
                     continue;
                 }
+                acceptedCenters++;
                 for (int i = 0; i < ore.veinSize(); i++) {
                     int px = Math.clamp(localX + random.nextInt(5) - 2, 0, 15);
                     int pz = Math.clamp(localZ + random.nextInt(5) - 2, 0, 15);
@@ -1327,8 +1342,10 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
                     }
                     BlockState oreState = py < 0 ? states.get().deepslate : states.get().normal;
                     placements.add(new ChunkTerrainPlanner.OrePlacement(px, py, pz, oreState));
+                    plannedPlacements++;
                 }
             }
+            logOrePlacementDebug(ore, chunk, score, normalAttempts, attempts, bandMin, bandMax, scaledPeakY, skippedBandMisses, acceptedCenters, plannedPlacements, minTerrainTop, maxTerrainTop);
         }
         return placements.toArray(ChunkTerrainPlanner.OrePlacement[]::new);
     }
@@ -1659,6 +1676,7 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         double multiplier = inOreArea ? ORE_AREA_ATTEMPT_MULTIPLIER : BACKGROUND_ORE_ATTEMPT_MULTIPLIER;
         int minY = scaledVanillaYFloor(ore.vanillaMinY(), level);
         int maxY = scaledVanillaYCeil(ore.vanillaMaxY(), level);
+        int effectiveTerrainMaxY = effectiveOreTerrainMaxY(level);
         String peaks = switch (ore.heightProfile()) {
             case UNIFORM, DEEP_BIASED -> "-";
             case TRIANGLE -> "%s->%d".formatted(ore.vanillaPeakY(), scaledVanillaY(ore.vanillaPeakY(), level));
@@ -1670,7 +1688,7 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
             );
         };
         UkGeoMod.LOGGER.info(
-            "Ore height profile ore={} vanillaRange={}..{} scaledRange={}..{} attemptsBeforeMultiplier={} effectiveAttempts={} profile={} peaks={}",
+            "Ore height profile ore={} vanillaRange={}..{} scaledRange={}..{} attemptsBeforeMultiplier={} effectiveAttempts={} profile={} peaks={} effectiveTerrainMaxY={} worldMinY={} worldMaxBuildY={} worldHeight={}",
             ore.name(),
             ore.vanillaMinY(),
             ore.vanillaMaxY(),
@@ -1679,7 +1697,58 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
             normalAttempts,
             normalAttempts * multiplier,
             ore.heightProfile(),
-            peaks
+            peaks,
+            effectiveTerrainMaxY,
+            level.getMinBuildHeight(),
+            level.getMaxBuildHeight(),
+            level.getHeight()
+        );
+    }
+
+    private static void logOrePlacementDebug(
+        OreDefinition ore,
+        LevelHeightAccessor level,
+        int score,
+        double normalAttempts,
+        int attempts,
+        int bandMin,
+        int bandMax,
+        int scaledPeakY,
+        int skippedBandMisses,
+        int acceptedCenters,
+        int plannedPlacements,
+        int minTerrainTop,
+        int maxTerrainTop
+    ) {
+        if (!DEBUG_ORE_PLACEMENT || !"coal".equals(ore.name())) {
+            return;
+        }
+        int effectiveTerrainMaxY = effectiveOreTerrainMaxY(level);
+        String peak = scaledPeakY == Integer.MIN_VALUE ? "-" : Integer.toString(scaledPeakY);
+        String terrainTopRange = attempts == 0 ? "-" : "%d..%d".formatted(minTerrainTop, maxTerrainTop);
+        boolean intersectsAttemptedTerrain = attempts > 0 && bandMin <= maxTerrainTop - 1 && bandMax >= level.getMinBuildHeight() + 1;
+        UkGeoMod.LOGGER.info(
+            "Ore placement debug ore={} chunk={} score={} attemptsBeforeMultiplier={} attempts={} vanillaBand={}..{} vanillaPeak={} scaledBand={}..{} scaledPeak={} effectiveTerrainMaxY={} worldMinY={} worldMaxBuildY={} worldHeight={} attemptedTerrainTop={} bandIntersectsAttemptedTerrain={} skippedBandMisses={} acceptedCenters={} plannedPlacements={}",
+            ore.name(),
+            level instanceof ChunkAccess chunk ? chunk.getPos() : "?",
+            score,
+            normalAttempts,
+            attempts,
+            ore.vanillaMinY(),
+            ore.vanillaMaxY(),
+            ore.vanillaPeakY(),
+            bandMin,
+            bandMax,
+            peak,
+            effectiveTerrainMaxY,
+            level.getMinBuildHeight(),
+            level.getMaxBuildHeight(),
+            level.getHeight(),
+            terrainTopRange,
+            intersectsAttemptedTerrain,
+            skippedBandMisses,
+            acceptedCenters,
+            plannedPlacements
         );
     }
 
@@ -1983,8 +2052,14 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     }
 
     private static double scaledVanillaYRaw(double vanillaY, LevelHeightAccessor level) {
-        double scale = (double) level.getHeight() / (VANILLA_MAX_Y - VANILLA_MIN_Y);
-        return level.getMinBuildHeight() + (vanillaY - VANILLA_MIN_Y) * scale;
+        int effectiveMinY = level.getMinBuildHeight();
+        int effectiveMaxY = effectiveOreTerrainMaxY(level);
+        double scale = (double) (effectiveMaxY - effectiveMinY) / (VANILLA_MAX_Y - VANILLA_MIN_Y);
+        return effectiveMinY + (vanillaY - VANILLA_MIN_Y) * scale;
+    }
+
+    private static int effectiveOreTerrainMaxY(LevelHeightAccessor level) {
+        return Math.clamp(DEFAULT_EFFECTIVE_ORE_TERRAIN_MAX_Y, level.getMinBuildHeight() + 1, level.getMaxBuildHeight() - 1);
     }
 
     private static int clampBuildY(int y, LevelHeightAccessor level) {
