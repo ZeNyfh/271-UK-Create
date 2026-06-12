@@ -4,7 +4,6 @@ import com.mojang.serialization.Codec;
 import com.mojang.serialization.MapCodec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
 import java.io.IOException;
-import java.lang.reflect.Method;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.EnumSet;
@@ -59,11 +58,8 @@ import net.minecraft.world.level.levelgen.blending.Blender;
 import net.minecraft.world.level.levelgen.carver.ConfiguredWorldCarver;
 import net.minecraft.world.level.levelgen.placement.PlacedFeature;
 import net.minecraft.world.level.material.Fluids;
-import net.neoforged.fml.ModList;
 
 public final class UkGeoChunkGenerator extends ChunkGenerator {
-    private static final String CREATE_DIESEL_GENERATORS_MOD_ID = "createdieselgenerators";
-    private static final String CREATE_DIESEL_GENERATORS_OIL_DATA_CLASS = "com.jesz.createdieselgenerators.world.OilChunksSavedData";
     private static final int OIL_SCORE_THRESHOLD = 64;
     private static final int OIL_DEPOSIT_MIN_MILLIBUCKETS = 4_250_000;
     private static final int OIL_DEPOSIT_MAX_MILLIBUCKETS = 9_500_000;
@@ -72,7 +68,8 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     private static final boolean DEBUG_GEN_TIMINGS = Boolean.getBoolean("ukgeo.debugGenTimings");
     private static final boolean CLEAN_PLANNED_DELEGATE_FLUIDS = Boolean.getBoolean("ukgeo.cleanPlannedDelegateFluids");
     private static final boolean SCHEDULE_FULL_WATER_COLUMNS = Boolean.getBoolean("ukgeo.scheduleFullWaterColumns");
-    private static final boolean ENABLE_CREATE_DIESEL_OIL_INTEGRATION = Boolean.getBoolean("ukgeo.enableCreateDieselOilIntegration");
+    private static final boolean ENABLE_CREATE_DIESEL_OIL_INTEGRATION = !Boolean.getBoolean("ukgeo.disableCreateDieselOilIntegration");
+    private static final boolean DEBUG_OIL_GEN = Boolean.getBoolean("ukgeo.debugOilGen");
     private static final boolean DEBUG_CAVES = Boolean.getBoolean("ukgeo.debugCaves");
     private static final boolean DEBUG_ORE_HEIGHTS = Boolean.getBoolean("ukgeo.debugOreHeights");
     private static final boolean PRESERVE_DELEGATE_NOISE_CAVES = Boolean.getBoolean("ukgeo.preserveDelegateNoiseCaves");
@@ -132,8 +129,6 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     private static final boolean DEBUG_ORE_PLACEMENT = Boolean.getBoolean("ukgeo.debugOrePlacement");
     private static final boolean DEBUG_HEIGHT_BOUNDS = Boolean.getBoolean("ukgeo.debugHeightBounds");
     private static final int MAX_DEBUG_HEIGHT_BOUNDS_LOGS = 32;
-    private static volatile boolean createDieselGeneratorsOilLookupAttempted;
-    private static volatile Method createDieselGeneratorsSetOilAmount;
     private static volatile boolean caveModeLogged;
     private static final AtomicInteger debugHeightBoundsLogs = new AtomicInteger();
     private static final Set<String> debuggedOreHeights = ConcurrentHashMap.newKeySet();
@@ -2019,8 +2014,8 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         primeGenerationHeightmaps(chunk);
         logTiming("primeGenerationHeightmaps.finalBuildSurface", chunk.getPos(), primeStartNanos);
         long oilStartNanos = System.nanoTime();
-        populateCreateDieselGeneratorsOil(level.getLevel(), chunk.getPos());
-        logTiming("populateCreateDieselGeneratorsOil", chunk.getPos(), oilStartNanos);
+        planCreateDieselGeneratorsOil(level.getLevel(), chunk.getPos());
+        logTiming("planCreateDieselGeneratorsOil", chunk.getPos(), oilStartNanos);
         logTiming("buildSurface.total", chunk.getPos(), startNanos);
     }
 
@@ -2835,51 +2830,18 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         }
     }
 
-    private void populateCreateDieselGeneratorsOil(ServerLevel level, ChunkPos chunkPos) {
+    private void planCreateDieselGeneratorsOil(ServerLevel level, ChunkPos chunkPos) {
         if (!ENABLE_CREATE_DIESEL_OIL_INTEGRATION) {
             return;
         }
         RuntimeData data = data();
-        Optional<Method> setOilAmount = createDieselGeneratorsSetOilAmount();
-        if (data == null || setOilAmount.isEmpty()) {
+        if (data == null) {
             return;
         }
         int amount = oilAmountForChunk(data, level.getSeed(), chunkPos);
-        try {
-            setOilAmount.get().invoke(null, level, chunkPos, amount);
-        } catch (ReflectiveOperationException ex) {
-            UkGeoMod.LOGGER.warn("Could not set Create: Diesel Generators oil amount for chunk {}: {}", chunkPos, ex.getMessage());
-        }
-    }
-
-    private static Optional<Method> createDieselGeneratorsSetOilAmount() {
-        if (!ModList.get().isLoaded(CREATE_DIESEL_GENERATORS_MOD_ID)) {
-            return Optional.empty();
-        }
-        Method current = createDieselGeneratorsSetOilAmount;
-        if (current != null) {
-            return Optional.of(current);
-        }
-        if (createDieselGeneratorsOilLookupAttempted) {
-            return Optional.empty();
-        }
-        synchronized (UkGeoChunkGenerator.class) {
-            if (createDieselGeneratorsSetOilAmount != null) {
-                return Optional.of(createDieselGeneratorsSetOilAmount);
-            }
-            if (createDieselGeneratorsOilLookupAttempted) {
-                return Optional.empty();
-            }
-            createDieselGeneratorsOilLookupAttempted = true;
-            try {
-                Class<?> savedDataClass = Class.forName(CREATE_DIESEL_GENERATORS_OIL_DATA_CLASS);
-                createDieselGeneratorsSetOilAmount = savedDataClass.getMethod("setChunkOilAmount", ServerLevel.class, ChunkPos.class, int.class);
-                UkGeoMod.LOGGER.info("Create: Diesel Generators oil integration enabled");
-                return Optional.of(createDieselGeneratorsSetOilAmount);
-            } catch (ReflectiveOperationException ex) {
-                UkGeoMod.LOGGER.warn("Create: Diesel Generators is loaded, but UKGeo could not find its oil chunk API: {}", ex.getMessage());
-                return Optional.empty();
-            }
+        UkGeoOilIntegration.enqueue(level, chunkPos, amount);
+        if (DEBUG_OIL_GEN) {
+            UkGeoMod.LOGGER.info("UKGeo oil planned chunk={} amount={}mB", chunkPos, amount);
         }
     }
 

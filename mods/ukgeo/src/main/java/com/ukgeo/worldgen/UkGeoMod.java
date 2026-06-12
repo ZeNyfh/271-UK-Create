@@ -25,6 +25,7 @@ public final class UkGeoMod {
         modContainer.registerConfig(ModConfig.Type.COMMON, UkGeoConfig.SPEC);
         modBus.addListener(this::register);
         NeoForge.EVENT_BUS.addListener(UkGeoCommands::register);
+        NeoForge.EVENT_BUS.addListener(UkGeoOilIntegration::onServerTick);
     }
 
     private void register(RegisterEvent event) {
