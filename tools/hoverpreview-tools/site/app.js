@@ -19,6 +19,9 @@ const PINCH_MIN_DISTANCE = 8;
 const SAMPLE_CROP_SIZE = 512;
 const BACKGROUND_ORE_ATTEMPT_MULTIPLIER = 0.1;
 const ORE_AREA_ATTEMPT_MULTIPLIER = 3.0;
+// Hover UI displays ore density in player-facing relative density units;
+// the raw attempt ratio is 10x larger than the intended displayed multiplier.
+const ORE_DISPLAY_MULTIPLIER_DIVISOR = 10.0;
 const ORE_ATTEMPT_SETTINGS = {
   coal: { base: 1, maxBonus: 14 },
   iron: { base: 1, maxBonus: 10 },
@@ -1087,7 +1090,9 @@ function oreAmountText(oreName, score) {
   if (backgroundAttempts <= 0) return null;
 
   const oreAreaAttempts = normalAttempts * ORE_AREA_ATTEMPT_MULTIPLIER;
-  return `${formatMultiplier(oreAreaAttempts / backgroundAttempts)}x`;
+  const rawMultiplier = oreAreaAttempts / backgroundAttempts;
+  const displayMultiplier = rawMultiplier / ORE_DISPLAY_MULTIPLIER_DIVISOR;
+  return `${formatMultiplier(displayMultiplier)}x`;
 }
 
 function formatMultiplier(multiplier) {
