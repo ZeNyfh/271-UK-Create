@@ -119,6 +119,16 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     private static final int DEEP_CAVE_BOTTOM_MARGIN = 8;
     private static final int DEEP_CAVE_ORIGIN_CHUNK_RADIUS = 2;
     private static final int MAX_DEBUG_CARVER_BIOME_LOGS = 16;
+    private static final double FLORA_DENSITY_MULTIPLIER = 0.58D;
+    private static final double FLORA_CLUSTER_THRESHOLD = 0.47D;
+    private static final double FLORA_CLUSTER_FILL_MULTIPLIER = 0.70D;
+    private static final double FLOWER_CHANCE_MULTIPLIER = 0.38D;
+    private static final double TALL_FLORA_CHANCE_MULTIPLIER = 0.55D;
+    private static final double FERN_CHANCE_MULTIPLIER = 0.55D;
+    private static final double AMBIENT_FLORA_CHANCE = 0.026D;
+    private static final double AMBIENT_TALL_GRASS_CHANCE = 0.18D;
+    private static final double AMBIENT_FLOWER_CHANCE = 0.035D;
+    private static final double AMBIENT_FERN_CHANCE = 0.08D;
     private static final boolean DEBUG_ORE_PLACEMENT = Boolean.getBoolean("ukgeo.debugOrePlacement");
     private static final boolean DEBUG_HEIGHT_BOUNDS = Boolean.getBoolean("ukgeo.debugHeightBounds");
     private static final int MAX_DEBUG_HEIGHT_BOUNDS_LOGS = 32;
@@ -1985,9 +1995,6 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
             long primeStartNanos = System.nanoTime();
             primeGenerationHeightmaps(chunk);
             logTiming("primeGenerationHeightmaps.beforeSurfaceFeatures", chunk.getPos(), primeStartNanos);
-            long vegetationStartNanos = System.nanoTime();
-            placeVegetation(chunk, plan);
-            logTiming("placeVegetation(plan)", chunk.getPos(), vegetationStartNanos);
         } else {
             long removeFluidsStartNanos = System.nanoTime();
             removeDelegateCaveFluids(chunk);
@@ -1998,9 +2005,6 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
             long waterTicksStartNanos = System.nanoTime();
             scheduleWaterTicks(level, chunk);
             logTiming("scheduleWaterTicks(fallback)", chunk.getPos(), waterTicksStartNanos);
-            long vegetationStartNanos = System.nanoTime();
-            placeVegetation(chunk);
-            logTiming("placeVegetation(fallback)", chunk.getPos(), vegetationStartNanos);
         }
         long snowPlaceStartNanos = System.nanoTime();
         placeHighAltitudeSnowAndIce(chunk);
@@ -2056,6 +2060,13 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
             long primeStartNanos = System.nanoTime();
             primeGenerationHeightmaps(chunk);
             logTiming("primeGenerationHeightmaps.decoration", chunk.getPos(), primeStartNanos);
+            long vegetationStartNanos = System.nanoTime();
+            placeVegetation(chunk, plan);
+            logTiming("placeVegetation(plan.decoration)", chunk.getPos(), vegetationStartNanos);
+        } else {
+            long vegetationStartNanos = System.nanoTime();
+            placeVegetation(chunk);
+            logTiming("placeVegetation(fallback.decoration)", chunk.getPos(), vegetationStartNanos);
         }
         logTiming("applyBiomeDecoration.total", chunk.getPos(), startNanos);
     }
@@ -2149,26 +2160,20 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
             return;
         }
         ChunkPos pos = chunk.getPos();
-        long seed = (((long) pos.x) << 32) ^ (pos.z & 0xffffffffL) ^ 0x564547554b47454fL;
-        java.util.Random random = new java.util.Random(seed);
         BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
         int minBuildY = chunk.getMinBuildHeight();
         int maxY = chunk.getMaxBuildHeight() - 1;
         Heightmap surfaceMap = chunk.getOrCreateHeightmapUnprimed(Heightmap.Types.WORLD_SURFACE_WG);
-        int cellBlocks = data.manifest.vegetationCellBlocks;
         for (int localX = 0; localX < 16; localX++) {
             int worldX = pos.getMinBlockX() + localX;
             for (int localZ = 0; localZ < 16; localZ++) {
                 int worldZ = pos.getMinBlockZ() + localZ;
-                if (Math.floorMod(worldX, cellBlocks) != 0 || Math.floorMod(worldZ, cellBlocks) != 0) {
-                    continue;
-                }
                 ChunkTerrainPlanner.ColumnPlan column = plan.columns()[localZ * 16 + localX];
                 if (!column.hasHeightData()) {
                     continue;
                 }
                 int vegetationClass = column.vegetationClass();
-                if (vegetationClass == VEGETATION_URBAN || vegetationClass == VEGETATION_FRESHWATER) {
+                if (vegetationClass == 0 || vegetationClass == VEGETATION_FRESHWATER) {
                     continue;
                 }
                 int top = surfaceMap.getHighestTaken(localX, localZ);
@@ -2179,15 +2184,18 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
                 if (river.hasWater() || top <= seaLevelY || river.terrainSurfaceY() != top) {
                     continue;
                 }
+                if (column.steep() || column.coastalBeach()) {
+                    continue;
+                }
                 BlockState ground = chunk.getBlockState(cursor.set(localX, top, localZ));
-                if (!ground.is(Blocks.GRASS_BLOCK) && !ground.is(Blocks.DIRT)) {
+                if (!isFloraGround(ground)) {
                     continue;
                 }
                 int y = top + 1;
                 if (y >= maxY || !chunk.getBlockState(cursor.set(localX, y, localZ)).isAir()) {
                     continue;
                 }
-                placeVegetationForClass(chunk, cursor, random, vegetationClass, localX, y, localZ);
+                placePlannedGroundFlora(chunk, cursor, pos, vegetationClass, localX, y, localZ, worldX, worldZ);
             }
         }
     }
@@ -2407,6 +2415,199 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
             return false;
         }
         return y <= waterSurfaceY && y >= terrainTop - WATERBED_PROTECTION_DEPTH;
+    }
+
+    private void placePlannedGroundFlora(
+        ChunkAccess chunk,
+        BlockPos.MutableBlockPos cursor,
+        ChunkPos chunkPos,
+        int vegetationClass,
+        int localX,
+        int y,
+        int localZ,
+        int worldX,
+        int worldZ
+    ) {
+        double baseDensity = floraBaseDensity(vegetationClass);
+        if (baseDensity <= 0.0) {
+            return;
+        }
+        double patch = (valueNoise(worldX, worldZ, 0.045, 0x464c4f5241504154L) + 1.0) * 0.5;
+        if (patch < FLORA_CLUSTER_THRESHOLD) {
+            placeAmbientGroundFlora(chunk, cursor, chunkPos, vegetationClass, localX, y, localZ, worldX, worldZ);
+            return;
+        }
+        double cluster = smoothstep((patch - FLORA_CLUSTER_THRESHOLD) / (1.0 - FLORA_CLUSTER_THRESHOLD));
+        double micro = hashUnit(worldX, worldZ, chunkPos.toLong() ^ 0x464c4f52414d4943L);
+        double density = Math.clamp(baseDensity * FLORA_DENSITY_MULTIPLIER * lerp(0.35, 1.0, cluster) * FLORA_CLUSTER_FILL_MULTIPLIER, 0.0, 0.48);
+        if (micro > density) {
+            placeAmbientGroundFlora(chunk, cursor, chunkPos, vegetationClass, localX, y, localZ, worldX, worldZ);
+            return;
+        }
+        double choice = hashUnit(worldX, worldZ, chunkPos.toLong() ^ 0x464c4f524143484fL);
+        BlockState plant = plannedGroundFloraState(vegetationClass, worldX, worldZ, choice);
+        if (plant == null) {
+            return;
+        }
+        double tallChance = tallFloraChance(vegetationClass, cluster);
+        if (isTallGrassClass(vegetationClass) && choice < tallChance) {
+            placeDoublePlant(chunk, cursor, localX, y, localZ, Blocks.TALL_GRASS.defaultBlockState());
+            return;
+        }
+        if (isFernClass(vegetationClass) && choice < tallChance) {
+            placeDoublePlant(chunk, cursor, localX, y, localZ, Blocks.LARGE_FERN.defaultBlockState());
+            return;
+        }
+        placePlant(chunk, cursor, localX, y, localZ, plant);
+    }
+
+    private void placeAmbientGroundFlora(
+        ChunkAccess chunk,
+        BlockPos.MutableBlockPos cursor,
+        ChunkPos chunkPos,
+        int vegetationClass,
+        int localX,
+        int y,
+        int localZ,
+        int worldX,
+        int worldZ
+    ) {
+        double ambientChance = AMBIENT_FLORA_CHANCE * ambientFloraMultiplier(vegetationClass);
+        if (hashUnit(worldX, worldZ, chunkPos.toLong() ^ 0x414d42464c4f5241L) > ambientChance) {
+            return;
+        }
+        double choice = hashUnit(worldX, worldZ, chunkPos.toLong() ^ 0x414d4243484f4943L);
+        if (isFernClass(vegetationClass) && choice < AMBIENT_FERN_CHANCE) {
+            placePlant(chunk, cursor, localX, y, localZ, Blocks.FERN.defaultBlockState());
+            return;
+        }
+        if (isTallGrassClass(vegetationClass) && choice < AMBIENT_FERN_CHANCE + AMBIENT_TALL_GRASS_CHANCE) {
+            placeDoublePlant(chunk, cursor, localX, y, localZ, Blocks.TALL_GRASS.defaultBlockState());
+            return;
+        }
+        if (choice > 1.0 - AMBIENT_FLOWER_CHANCE) {
+            placePlant(chunk, cursor, localX, y, localZ, flowerForClass(vegetationClass, worldX, worldZ));
+            return;
+        }
+        placePlant(chunk, cursor, localX, y, localZ, Blocks.SHORT_GRASS.defaultBlockState());
+    }
+
+    private static double ambientFloraMultiplier(int vegetationClass) {
+        return switch (vegetationClass) {
+            case VEGETATION_BROADLEAF_WOODLAND, VEGETATION_CONIFER_WOODLAND -> 1.10;
+            case VEGETATION_IMPROVED_GRASSLAND, VEGETATION_NEUTRAL_GRASSLAND -> 1.20;
+            case VEGETATION_CALCAREOUS_GRASSLAND -> 1.00;
+            case VEGETATION_ACID_GRASSLAND, VEGETATION_WETLAND -> 0.95;
+            case VEGETATION_HEATH -> 0.70;
+            case VEGETATION_ARABLE -> 0.45;
+            case VEGETATION_URBAN -> 0.65;
+            case VEGETATION_ROCKY -> 0.35;
+            default -> 0.0;
+        };
+    }
+
+    private static double floraBaseDensity(int vegetationClass) {
+        return switch (vegetationClass) {
+            case VEGETATION_BROADLEAF_WOODLAND -> 0.34;
+            case VEGETATION_CONIFER_WOODLAND -> 0.32;
+            case VEGETATION_ARABLE -> 0.08;
+            case VEGETATION_IMPROVED_GRASSLAND -> 0.48;
+            case VEGETATION_NEUTRAL_GRASSLAND -> 0.46;
+            case VEGETATION_CALCAREOUS_GRASSLAND -> 0.42;
+            case VEGETATION_ACID_GRASSLAND -> 0.34;
+            case VEGETATION_WETLAND -> 0.38;
+            case VEGETATION_HEATH -> 0.30;
+            case VEGETATION_URBAN -> 0.22;
+            case VEGETATION_ROCKY -> 0.14;
+            default -> 0.0;
+        };
+    }
+
+    private static double tallFloraChance(int vegetationClass, double cluster) {
+        double patchBoost = cluster > 0.45 ? 0.08 : 0.0;
+        double baseChance = switch (vegetationClass) {
+            case VEGETATION_BROADLEAF_WOODLAND -> 0.08 + patchBoost;
+            case VEGETATION_CONIFER_WOODLAND -> 0.13 + patchBoost;
+            case VEGETATION_IMPROVED_GRASSLAND, VEGETATION_NEUTRAL_GRASSLAND -> 0.10 + patchBoost;
+            case VEGETATION_CALCAREOUS_GRASSLAND -> 0.06 + patchBoost * 0.5;
+            case VEGETATION_ACID_GRASSLAND, VEGETATION_WETLAND -> 0.12 + patchBoost;
+            case VEGETATION_HEATH -> 0.05;
+            case VEGETATION_URBAN -> 0.04;
+            case VEGETATION_ROCKY -> 0.03;
+            default -> 0.0;
+        };
+        return baseChance * TALL_FLORA_CHANCE_MULTIPLIER;
+    }
+
+    private static boolean isTallGrassClass(int vegetationClass) {
+        return vegetationClass == VEGETATION_IMPROVED_GRASSLAND
+            || vegetationClass == VEGETATION_NEUTRAL_GRASSLAND
+            || vegetationClass == VEGETATION_CALCAREOUS_GRASSLAND
+            || vegetationClass == VEGETATION_URBAN;
+    }
+
+    private static boolean isFernClass(int vegetationClass) {
+        return vegetationClass == VEGETATION_BROADLEAF_WOODLAND
+            || vegetationClass == VEGETATION_CONIFER_WOODLAND
+            || vegetationClass == VEGETATION_ACID_GRASSLAND
+            || vegetationClass == VEGETATION_WETLAND;
+    }
+
+    private static BlockState plannedGroundFloraState(int vegetationClass, int worldX, int worldZ, double choice) {
+        double flowerPatch = (valueNoise(worldX, worldZ, 0.028, 0x464c4f5745525041L) + 1.0) * 0.5;
+        double flowerChance = switch (vegetationClass) {
+            case VEGETATION_CALCAREOUS_GRASSLAND -> 0.28;
+            case VEGETATION_NEUTRAL_GRASSLAND -> 0.20;
+            case VEGETATION_IMPROVED_GRASSLAND -> 0.12;
+            case VEGETATION_ARABLE -> 0.16;
+            case VEGETATION_URBAN -> 0.08;
+            case VEGETATION_HEATH -> 0.04;
+            case VEGETATION_ROCKY -> 0.03;
+            default -> 0.08;
+        };
+        flowerChance *= FLOWER_CHANCE_MULTIPLIER * lerp(0.20, 1.15, flowerPatch);
+        double flowerRoll = hashUnit(worldX, worldZ, 0x464c4f5745524f4cL);
+        if (flowerRoll < flowerChance) {
+            return flowerForClass(vegetationClass, worldX, worldZ);
+        }
+        return switch (vegetationClass) {
+            case VEGETATION_BROADLEAF_WOODLAND -> choice < 0.30 * FERN_CHANCE_MULTIPLIER ? Blocks.FERN.defaultBlockState() : Blocks.SHORT_GRASS.defaultBlockState();
+            case VEGETATION_CONIFER_WOODLAND -> choice < 0.72 * FERN_CHANCE_MULTIPLIER ? Blocks.FERN.defaultBlockState() : Blocks.SHORT_GRASS.defaultBlockState();
+            case VEGETATION_ACID_GRASSLAND -> choice < 0.45 * FERN_CHANCE_MULTIPLIER ? Blocks.FERN.defaultBlockState() : Blocks.SHORT_GRASS.defaultBlockState();
+            case VEGETATION_WETLAND -> choice < 0.50 * FERN_CHANCE_MULTIPLIER ? Blocks.FERN.defaultBlockState() : Blocks.SHORT_GRASS.defaultBlockState();
+            case VEGETATION_HEATH -> choice < 0.22 * FERN_CHANCE_MULTIPLIER ? Blocks.FERN.defaultBlockState() : Blocks.SHORT_GRASS.defaultBlockState();
+            case VEGETATION_ROCKY -> choice < 0.18 * FERN_CHANCE_MULTIPLIER ? Blocks.FERN.defaultBlockState() : Blocks.SHORT_GRASS.defaultBlockState();
+            default -> Blocks.SHORT_GRASS.defaultBlockState();
+        };
+    }
+
+    private static BlockState flowerForClass(int vegetationClass, int worldX, int worldZ) {
+        int variant = (int) Math.floor(hashUnit(worldX, worldZ, 0x464c4f5745524944L) * 8.0);
+        return switch (vegetationClass) {
+            case VEGETATION_CALCAREOUS_GRASSLAND -> switch (variant % 5) {
+                case 0 -> Blocks.OXEYE_DAISY.defaultBlockState();
+                case 1 -> Blocks.AZURE_BLUET.defaultBlockState();
+                case 2 -> Blocks.CORNFLOWER.defaultBlockState();
+                case 3 -> Blocks.WHITE_TULIP.defaultBlockState();
+                default -> Blocks.DANDELION.defaultBlockState();
+            };
+            case VEGETATION_NEUTRAL_GRASSLAND, VEGETATION_IMPROVED_GRASSLAND, VEGETATION_URBAN -> switch (variant % 8) {
+                case 0 -> Blocks.POPPY.defaultBlockState();
+                case 1 -> Blocks.DANDELION.defaultBlockState();
+                case 2 -> Blocks.ALLIUM.defaultBlockState();
+                case 3 -> Blocks.OXEYE_DAISY.defaultBlockState();
+                case 4 -> Blocks.CORNFLOWER.defaultBlockState();
+                case 5 -> Blocks.PINK_TULIP.defaultBlockState();
+                case 6 -> Blocks.RED_TULIP.defaultBlockState();
+                default -> Blocks.ORANGE_TULIP.defaultBlockState();
+            };
+            case VEGETATION_WETLAND -> variant % 3 == 0 ? Blocks.BLUE_ORCHID.defaultBlockState() : Blocks.DANDELION.defaultBlockState();
+            default -> variant % 2 == 0 ? Blocks.DANDELION.defaultBlockState() : Blocks.POPPY.defaultBlockState();
+        };
+    }
+
+    private static boolean isFloraGround(BlockState state) {
+        return state.is(Blocks.GRASS_BLOCK) || state.is(Blocks.DIRT);
     }
 
     private void placeVegetationForClass(ChunkAccess chunk, BlockPos.MutableBlockPos cursor, java.util.Random random, int vegetationClass, int localX, int y, int localZ) {
