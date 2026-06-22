@@ -1085,7 +1085,7 @@ function statusDetails(sample) {
   const parts = [];
   if (overlays.length) parts.push(overlays.join(" | "));
   if (ores.length) parts.push(`Ores ${ores.join(", ")}`);
-  if (animals.length) parts.push(`Animals ${animals.join(", ")}`);
+  parts.push(`Animals: ${animals}`);
 
   return parts.length ? ` | ${parts.join(" | ")}` : "";
 }
@@ -1122,6 +1122,7 @@ function animalsListUrl(manifest) {
   const queryValue = new URLSearchParams(location.search).get("animals");
   if (queryValue) return new URL(queryValue, location.href);
   if (manifest.animals_file) return new URL(manifest.animals_file, state.baseUrl || location.href);
+  if (manifest.animals?.file) return new URL(manifest.animals.file, state.baseUrl || location.href);
   return new URL(DEFAULT_ANIMALS_LIST, location.href);
 }
 
@@ -1134,11 +1135,14 @@ async function loadAnimalsList(manifest) {
     state.animals = parseAnimalsList(text);
     state.animalsLoaded = true;
     state.animalsLoadError = null;
+    console.info(`[hoverpreview] Loaded animal list: ${url.href}`);
     refreshStatus();
   } catch (error) {
     state.animals.clear();
     state.animalsLoaded = false;
     state.animalsLoadError = error;
+    console.warn(`[hoverpreview] Could not load animal list ${url.href}`, error);
+    refreshStatus();
   }
 }
 
@@ -1147,26 +1151,29 @@ function parseAnimalsList(text) {
   const lines = String(text).split(/\r?\n/);
 
   for (const rawLine of lines) {
-    const line = rawLine.replace(/#.*/, "").trim();
+    const line = rawLine.trim();
     if (!line) continue;
+    if (line.startsWith("#")) continue;
 
-    const separator = line.includes(":") ? ":" : line.includes("=") ? "=" : null;
-    if (!separator) continue;
+    const colonIndex = line.indexOf(":");
+    const equalsIndex = line.indexOf("=");
+    let splitAt = -1;
 
-    const splitAt = line.indexOf(separator);
+    if (colonIndex >= 0 && equalsIndex >= 0) {
+      splitAt = Math.min(colonIndex, equalsIndex);
+    } else {
+      splitAt = Math.max(colonIndex, equalsIndex);
+    }
+
+    if (splitAt < 0) continue;
+
     const keyText = line.slice(0, splitAt).trim();
     const animalText = line.slice(splitAt + 1).trim();
     if (!keyText || !animalText) continue;
 
-    const animals = animalText
-      .split(/[,;]/)
-      .map((value) => value.trim())
-      .filter(Boolean);
-    if (!animals.length) continue;
-
     for (const alias of keyText.split("|")) {
       const key = normaliseAnimalKey(alias);
-      if (key) rules.set(key, animals);
+      if (key) rules.set(key, animalText);
     }
   }
 
@@ -1174,7 +1181,7 @@ function parseAnimalsList(text) {
 }
 
 function animalsForSample(sample) {
-  if (!state.animalsLoaded || !state.animals.size) return [];
+  if (!state.animalsLoaded || !state.animals.size) return "—";
 
   const vegetation = samplePixel(
     "vegetation",
@@ -1182,16 +1189,24 @@ function animalsForSample(sample) {
     sample.dataZ / Number(state.manifest.scale || 1)
   );
 
+  const candidates = [];
   if (vegetation !== null && vegetation !== undefined && vegetation !== 0) {
     const label = classLabel("vegetation", vegetation);
-    const byLabel = state.animals.get(normaliseAnimalKey(label));
-    if (byLabel) return byLabel;
-
-    const byValue = state.animals.get(String(vegetation));
-    if (byValue) return byValue;
+    candidates.push(label, String(vegetation));
   }
 
-  return [];
+  if (sample.vegetation) candidates.push(sample.vegetation);
+  if (sample.vegetationClass) candidates.push(sample.vegetationClass);
+  if (sample.biome) candidates.push(sample.biome);
+  if (sample.biomeId) candidates.push(sample.biomeId);
+  if (sample.label) candidates.push(sample.label);
+
+  for (const candidate of candidates) {
+    const animals = state.animals.get(normaliseAnimalKey(candidate));
+    if (animals) return animals;
+  }
+
+  return "—";
 }
 
 function normaliseAnimalKey(value) {
@@ -1202,6 +1217,14 @@ function normaliseAnimalKey(value) {
     .replace(/&/g, "and")
     .replace(/[^a-z0-9]+/g, "_")
     .replace(/^_+|_+$/g, "");
+}
+
+function refreshStatus() {
+  if (!state.lastStatusPoint) return;
+  updateStatus({
+    clientX: state.lastStatusPoint.clientX,
+    clientY: state.lastStatusPoint.clientY,
+  });
 }
 
 function updateMeasurement(event) {
