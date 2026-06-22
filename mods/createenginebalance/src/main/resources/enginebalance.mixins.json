@@ -1,0 +1,14 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "com.zenyfh.enginebalance.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [
+    "DieselEngineBlockEntityMixin",
+    "HugeDieselEngineBlockEntityMixin",
+    "ModularDieselEngineBlockEntityMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
