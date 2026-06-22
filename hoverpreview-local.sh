@@ -54,13 +54,49 @@ fi
 URL="http://$HOST:$PORT/$MANIFEST_QUERY"
 SERVER_PID=""
 
-cleanup() {
-  if [[ -n "$SERVER_PID" ]] && kill -0 "$SERVER_PID" 2>/dev/null; then
-    kill "$SERVER_PID" 2>/dev/null || true
-    wait "$SERVER_PID" 2>/dev/null || true
+cleanup_server() {
+  if [[ -z "${SERVER_PID:-}" ]]; then
+    return
   fi
+
+  if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+    return
+  fi
+
+  kill -TERM "$SERVER_PID" 2>/dev/null || true
+
+  # Give the HTTP server a brief chance to exit cleanly.
+  for _ in {1..20}; do
+    if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+      break
+    fi
+    sleep 0.05
+  done
+
+  # If it ignored TERM, make sure it is gone before this script exits.
+  if kill -0 "$SERVER_PID" 2>/dev/null; then
+    kill -KILL "$SERVER_PID" 2>/dev/null || true
+  fi
+
+  wait "$SERVER_PID" 2>/dev/null || true
 }
-trap cleanup EXIT INT TERM
+
+on_interrupt() {
+  trap - EXIT INT TERM
+  echo
+  cleanup_server
+  exit 130
+}
+
+on_terminate() {
+  trap - EXIT INT TERM
+  cleanup_server
+  exit 143
+}
+
+trap cleanup_server EXIT
+trap on_interrupt INT
+trap on_terminate TERM
 
 open_url() {
   if command -v xdg-open >/dev/null 2>&1; then
