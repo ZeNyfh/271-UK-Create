@@ -1,0 +1,18 @@
+# UKGeo hover map animal list
+# Format: vegetation_or_biome_key: animal, animal, animal
+# Keys are case-insensitive. Spaces, hyphens, and underscores are treated the same.
+# Multiple aliases can be separated with |.
+
+broadleaf_woodland|broadleaf woodland|woodland: Deer, Boar, Hedgehog, Squirrel, Owl, Pig, Fox, Wolf (rare), Bat (night/caves)
+conifer_woodland|conifer woodland|forest|taiga: Deer, Boar, Squirrel, Owl, Fox, Wolf (rare), Bat (night/caves)
+arable|farmland|cropland: Cow, Chicken, Pig, Hedgehog, Dog (rare), Fox, Deer (edge)
+improved_grassland|improved grassland|pasture: Cow, Sheep, Minisheep, Chicken, Rabbit, Hedgehog, Deer
+neutral_grassland|neutral grassland|meadow|grassland: Cow, Sheep, Minisheep, Deer, Rabbit, Hedgehog, Chicken, Bison (very rare), Fox
+calcareous_grassland|calcareous grassland: Sheep, Minisheep, Deer, Rabbit, Fox
+acid_grassland|acid grassland|upland grassland: Sheep, Minisheep, Deer, Rabbit, Boar, Fox
+heath|heathland|moorland|moor: Deer, Rabbit, Minisheep, Fox, Owl, Bison (very rare), Wolf (rare)
+wetland|swamp|marsh: Frog, Chicken (edge), Bat (night/caves)
+freshwater|river|lake|pond: Frog, Bat (night/caves)
+coastal_ocean|ocean|sea|beach|coast: No regular land animals
+urban|settlement|town|city: Cat, Dog (rare), Chicken, Hedgehog, Fox, Squirrel (parks)
+rocky|stony_peaks|upland_rocky|mountain: Sheep, Minisheep, Rabbit, Fox, Bat (caves/night)

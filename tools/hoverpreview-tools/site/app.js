@@ -1,5 +1,6 @@
 const FORMAT = "ukgeo-hoverpreviews-v1";
 const DEFAULT_MANIFEST = "hoverpreviews/hover_manifest.json";
+const DEFAULT_ANIMALS_LIST = "animals.txt";
 const START_STATUS = "Mouse wheel zooms. Middle/right drag pans. Left click copies the current Minecraft coordinates.";
 const DEFAULT_VISIBLE_OVERLAYS = new Set(["surface", "vegetation", "rivers"]);
 const DEFAULT_VISIBLE_ORES = new Set(["coal", "iron", "copper", "zinc", "gold"]);
@@ -89,6 +90,9 @@ const state = {
   chunkLoadRequestTimer: 0,
   samples: new Map(),
   sampleLoads: new Map(),
+  animals: new Map(),
+  animalsLoaded: false,
+  animalsLoadError: null,
   measure: null,
   mapCanvas: null,
   mapCtx: null,
@@ -249,6 +253,9 @@ async function loadManifest(url) {
   state.imageWidth = Number(manifest.image_width);
   state.imageHeight = Number(manifest.image_height);
   state.layers.clear();
+  state.animals.clear();
+  state.animalsLoaded = false;
+  state.animalsLoadError = null;
   clearBitmapCaches();
   clearMeasurement();
   elements.stack.replaceChildren();
@@ -267,6 +274,7 @@ async function loadManifest(url) {
 
   const height = state.layers.get("height");
   if (height) loadSample(height.layer).catch(() => undefined);
+  loadAnimalsList(manifest).catch(() => undefined);
 
   elements.empty.hidden = true;
   fitView();
@@ -1053,6 +1061,7 @@ function bngText(dataX, dataZ) {
 function statusDetails(sample) {
   const overlays = [];
   const ores = [];
+  const animals = animalsForSample(sample);
 
   for (const entry of state.layers.values()) {
     if (entry.layer.kind === "base" || !entry.enabled) continue;
@@ -1076,6 +1085,7 @@ function statusDetails(sample) {
   const parts = [];
   if (overlays.length) parts.push(overlays.join(" | "));
   if (ores.length) parts.push(`Ores ${ores.join(", ")}`);
+  if (animals.length) parts.push(`Animals ${animals.join(", ")}`);
 
   return parts.length ? ` | ${parts.join(" | ")}` : "";
 }
@@ -1106,6 +1116,92 @@ function classLabel(layerName, value) {
   const key = layerName === "surface" ? "surface_geology" : layerName;
   const classes = state.manifest[key]?.classes || {};
   return classes[String(value)]?.name || String(value);
+}
+
+function animalsListUrl(manifest) {
+  const queryValue = new URLSearchParams(location.search).get("animals");
+  if (queryValue) return new URL(queryValue, location.href);
+  if (manifest.animals_file) return new URL(manifest.animals_file, state.baseUrl || location.href);
+  return new URL(DEFAULT_ANIMALS_LIST, location.href);
+}
+
+async function loadAnimalsList(manifest) {
+  const url = animalsListUrl(manifest);
+  try {
+    const response = await fetch(url.href, { cache: "no-cache" });
+    if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+    const text = await response.text();
+    state.animals = parseAnimalsList(text);
+    state.animalsLoaded = true;
+    state.animalsLoadError = null;
+    refreshStatus();
+  } catch (error) {
+    state.animals.clear();
+    state.animalsLoaded = false;
+    state.animalsLoadError = error;
+  }
+}
+
+function parseAnimalsList(text) {
+  const rules = new Map();
+  const lines = String(text).split(/\r?\n/);
+
+  for (const rawLine of lines) {
+    const line = rawLine.replace(/#.*/, "").trim();
+    if (!line) continue;
+
+    const separator = line.includes(":") ? ":" : line.includes("=") ? "=" : null;
+    if (!separator) continue;
+
+    const splitAt = line.indexOf(separator);
+    const keyText = line.slice(0, splitAt).trim();
+    const animalText = line.slice(splitAt + 1).trim();
+    if (!keyText || !animalText) continue;
+
+    const animals = animalText
+      .split(/[,;]/)
+      .map((value) => value.trim())
+      .filter(Boolean);
+    if (!animals.length) continue;
+
+    for (const alias of keyText.split("|")) {
+      const key = normaliseAnimalKey(alias);
+      if (key) rules.set(key, animals);
+    }
+  }
+
+  return rules;
+}
+
+function animalsForSample(sample) {
+  if (!state.animalsLoaded || !state.animals.size) return [];
+
+  const vegetation = samplePixel(
+    "vegetation",
+    sample.dataX / Number(state.manifest.scale || 1),
+    sample.dataZ / Number(state.manifest.scale || 1)
+  );
+
+  if (vegetation !== null && vegetation !== undefined && vegetation !== 0) {
+    const label = classLabel("vegetation", vegetation);
+    const byLabel = state.animals.get(normaliseAnimalKey(label));
+    if (byLabel) return byLabel;
+
+    const byValue = state.animals.get(String(vegetation));
+    if (byValue) return byValue;
+  }
+
+  return [];
+}
+
+function normaliseAnimalKey(value) {
+  return String(value)
+    .trim()
+    .toLowerCase()
+    .replace(/^ukgeo:/, "")
+    .replace(/&/g, "and")
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
 }
 
 function updateMeasurement(event) {
