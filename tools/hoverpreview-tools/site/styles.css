@@ -52,7 +52,8 @@ button:active { background: var(--button-active); }
   z-index: 100;
   background: var(--panel);
   overflow: visible;
-  white-space: nowrap;
+  flex-wrap: wrap;
+  white-space: normal;
 }
 
 .app-title { margin-right: 4px; }
@@ -247,5 +248,12 @@ button:active { background: var(--button-active); }
 }
 
 .animal-toggle {
+  text-transform: none;
   white-space: nowrap;
+  min-height: 26px;
+  padding: 2px 7px;
+  border: 1px solid #9f9f9f;
+  border-radius: 2px;
+  background: linear-gradient(#ffffff, var(--button));
+  color: var(--text);
 }

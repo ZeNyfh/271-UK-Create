@@ -1,6 +1,23 @@
 const FORMAT = "ukgeo-hoverpreviews-v1";
 const DEFAULT_MANIFEST = "hoverpreviews/hover_manifest.json";
 const DEFAULT_ANIMALS_LIST = "animals.txt";
+const DEFAULT_ANIMALS_TEXT = `
+# Built-in fallback used when animals.txt cannot be fetched.
+0|none|unknown: —
+1|broadleaf_woodland|broadleaf woodland|forest|minecraft:forest|ukgeo:broadleaf_woodland: Deer, Boar, Squirrel, Owl, Fox, Pig
+2|conifer_woodland|conifer woodland|taiga|minecraft:taiga|ukgeo:conifer_woodland: Deer, Squirrel, Owl, Wolf
+3|arable|arable_and_horticulture|arable and horticulture|farmland|plains|minecraft:plains|ukgeo:arable: Cow, Chicken, Pig, Hedgehog, Fox
+4|improved_grassland|improved grassland|pasture|ukgeo:improved_grassland: Cow, Sheep, Chicken, Deer
+5|neutral_grassland|neutral grassland|meadow|grassland|minecraft:meadow|ukgeo:neutral_grassland: Cow, Sheep, Rabbit, Deer, Minisheep
+6|calcareous_grassland|calcareous grassland|ukgeo:calcareous_grassland: Sheep, Rabbit, Deer, Minisheep
+7|acid_grassland|acid grassland|upland grassland|ukgeo:acid_grassland: Sheep, Rabbit, Deer, Minisheep
+8|wetland|wetland_bog_fen|wetland/bog/fen|swamp|minecraft:swamp|ukgeo:wetland: Owl, Bat
+9|heath|heath_heather|heath/heather|moorland|heathland|ukgeo:heath: Rabbit, Fox, Deer, Boar, Owl, Bison
+10|freshwater|river|lake|minecraft:river|ukgeo:freshwater: —
+11|urban|urban_suburban|urban/suburban|settlement|ukgeo:urban: Dog, Hedgehog, Chicken, Fox
+12|rocky|upland|mountain|stony_peaks|minecraft:stony_peaks|ukgeo:rocky: Sheep, Rabbit, Bat
+13|coastal_ocean|ocean|sea|beach|coast|minecraft:ocean|ukgeo:coastal_ocean: —
+`;
 const START_STATUS = "Mouse wheel zooms. Middle/right drag pans. Left click copies the current Minecraft coordinates.";
 const DEFAULT_VISIBLE_OVERLAYS = new Set(["surface", "vegetation", "rivers"]);
 const DEFAULT_VISIBLE_ORES = new Set(["coal", "iron", "copper", "zinc", "gold"]);
@@ -45,9 +62,10 @@ const ORE_ATTEMPT_SETTINGS = {
 
 const elements = {
   loadState: document.querySelector("#load-state"),
+  controls: document.querySelector(".controls"),
   layerControls: document.querySelector("#layer-controls"),
   oreControls: document.querySelector("#ore-controls"),
-  animalToggle: document.querySelector("#animals-toggle"),
+  animalToggle: document.querySelector("#showAnimals") || document.querySelector("#animals-toggle"),
   viewer: document.querySelector("#viewer"),
   stack: document.querySelector("#map-stack"),
   empty: document.querySelector("#empty-state"),
@@ -112,12 +130,46 @@ const state = {
   lastStatusPoint: null,
 };
 
+ensureAnimalToggleControl();
+
 if (elements.animalToggle) {
   state.showAnimals = elements.animalToggle.checked;
   elements.animalToggle.addEventListener("change", () => {
     state.showAnimals = elements.animalToggle.checked;
     refreshStatus();
   });
+} else {
+  console.warn("[hoverpreview] Show animals checkbox was not found");
+}
+
+function ensureAnimalToggleControl() {
+  if (!elements.controls) return;
+
+  let label = elements.animalToggle?.closest("label");
+  if (!elements.animalToggle) {
+    label = document.createElement("label");
+    label.className = "layer-toggle animal-toggle";
+    label.title = "Show animal list in the hover status";
+
+    const input = document.createElement("input");
+    input.id = "showAnimals";
+    input.type = "checkbox";
+    input.checked = true;
+
+    const text = document.createElement("span");
+    text.textContent = "Show animals";
+
+    label.append(input, text);
+    elements.animalToggle = input;
+  }
+
+  // Keep the animals toggle immediately to the right of the Ores menu.
+  // This is the requested location and groups it with map overlay controls.
+  const oreMenu = elements.oreControls?.closest("details") || elements.controls.querySelector(".ore-menu");
+  const anchor = oreMenu || elements.layerControls || elements.controls.querySelector(".app-title");
+  if (label && anchor && label.previousElementSibling !== anchor) {
+    anchor.insertAdjacentElement("afterend", label);
+  }
 }
 
 elements.zoomIn.addEventListener("click", (event) => stepZoomAroundCentre(1, event.shiftKey));
@@ -1074,7 +1126,10 @@ function statusDetails(sample) {
   const animalCandidates = [];
 
   for (const entry of state.layers.values()) {
-    if (entry.layer.kind === "base" || !entry.enabled) continue;
+    if (entry.layer.kind === "base") continue;
+
+    const isAnimalLayer = isAnimalSourceLayer(entry.layer);
+    if (!entry.enabled && !isAnimalLayer) continue;
 
     const value = samplePixel(
         entry.layer.name,
@@ -1085,17 +1140,17 @@ function statusDetails(sample) {
     if (value === null || value === undefined || value === 0) continue;
 
     if (entry.layer.kind === "ore") {
+      if (!entry.enabled) continue;
       const oreText = oreAmountText(entry.layer.ore, value);
       if (oreText) ores.push(`${entry.layer.ore}: ${oreText}`);
     } else {
       const label = classLabel(entry.layer.name, value);
-      overlays.push(`${labelFor(entry.layer.name)}: ${label}`);
+      if (entry.enabled) overlays.push(`${labelFor(entry.layer.name)}: ${label}`);
 
-      // Reuse the exact sampled vegetation/biome label shown in the hover text
-      // for animal lookup. This avoids a second lookup using a slightly different
-      // coordinate space and keeps the animal list in sync with the visible class.
-      if (entry.layer.name === "vegetation" || entry.layer.name === "biome") {
-        animalCandidates.push(label, String(value));
+      // Animal lookup must not depend on the overlay being visible. Use the
+      // same sampled class plus aliases from the manifest class table.
+      if (isAnimalLayer) {
+        animalCandidates.push(...classCandidateValues(entry.layer.name, value));
       }
     }
   }
@@ -1106,6 +1161,90 @@ function statusDetails(sample) {
   if (state.showAnimals) parts.push(`Animals: ${animalsForSample(sample, animalCandidates)}`);
 
   return parts.length ? ` | ${parts.join(" | ")}` : "";
+}
+
+function isAnimalSourceLayer(layer) {
+  const name = normaliseAnimalKey(layer?.name || "");
+  const kind = normaliseAnimalKey(layer?.kind || "");
+  const label = normaliseAnimalKey(layer?.label || layer?.title || "");
+  return (
+    name === "vegetation" ||
+    name === "biome" ||
+    name === "biomes" ||
+    name === "landcover" ||
+    name === "land_cover" ||
+    name.includes("vegetation") ||
+    name.includes("biome") ||
+    name.includes("landcover") ||
+    name.includes("land_cover") ||
+    kind === "vegetation" ||
+    kind === "biome" ||
+    kind === "landcover" ||
+    kind === "land_cover" ||
+    label.includes("vegetation") ||
+    label.includes("biome") ||
+    label.includes("landcover") ||
+    label.includes("land_cover")
+  );
+}
+
+function classCandidateValues(layerName, value) {
+  const values = [];
+  const add = (candidate) => {
+    if (candidate === undefined || candidate === null || candidate === "") return;
+    values.push(candidate);
+  };
+
+  add(value);
+  add(String(value));
+  add(classLabel(layerName, value));
+
+  const classInfo = classInfoFor(layerName, value);
+  if (classInfo && typeof classInfo === "object") {
+    add(classInfo.name);
+    add(classInfo.label);
+    add(classInfo.id);
+    add(classInfo.key);
+    add(classInfo.biome);
+    add(classInfo.biome_id);
+    add(classInfo.biomeId);
+    add(classInfo.landcover);
+    add(classInfo.landcover_class);
+    add(classInfo.landcoverClass);
+  }
+
+  return values;
+}
+
+function classInfoFor(layerName, value) {
+  const keys = classManifestKeys(layerName);
+  for (const key of keys) {
+    const classes = state.manifest?.[key]?.classes;
+    const info = classes?.[String(value)];
+    if (info) return info;
+  }
+  return null;
+}
+
+function classManifestKeys(layerName) {
+  const keys = [];
+  const add = (key) => {
+    if (key && !keys.includes(key)) keys.push(key);
+  };
+
+  const normalised = normaliseAnimalKey(layerName);
+  add(layerName);
+  add(normalised);
+  if (layerName === "surface" || normalised === "surface") add("surface_geology");
+  if (isAnimalSourceLayer({ name: layerName })) {
+    add("vegetation");
+    add("biome");
+    add("biomes");
+    add("landcover");
+    add("land_cover");
+  }
+
+  return keys;
 }
 
 function oreAmountText(oreName, score) {
@@ -1131,58 +1270,74 @@ function formatMultiplier(multiplier) {
 }
 
 function classLabel(layerName, value) {
-  const key = layerName === "surface" ? "surface_geology" : layerName;
-  const classes = state.manifest[key]?.classes || {};
-  return classes[String(value)]?.name || String(value);
+  const info = classInfoFor(layerName, value);
+  return info?.name || info?.label || info?.id || info?.key || String(value);
 }
 
-function animalsListUrl(manifest) {
-  const queryValue = new URLSearchParams(location.search).get("animals");
-  if (queryValue) return new URL(queryValue, location.href);
-  if (manifest.animals_file) return new URL(manifest.animals_file, state.baseUrl || location.href);
-  if (manifest.animals?.file) return new URL(manifest.animals.file, state.baseUrl || location.href);
-  return new URL(DEFAULT_ANIMALS_LIST, location.href);
+function animalsListUrls(manifest) {
+  const params = new URLSearchParams(location.search);
+  const queryValue = params.get("animals");
+  const urls = [];
+  const add = (value, base) => {
+    if (!value) return;
+    const href = new URL(value, base || location.href).href;
+    if (!urls.some((url) => url.href === href)) urls.push(new URL(href));
+  };
+
+  add(queryValue, location.href);
+  add(manifest.animals_file, state.baseUrl || location.href);
+  add(manifest.animals?.file, state.baseUrl || location.href);
+  add(DEFAULT_ANIMALS_LIST, location.href);
+  add(DEFAULT_ANIMALS_LIST, state.baseUrl || location.href);
+
+  return urls;
 }
 
 async function loadAnimalsList(manifest) {
-  const url = animalsListUrl(manifest);
-  try {
-    const response = await fetch(url.href, { cache: "no-cache" });
-    if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
-    const text = await response.text();
-    state.animals = parseAnimalsList(text);
-    state.animalsLoaded = true;
-    state.animalsLoadError = null;
-    console.info(`[hoverpreview] Loaded animal list: ${url.href}`);
-    refreshStatus();
-  } catch (error) {
-    state.animals.clear();
-    state.animalsLoaded = false;
-    state.animalsLoadError = error;
-    console.warn(`[hoverpreview] Could not load animal list ${url.href}`, error);
-    refreshStatus();
+  // Use a built-in list immediately so the hover UI works even when this page is
+  // served from a wrapper path that cannot fetch ./animals.txt. A fetched
+  // animals.txt still overrides this fallback below.
+  state.animals = parseAnimalsList(DEFAULT_ANIMALS_TEXT);
+  state.animalsLoaded = state.animals.size > 0;
+  state.animalsLoadError = null;
+
+  const urls = animalsListUrls(manifest);
+  let lastError = null;
+
+  for (const url of urls) {
+    try {
+      const response = await fetch(url.href, { cache: "no-cache" });
+      if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+      const text = await response.text();
+      const fetchedAnimals = parseAnimalsList(text);
+      state.animals = new Map([...parseAnimalsList(DEFAULT_ANIMALS_TEXT), ...fetchedAnimals]);
+      state.animalsLoaded = state.animals.size > 0;
+      state.animalsLoadError = null;
+      console.info(`[hoverpreview] Loaded ${fetchedAnimals.size} animal keys from ${url.href} (${state.animals.size} keys including built-in aliases)`);
+      refreshStatus();
+      return;
+    } catch (error) {
+      lastError = error;
+      debugAnimals("Could not load animal list candidate", { url: url.href, error });
+    }
   }
+
+  state.animalsLoadError = lastError;
+  console.warn(`[hoverpreview] Could not load animal list from any candidate; using built-in animal list`, urls.map((url) => url.href), lastError);
+  refreshStatus();
 }
 
 function parseAnimalsList(text) {
   const rules = new Map();
-  const lines = String(text).split(/\r?\n/);
+  const lines = String(text || "").split(/\r?\n/);
 
   for (const rawLine of lines) {
     const line = rawLine.trim();
-    if (!line) continue;
-    if (line.startsWith("#")) continue;
+    if (!line || line.startsWith("#")) continue;
 
-    const colonIndex = line.indexOf(":");
     const equalsIndex = line.indexOf("=");
-    let splitAt = -1;
-
-    if (colonIndex >= 0 && equalsIndex >= 0) {
-      splitAt = Math.min(colonIndex, equalsIndex);
-    } else {
-      splitAt = Math.max(colonIndex, equalsIndex);
-    }
-
+    const colonIndex = line.lastIndexOf(":");
+    const splitAt = equalsIndex >= 0 ? equalsIndex : colonIndex;
     if (splitAt < 0) continue;
 
     const keyText = line.slice(0, splitAt).trim();
@@ -1190,8 +1345,9 @@ function parseAnimalsList(text) {
     if (!keyText || !animalText) continue;
 
     for (const alias of keyText.split("|")) {
-      const key = normaliseAnimalKey(alias);
-      if (key) rules.set(key, animalText);
+      for (const key of animalKeyVariants(alias)) {
+        if (key) rules.set(key, animalText);
+      }
     }
   }
 
@@ -1201,39 +1357,138 @@ function parseAnimalsList(text) {
 function animalsForSample(sample, candidates = []) {
   if (!state.animalsLoaded || !state.animals.size) return "—";
 
-  const allCandidates = [...candidates];
+  const allCandidates = [];
+  const addCandidate = (value) => {
+    if (value === undefined || value === null || value === "") return;
+    allCandidates.push(value);
+  };
 
-  // Fallback: sample the vegetation layer directly even when it is hidden, so
-  // the Animals toggle is independent of the vegetation overlay toggle.
-  const vegetation = samplePixel("vegetation", sample.imageX, sample.imageY);
-
-  if (vegetation !== null && vegetation !== undefined && vegetation !== 0) {
-    const label = classLabel("vegetation", vegetation);
-    allCandidates.push(label, String(vegetation));
+  // Simple source of truth: the animals list corresponds to the vegetation class
+  // under the cursor. Read the vegetation/landcover/biome sample layer directly
+  // and try both its numeric class ID and its manifest class name/aliases.
+  for (const entry of state.layers.values()) {
+    if (!isAnimalSourceLayer(entry.layer)) continue;
+    for (const candidate of animalCandidatesFromLayer(entry.layer.name, sample.imageX, sample.imageY)) {
+      addCandidate(candidate);
+    }
   }
 
-  if (sample.vegetation) allCandidates.push(sample.vegetation);
-  if (sample.vegetationClass) allCandidates.push(sample.vegetationClass);
-  if (sample.biome) allCandidates.push(sample.biome);
-  if (sample.biomeId) allCandidates.push(sample.biomeId);
-  if (sample.label) allCandidates.push(sample.label);
+  // Secondary source: values collected while the status text was built.
+  for (const candidate of candidates) addCandidate(candidate);
+  for (const field of [
+    "vegetation", "vegetationClass", "vegetationClassId", "vegetationId", "vegetationName",
+    "biome", "biomeId", "biomeName", "landcover", "landcoverClass", "label"
+  ]) {
+    addCandidate(sample?.[field]);
+  }
 
   for (const candidate of allCandidates) {
-    const animals = state.animals.get(normaliseAnimalKey(candidate));
-    if (animals) return animals;
+    for (const key of animalKeyVariants(candidate)) {
+      const animals = state.animals.get(key);
+      if (animals) {
+        debugAnimals("Matched animals", { candidate, key, animals });
+        return animals;
+      }
+    }
   }
 
+  debugAnimals("No animals match", { candidates: allCandidates, keys: allCandidates.flatMap(animalKeyVariants), loadedKeys: Array.from(state.animals.keys()) });
   return "—";
 }
 
+function animalCandidatesFromLayer(layerName, imageX, imageY) {
+  const candidates = [];
+  const add = (value) => {
+    if (value === undefined || value === null || value === "") return;
+    candidates.push(value);
+  };
+
+  const rawValue = samplePixel(layerName, imageX, imageY);
+  if (rawValue !== undefined && rawValue !== null) {
+    for (const candidate of classCandidateValues(layerName, rawValue)) add(candidate);
+  }
+
+  // If the sample image is colour-coded rather than raw U8 class IDs, the red
+  // channel alone is not the vegetation class. Match the full sampled colour to
+  // the manifest's class colours and then use that class ID/name.
+  const rgba = samplePixelRgba(layerName, imageX, imageY);
+  for (const classId of classIdsForSampleColor(layerName, rgba)) {
+    for (const candidate of classCandidateValues(layerName, classId)) add(candidate);
+  }
+
+  return candidates;
+}
+
+function classIdsForSampleColor(layerName, rgba) {
+  if (!rgba) return [];
+  const matches = [];
+  const seen = new Set();
+
+  for (const key of classManifestKeys(layerName)) {
+    const classes = state.manifest?.[key]?.classes || {};
+    for (const [classId, info] of Object.entries(classes)) {
+      const color = parseClassColor(info?.color || info?.colour || info?.hex);
+      if (!color) continue;
+      const distance = Math.abs(color[0] - rgba[0]) + Math.abs(color[1] - rgba[1]) + Math.abs(color[2] - rgba[2]);
+      if (distance <= 6 && !seen.has(classId)) {
+        seen.add(classId);
+        matches.push(classId);
+      }
+    }
+  }
+
+  return matches;
+}
+
+function parseClassColor(value) {
+  const text = String(value || "").trim();
+  if (!text) return null;
+
+  const hex = text.startsWith("#") ? text.slice(1) : text;
+  if (/^[0-9a-fA-F]{6}$/.test(hex)) {
+    return [
+      Number.parseInt(hex.slice(0, 2), 16),
+      Number.parseInt(hex.slice(2, 4), 16),
+      Number.parseInt(hex.slice(4, 6), 16),
+    ];
+  }
+
+  const rgb = text.match(/rgba?\((\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i);
+  if (rgb) return [Number(rgb[1]), Number(rgb[2]), Number(rgb[3])];
+
+  return null;
+}
+
 function normaliseAnimalKey(value) {
-  return String(value)
+  return String(value ?? "")
     .trim()
     .toLowerCase()
-    .replace(/^ukgeo:/, "")
+    .replace(/^#/, "")
     .replace(/&/g, "and")
-    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/[-\s]+/g, "_")
+    .replace(/[^a-z0-9:_]+/g, "_")
+    .replace(/_+/g, "_")
     .replace(/^_+|_+$/g, "");
+}
+
+function animalKeyVariants(value) {
+  const base = normaliseAnimalKey(value);
+  const variants = new Set();
+
+  if (base) variants.add(base);
+
+  const colon = base.indexOf(":");
+  if (colon >= 0 && colon + 1 < base.length) {
+    variants.add(base.slice(colon + 1));
+  }
+
+  return Array.from(variants);
+}
+
+function debugAnimals(message, details) {
+  if (window.localStorage?.getItem("ukgeo.debugAnimals") === "1") {
+    console.debug(`[hoverpreview] ${message}`, details);
+  }
 }
 
 function refreshStatus() {
@@ -1440,6 +1695,15 @@ function releaseSample(layerName) {
 }
 
 function samplePixel(layerName, imageX, imageY) {
+  const rgba = samplePixelRgba(layerName, imageX, imageY);
+  if (!rgba) return undefined;
+  const sample = state.samples.get(layerName);
+  if (!sample?.heightLayer) return rgba[0];
+  const encoded = rgba[0] + rgba[1] * 256;
+  return encoded === 0 ? null : encoded - 32768;
+}
+
+function samplePixelRgba(layerName, imageX, imageY) {
   const sample = state.samples.get(layerName);
   if (!sample || !sampleContains(sample, imageX, imageY)) {
     const entry = state.layers.get(layerName);
@@ -1448,14 +1712,11 @@ function samplePixel(layerName, imageX, imageY) {
   }
   const x = Math.max(0, Math.min(sample.width - 1, Math.floor(imageX) - sample.originX));
   const y = Math.max(0, Math.min(sample.height - 1, Math.floor(imageY) - sample.originY));
-  const rgba = sample.ctx.getImageData(x, y, 1, 1).data;
-  if (!sample.heightLayer) return rgba[0];
-  const encoded = rgba[0] + rgba[1] * 256;
-  return encoded === 0 ? null : encoded - 32768;
+  return sample.ctx.getImageData(x, y, 1, 1).data;
 }
 
 function shouldLoadSample(entry) {
-  return entry.layer.kind === "ore" || entry.enabled || (state.showAnimals && entry.layer.name === "vegetation");
+  return entry.layer.kind === "ore" || entry.enabled || (state.showAnimals && isAnimalSourceLayer(entry.layer));
 }
 
 async function copyCoordinates(event) {
