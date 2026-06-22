@@ -2,17 +2,21 @@
 # Format: vegetation_or_biome_key: animal, animal, animal
 # Keys are case-insensitive. Spaces, hyphens, and underscores are treated the same.
 # Multiple aliases can be separated with |.
+# Numeric aliases match UKGeo vegetation class IDs:
+# 0=ocean, 1=broadleaf woodland, 2=conifer woodland, 3=arable,
+# 4=improved grassland, 5=neutral grassland, 6=calcareous grassland,
+# 7=acid grassland, 8=wetland, 9=heath, 10=freshwater, 11=urban, 12=rocky.
 
-broadleaf_woodland|broadleaf woodland|woodland: Deer, Boar, Hedgehog, Squirrel, Owl, Pig, Fox, Wolf (rare), Bat (night/caves)
-conifer_woodland|conifer woodland|forest|taiga: Deer, Boar, Squirrel, Owl, Fox, Wolf (rare), Bat (night/caves)
-arable|farmland|cropland: Cow, Chicken, Pig, Hedgehog, Dog (rare), Fox, Deer (edge)
-improved_grassland|improved grassland|pasture: Cow, Sheep, Minisheep, Chicken, Rabbit, Hedgehog, Deer
-neutral_grassland|neutral grassland|meadow|grassland: Cow, Sheep, Minisheep, Deer, Rabbit, Hedgehog, Chicken, Bison (very rare), Fox
-calcareous_grassland|calcareous grassland: Sheep, Minisheep, Deer, Rabbit, Fox
-acid_grassland|acid grassland|upland grassland: Sheep, Minisheep, Deer, Rabbit, Boar, Fox
-heath|heathland|moorland|moor: Deer, Rabbit, Minisheep, Fox, Owl, Bison (very rare), Wolf (rare)
-wetland|swamp|marsh: Frog, Chicken (edge), Bat (night/caves)
-freshwater|river|lake|pond: Frog, Bat (night/caves)
-coastal_ocean|ocean|sea|beach|coast: No regular land animals
-urban|settlement|town|city: Cat, Dog (rare), Chicken, Hedgehog, Fox, Squirrel (parks)
-rocky|stony_peaks|upland_rocky|mountain: Sheep, Minisheep, Rabbit, Fox, Bat (caves/night)
+1|broadleaf_woodland|broadleaf woodland|broadleaved woodland|broadleaf forest|deciduous woodland|woodland: Deer, Boar, Hedgehog, Squirrel, Owl, Pig, Fox, Wolf (rare), Bat (night/caves)
+2|conifer_woodland|conifer woodland|coniferous woodland|conifer forest|forest|taiga: Deer, Boar, Squirrel, Owl, Fox, Wolf (rare), Bat (night/caves)
+3|arable|farmland|cropland|arable land: Cow, Chicken, Pig, Hedgehog, Dog (rare), Fox, Deer (edge)
+4|improved_grassland|improved grassland|pasture|pastureland: Cow, Sheep, Minisheep, Chicken, Rabbit, Hedgehog, Deer
+5|neutral_grassland|neutral grassland|meadow|grassland: Cow, Sheep, Minisheep, Deer, Rabbit, Hedgehog, Chicken, Bison (very rare), Fox
+6|calcareous_grassland|calcareous grassland|chalk grassland|limestone grassland: Sheep, Minisheep, Deer, Rabbit, Fox
+7|acid_grassland|acid grassland|upland grassland: Sheep, Minisheep, Deer, Rabbit, Boar, Fox
+9|heath|heathland|moorland|moor: Deer, Rabbit, Minisheep, Fox, Owl, Bison (very rare), Wolf (rare)
+8|wetland|swamp|marsh: Frog, Chicken (edge), Bat (night/caves)
+10|freshwater|river|lake|pond: Frog, Bat (night/caves)
+0|coastal_ocean|ocean|sea|beach|coast: No regular land animals
+11|urban|settlement|town|city: Cat, Dog (rare), Chicken, Hedgehog, Fox, Squirrel (parks)
+12|rocky|stony_peaks|upland_rocky|mountain|rock|rocks: Sheep, Minisheep, Rabbit, Fox, Bat (caves/night)

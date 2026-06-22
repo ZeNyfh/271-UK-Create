@@ -47,6 +47,7 @@ const elements = {
   loadState: document.querySelector("#load-state"),
   layerControls: document.querySelector("#layer-controls"),
   oreControls: document.querySelector("#ore-controls"),
+  animalToggle: document.querySelector("#animals-toggle"),
   viewer: document.querySelector("#viewer"),
   stack: document.querySelector("#map-stack"),
   empty: document.querySelector("#empty-state"),
@@ -93,6 +94,7 @@ const state = {
   animals: new Map(),
   animalsLoaded: false,
   animalsLoadError: null,
+  showAnimals: true,
   measure: null,
   mapCanvas: null,
   mapCtx: null,
@@ -109,6 +111,14 @@ const state = {
   pinchStartImageY: null,
   lastStatusPoint: null,
 };
+
+if (elements.animalToggle) {
+  state.showAnimals = elements.animalToggle.checked;
+  elements.animalToggle.addEventListener("change", () => {
+    state.showAnimals = elements.animalToggle.checked;
+    refreshStatus();
+  });
+}
 
 elements.zoomIn.addEventListener("click", (event) => stepZoomAroundCentre(1, event.shiftKey));
 elements.zoomOut.addEventListener("click", (event) => stepZoomAroundCentre(-1, event.shiftKey));
@@ -1061,15 +1071,15 @@ function bngText(dataX, dataZ) {
 function statusDetails(sample) {
   const overlays = [];
   const ores = [];
-  const animals = animalsForSample(sample);
+  const animalCandidates = [];
 
   for (const entry of state.layers.values()) {
     if (entry.layer.kind === "base" || !entry.enabled) continue;
 
     const value = samplePixel(
         entry.layer.name,
-        sample.dataX / Number(state.manifest.scale || 1),
-        sample.dataZ / Number(state.manifest.scale || 1)
+        sample.imageX,
+        sample.imageY
     );
 
     if (value === null || value === undefined || value === 0) continue;
@@ -1078,14 +1088,22 @@ function statusDetails(sample) {
       const oreText = oreAmountText(entry.layer.ore, value);
       if (oreText) ores.push(`${entry.layer.ore}: ${oreText}`);
     } else {
-      overlays.push(`${labelFor(entry.layer.name)}: ${classLabel(entry.layer.name, value)}`);
+      const label = classLabel(entry.layer.name, value);
+      overlays.push(`${labelFor(entry.layer.name)}: ${label}`);
+
+      // Reuse the exact sampled vegetation/biome label shown in the hover text
+      // for animal lookup. This avoids a second lookup using a slightly different
+      // coordinate space and keeps the animal list in sync with the visible class.
+      if (entry.layer.name === "vegetation" || entry.layer.name === "biome") {
+        animalCandidates.push(label, String(value));
+      }
     }
   }
 
   const parts = [];
   if (overlays.length) parts.push(overlays.join(" | "));
   if (ores.length) parts.push(`Ores ${ores.join(", ")}`);
-  parts.push(`Animals: ${animals}`);
+  if (state.showAnimals) parts.push(`Animals: ${animalsForSample(sample, animalCandidates)}`);
 
   return parts.length ? ` | ${parts.join(" | ")}` : "";
 }
@@ -1180,28 +1198,27 @@ function parseAnimalsList(text) {
   return rules;
 }
 
-function animalsForSample(sample) {
+function animalsForSample(sample, candidates = []) {
   if (!state.animalsLoaded || !state.animals.size) return "—";
 
-  const vegetation = samplePixel(
-    "vegetation",
-    sample.dataX / Number(state.manifest.scale || 1),
-    sample.dataZ / Number(state.manifest.scale || 1)
-  );
+  const allCandidates = [...candidates];
 
-  const candidates = [];
+  // Fallback: sample the vegetation layer directly even when it is hidden, so
+  // the Animals toggle is independent of the vegetation overlay toggle.
+  const vegetation = samplePixel("vegetation", sample.imageX, sample.imageY);
+
   if (vegetation !== null && vegetation !== undefined && vegetation !== 0) {
     const label = classLabel("vegetation", vegetation);
-    candidates.push(label, String(vegetation));
+    allCandidates.push(label, String(vegetation));
   }
 
-  if (sample.vegetation) candidates.push(sample.vegetation);
-  if (sample.vegetationClass) candidates.push(sample.vegetationClass);
-  if (sample.biome) candidates.push(sample.biome);
-  if (sample.biomeId) candidates.push(sample.biomeId);
-  if (sample.label) candidates.push(sample.label);
+  if (sample.vegetation) allCandidates.push(sample.vegetation);
+  if (sample.vegetationClass) allCandidates.push(sample.vegetationClass);
+  if (sample.biome) allCandidates.push(sample.biome);
+  if (sample.biomeId) allCandidates.push(sample.biomeId);
+  if (sample.label) allCandidates.push(sample.label);
 
-  for (const candidate of candidates) {
+  for (const candidate of allCandidates) {
     const animals = state.animals.get(normaliseAnimalKey(candidate));
     if (animals) return animals;
   }
@@ -1438,7 +1455,7 @@ function samplePixel(layerName, imageX, imageY) {
 }
 
 function shouldLoadSample(entry) {
-  return entry.layer.kind === "ore" || entry.enabled;
+  return entry.layer.kind === "ore" || entry.enabled || (state.showAnimals && entry.layer.name === "vegetation");
 }
 
 async function copyCoordinates(event) {

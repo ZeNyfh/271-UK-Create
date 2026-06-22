@@ -245,3 +245,7 @@ button:active { background: var(--button-active); }
   pointer-events: none;
   overflow: visible;
 }
+
+.animal-toggle {
+  white-space: nowrap;
+}
