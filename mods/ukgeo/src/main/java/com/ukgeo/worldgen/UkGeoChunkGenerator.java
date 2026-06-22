@@ -2037,7 +2037,7 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
          * rarity filters, biome checks, and configured-feature mixtures that make forests/taiga/swamps vary like vanilla.
          */
         long treeDiscoveryStartNanos = System.nanoTime();
-        Set<ResourceKey<PlacedFeature>> treeFeatures = vanillaTreeFeaturesForChunk(level, chunkPos);
+        Set<ResourceKey<PlacedFeature>> treeFeatures = vanillaTreeFeaturesForChunk(chunk);
         logTiming("applyBiomeDecoration.vanillaTreeDiscovery", chunk.getPos(), treeDiscoveryStartNanos);
         long treePlacementStartNanos = System.nanoTime();
         for (ResourceKey<PlacedFeature> key : treeFeatures) {
@@ -2067,11 +2067,15 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         logTiming("applyBiomeDecoration.total", chunk.getPos(), startNanos);
     }
 
-    private Set<ResourceKey<PlacedFeature>> vanillaTreeFeaturesForChunk(WorldGenLevel level, ChunkPos center) {
-        Set<ResourceKey<PlacedFeature>> discovered = new LinkedHashSet<>();
-        ChunkPos.rangeClosed(center, 1).forEach(chunkPos -> {
-            discovered.addAll(vanillaTreeFeaturesInChunk(level, chunkPos));
-        });
+    private Set<ResourceKey<PlacedFeature>> vanillaTreeFeaturesForChunk(ChunkAccess chunk) {
+        /*
+         * Keep decoration local to the chunk currently being decorated. The previous neighbour scan
+         * called WorldGenLevel#getChunk for surrounding chunks from inside applyBiomeDecoration; during
+         * parallel worldgen that can recursively request more chunks and make new-world creation stall.
+         * Reading the current ChunkAccess sections is enough to discover this chunk's biome-style tree
+         * feature set without causing extra chunk loads.
+         */
+        Set<ResourceKey<PlacedFeature>> discovered = vanillaTreeFeaturesInChunk(chunk);
         Set<ResourceKey<PlacedFeature>> ordered = new LinkedHashSet<>();
         for (ResourceKey<PlacedFeature> key : VANILLA_TREE_FEATURES) {
             if (discovered.contains(key)) {
@@ -2081,14 +2085,13 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         return ordered;
     }
 
-    private Set<ResourceKey<PlacedFeature>> vanillaTreeFeaturesInChunk(WorldGenLevel level, ChunkPos chunkPos) {
-        long key = chunkPos.toLong();
+    private Set<ResourceKey<PlacedFeature>> vanillaTreeFeaturesInChunk(ChunkAccess chunk) {
+        long key = chunk.getPos().toLong();
         Set<ResourceKey<PlacedFeature>> cached = chunkTreeFeatureCache.get(key);
         if (cached != null) {
             return cached;
         }
         Set<ResourceKey<PlacedFeature>> discovered = new LinkedHashSet<>();
-        ChunkAccess chunk = level.getChunk(chunkPos.x, chunkPos.z);
         for (var section : chunk.getSections()) {
             section.getBiomes().getAll(biome -> addVanillaTreeFeaturesForBiome(discovered, biome));
         }
@@ -2247,6 +2250,7 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         int minBuildY = chunk.getMinBuildHeight();
         int maxY = chunk.getMaxBuildHeight() - 1;
         Heightmap surfaceMap = chunk.getOrCreateHeightmapUnprimed(Heightmap.Types.WORLD_SURFACE_WG);
+        RuntimeData runtime = data;
         int cellBlocks = data.manifest.vegetationCellBlocks;
         for (int localX = 0; localX < 16; localX++) {
             int worldX = pos.getMinBlockX() + localX;
@@ -2271,7 +2275,6 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
                     skippedCount++;
                     continue;
                 }
-                RuntimeData runtime = data();
                 RiverShape river = runtime == null ? RiverShape.none(top) : computeRiverShape(runtime, null, worldX, worldZ, top, minBuildY);
                 if (river.hasWater() || top <= seaLevelY || river.terrainSurfaceY() != top) {
                     skippedCount++;
