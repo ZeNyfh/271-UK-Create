@@ -66,13 +66,13 @@ public final class VanillaAdjustConfig {
 
         builder.push("playerPlacedWaterSources");
         PLAYER_PLACED_WATER_SOURCE_LIMIT_ENABLED = builder
-                .comment("When true, water sources placed by players cannot create infinite water sources. Natural water remains infinite.")
+                .comment("When true, non-natural water and ice cannot create or contribute to infinite water sources. Natural water and natural ice remain infinite.")
                 .define("playerPlacedWaterSourceLimitEnabled", true);
         TRACK_DISPENSER_PLACED_WATER_AS_ARTIFICIAL = builder
-                .comment("When true, water placed by dispensers is also treated as artificial for infinite-source prevention. Currently reserved for future dispenser tracking.")
+                .comment("When true, water placed by dispensers is also treated as non-natural for infinite-source prevention. Currently reserved for future dispenser tracking.")
                 .define("trackDispenserPlacedWaterAsArtificial", false);
         DEBUG_PLAYER_PLACED_WATER_SOURCES = builder
-                .comment("When true, logs artificial water source tracking and blocked water source conversions.")
+                .comment("When true, logs non-natural water/ice tracking, freeze/thaw propagation, and blocked water source conversions.")
                 .define("debugPlayerPlacedWaterSources", false);
         builder.pop();
 

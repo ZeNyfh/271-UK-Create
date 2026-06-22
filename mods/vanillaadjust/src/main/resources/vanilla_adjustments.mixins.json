@@ -6,9 +6,11 @@
   "mixins": [
     "BucketItemMixin",
     "FlowingFluidMixin",
+    "IceBlockMixin",
     "FireworkRocketItemMixin",
     "PointedDripstoneBlockMixin",
     "ServerGamePacketListenerImplMixin",
+    "ServerLevelMixin",
     "WolfMixin"
   ],
   "injectors": {
