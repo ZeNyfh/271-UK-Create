@@ -6,11 +6,12 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.MobSpawnType;
 import net.minecraft.world.item.CreativeModeTab;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.level.biome.Biome;
+import net.minecraft.world.level.LightLayer;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.ModContainer;
@@ -25,36 +26,67 @@ import org.slf4j.LoggerFactory;
 public final class UkGeoAnimals {
     public static final String MOD_ID = "ukgeo_animals";
     private static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
+    private static final boolean DEBUG_ANIMAL_SPAWNS = Boolean.getBoolean("ukgeoanimals.debugSpawns");
     private static final ResourceLocation BLUNDERBUSS = ResourceLocation.fromNamespaceAndPath("wildernature", "blunderbuss");
-    private static final Set<String> UNWANTED = Set.of(
-        "red_wolf",
-        "raccoon",
-        "penguin",
-        "turkey",
-        "pelican",
-        "flamingo",
-        "cassowary"
+
+    private static final Set<ResourceLocation> UNWANTED_WILDERNATURE = Set.of(
+            id("wildernature", "red_wolf"),
+            id("wildernature", "raccoon"),
+            id("wildernature", "penguin"),
+            id("wildernature", "turkey"),
+            id("wildernature", "pelican"),
+            id("wildernature", "flamingo"),
+            id("wildernature", "cassowary")
     );
-    private static final Set<String> FILTERED = Set.of(
-        "deer",
-        "bison",
-        "boar",
-        "dog",
-        "hedgehog",
-        "minisheep",
-        "owl",
-        "squirrel"
+
+    private static final Set<ResourceLocation> FILTERED_WILDERNATURE = Set.of(
+            id("wildernature", "deer"),
+            id("wildernature", "bison"),
+            id("wildernature", "boar"),
+            id("wildernature", "dog"),
+            id("wildernature", "hedgehog"),
+            id("wildernature", "minisheep"),
+            id("wildernature", "owl"),
+            id("wildernature", "squirrel")
     );
-    private static final Map<String, Integer> RARENESS = Map.of(
-        "bison", 16,
-        "dog", 8,
-        "owl", 4
+
+    private static final Set<ResourceLocation> FILTERED_VANILLA = Set.of(
+            id("minecraft", "cow"),
+            id("minecraft", "sheep"),
+            id("minecraft", "pig"),
+            id("minecraft", "chicken"),
+            id("minecraft", "rabbit"),
+            id("minecraft", "wolf"),
+            id("minecraft", "fox"),
+            id("minecraft", "bat")
+    );
+
+    private static final Map<ResourceLocation, Integer> EXTRA_RARITY = Map.of(
+            id("wildernature", "bison"), 10,
+            id("wildernature", "dog"), 5,
+            id("wildernature", "owl"), 3,
+            id("minecraft", "wolf"), 6,
+            id("minecraft", "fox"), 3,
+            id("minecraft", "bat"), 4
     );
 
     public UkGeoAnimals(IEventBus modBus, ModContainer modContainer) {
         modBus.addListener(UkGeoAnimals::removeBlunderbussFromCreativeTabs);
         NeoForge.EVENT_BUS.register(this);
+        validateWilderNatureEntityIds();
         LOGGER.info("UKGeo Animals loaded");
+    }
+
+    private static void validateWilderNatureEntityIds() {
+        if (!DEBUG_ANIMAL_SPAWNS) {
+            return;
+        }
+        for (ResourceLocation id : FILTERED_WILDERNATURE) {
+            LOGGER.info("UKGeo Animals debug wanted entity {} exists={}", id, BuiltInRegistries.ENTITY_TYPE.containsKey(id));
+        }
+        for (ResourceLocation id : UNWANTED_WILDERNATURE) {
+            LOGGER.info("UKGeo Animals debug blocked entity {} exists={}", id, BuiltInRegistries.ENTITY_TYPE.containsKey(id));
+        }
     }
 
     private static void removeBlunderbussFromCreativeTabs(BuildCreativeModeTabContentsEvent event) {
@@ -71,61 +103,103 @@ public final class UkGeoAnimals {
     @SubscribeEvent
     public void onSpawnPlacement(MobSpawnEvent.SpawnPlacementCheck event) {
         ResourceLocation entityId = BuiltInRegistries.ENTITY_TYPE.getKey(event.getEntityType());
-        if (!"wildernature".equals(entityId.getNamespace())) {
-            return;
-        }
-        String animal = entityId.getPath();
-        if (!isNaturalSpawn(event.getSpawnType())) {
-            return;
-        }
-
         BlockPos pos = event.getPos();
-        ResourceLocation biomeId = event.getLevel().getBiome(pos).unwrapKey()
-            .map(ResourceKey::location)
-            .orElse(null);
-        if (biomeId == null || !"ukgeo".equals(biomeId.getNamespace())) {
+        ResourceLocation biomeId = biomeId(event.getLevel(), pos);
+        if (!isUkGeoBiome(biomeId)) {
             return;
         }
 
-        if (UNWANTED.contains(animal)) {
-            event.setResult(MobSpawnEvent.SpawnPlacementCheck.Result.FAIL);
-            return;
-        }
-        if (!FILTERED.contains(animal)) {
-            return;
-        }
-        if (!isHabitatAllowed(animal, biomeId.getPath(), pos.getY())) {
-            event.setResult(MobSpawnEvent.SpawnPlacementCheck.Result.FAIL);
-            return;
-        }
-        int rarity = RARENESS.getOrDefault(animal, 1);
-        if (rarity > 1 && Math.floorMod(positionHash(pos, animal), rarity) != 0) {
+        SpawnDecision decision = decide(entityId, biomeId.getPath(), pos, event.getSpawnType(), event.getLevel());
+        if (!decision.allowed()) {
+            debug("placement blocked entity=%s biome=%s reason=%s spawn=%s y=%d", entityId, biomeId, decision.reason(), event.getSpawnType(), pos.getY());
             event.setResult(MobSpawnEvent.SpawnPlacementCheck.Result.FAIL);
         }
     }
 
-    private static boolean isNaturalSpawn(MobSpawnType spawnType) {
-        return spawnType == MobSpawnType.NATURAL || spawnType == MobSpawnType.CHUNK_GENERATION;
+    @SubscribeEvent
+    public void onPositionCheck(MobSpawnEvent.PositionCheck event) {
+        ResourceLocation entityId = BuiltInRegistries.ENTITY_TYPE.getKey(event.getEntity().getType());
+        BlockPos pos = BlockPos.containing(event.getX(), event.getY(), event.getZ());
+        ResourceLocation biomeId = biomeId(event.getLevel(), pos);
+        if (!isUkGeoBiome(biomeId)) {
+            return;
+        }
+
+        SpawnDecision decision = decide(entityId, biomeId.getPath(), pos, event.getSpawnType(), event.getLevel());
+        if (!decision.allowed()) {
+            debug("position blocked entity=%s biome=%s reason=%s spawn=%s y=%d", entityId, biomeId, decision.reason(), event.getSpawnType(), pos.getY());
+            event.setResult(MobSpawnEvent.PositionCheck.Result.FAIL);
+        }
     }
 
-    private static boolean isHabitatAllowed(String animal, String biome, int y) {
-        if (isWaterOrCoast(biome)) {
-            return false;
+    private static SpawnDecision decide(ResourceLocation entityId, String biome, BlockPos pos, MobSpawnType spawnType, net.minecraft.world.level.ServerLevelAccessor level) {
+        if (UNWANTED_WILDERNATURE.contains(entityId) && isWorldSpawn(spawnType)) {
+            return SpawnDecision.block("unwanted_wildernature");
         }
-        return switch (animal) {
-            case "deer" -> y <= 265 && (isWoodland(biome) || isGrassland(biome) || isHeath(biome));
-            case "boar" -> y <= 245 && (isWoodland(biome) || "arable".equals(biome) || isHeath(biome));
-            case "hedgehog" -> y <= 180 && ("arable".equals(biome) || "urban".equals(biome) || isLowlandGrassland(biome) || "broadleaf_woodland".equals(biome));
-            case "squirrel" -> y <= 230 && (isWoodland(biome) || "urban".equals(biome));
-            case "owl" -> y <= 260 && (isWoodland(biome) || "arable".equals(biome) || "neutral_grassland".equals(biome) || isHeath(biome));
-            case "dog" -> y <= 160 && ("arable".equals(biome) || "urban".equals(biome) || isLowlandGrassland(biome));
-            case "minisheep" -> y <= 285 && (isGrassland(biome) || isHeath(biome) || "rocky".equals(biome));
-            case "bison" -> y <= 210 && ("improved_grassland".equals(biome) || "neutral_grassland".equals(biome) || isHeath(biome));
+        if (!isWorldSpawn(spawnType)) {
+            return SpawnDecision.allow();
+        }
+        if (FILTERED_WILDERNATURE.contains(entityId) || FILTERED_VANILLA.contains(entityId)) {
+            if (!isHabitatAllowed(entityId, biome, pos, spawnType, level)) {
+                return SpawnDecision.block("habitat");
+            }
+            int rarity = EXTRA_RARITY.getOrDefault(entityId, 1);
+            if (rarity > 1 && Math.floorMod(positionHash(pos, entityId.toString()), rarity) != 0) {
+                return SpawnDecision.block("rarity");
+            }
+        }
+        return SpawnDecision.allow();
+    }
+
+    private static boolean isWorldSpawn(MobSpawnType spawnType) {
+        return spawnType == MobSpawnType.NATURAL
+                || spawnType == MobSpawnType.CHUNK_GENERATION
+                || spawnType == MobSpawnType.STRUCTURE
+                || spawnType == MobSpawnType.EVENT
+                || spawnType == MobSpawnType.MOB_SUMMONED
+                || spawnType == MobSpawnType.TRIGGERED
+                || spawnType == MobSpawnType.PATROL;
+    }
+
+    private static boolean isHabitatAllowed(ResourceLocation entityId, String biome, BlockPos pos, MobSpawnType spawnType, net.minecraft.world.level.ServerLevelAccessor level) {
+        int y = pos.getY();
+        if (isWaterOrWetland(biome)) {
+            return entityId.equals(id("minecraft", "bat"));
+        }
+        return switch (entityId.getNamespace() + ":" + entityId.getPath()) {
+            case "wildernature:deer" -> y <= 265 && (isWoodland(biome) || isGrassland(biome) || isHeath(biome) || isArableEdge(biome));
+            case "wildernature:boar" -> y <= 245 && (isWoodland(biome) || isHeath(biome) || isArableEdge(biome));
+            case "wildernature:hedgehog" -> y <= 185 && (isLowlandOpen(biome) || isArableEdge(biome) || "urban".equals(biome) || "broadleaf_woodland".equals(biome));
+            case "wildernature:squirrel" -> y <= 235 && (isWoodland(biome) || "urban".equals(biome));
+            case "wildernature:owl" -> y <= 265 && (isWoodland(biome) || isArableEdge(biome) || isHeath(biome));
+            case "wildernature:dog" -> y <= 170 && (isLowlandOpen(biome) || "urban".equals(biome) || "arable".equals(biome));
+            case "wildernature:minisheep" -> y <= 290 && (isGrassland(biome) || isHeath(biome) || "rocky".equals(biome));
+            case "wildernature:bison" -> y <= 220 && ("improved_grassland".equals(biome) || "neutral_grassland".equals(biome) || isHeath(biome));
+            case "minecraft:cow" -> y <= 210 && (isLowlandOpen(biome) || "arable".equals(biome) || "urban".equals(biome));
+            case "minecraft:sheep" -> y <= 290 && (isGrassland(biome) || isHeath(biome) || "rocky".equals(biome) || "arable".equals(biome) || "urban".equals(biome));
+            case "minecraft:pig" -> y <= 230 && (isWoodland(biome) || isArableEdge(biome) || isLowlandOpen(biome));
+            case "minecraft:chicken" -> y <= 220 && (isLowlandOpen(biome) || isArableEdge(biome) || isWoodland(biome) || "urban".equals(biome));
+            case "minecraft:rabbit" -> y <= 285 && (isGrassland(biome) || isHeath(biome) || "rocky".equals(biome) || "arable".equals(biome));
+            case "minecraft:wolf" -> y >= 80 && y <= 260 && (isWoodland(biome) || isHeath(biome) || "acid_grassland".equals(biome));
+            case "minecraft:fox" -> y <= 245 && (spawnType == MobSpawnType.CHUNK_GENERATION || isLowLightOrNight(level, pos)) && (isWoodland(biome) || isArableEdge(biome) || isHeath(biome));
+            case "minecraft:bat" -> y <= 120 && (spawnType == MobSpawnType.CHUNK_GENERATION || isLowLightOrNight(level, pos));
             default -> true;
         };
     }
 
-    private static boolean isWaterOrCoast(String biome) {
+    private static boolean isLowLightOrNight(net.minecraft.world.level.ServerLevelAccessor level, BlockPos pos) {
+        return level.getLevel().isNight() || level.getLevel().getBrightness(LightLayer.BLOCK, pos) <= 7;
+    }
+
+    private static ResourceLocation biomeId(net.minecraft.world.level.ServerLevelAccessor level, BlockPos pos) {
+        return level.getBiome(pos).unwrapKey().map(ResourceKey::location).orElse(null);
+    }
+
+    private static boolean isUkGeoBiome(ResourceLocation biomeId) {
+        return biomeId != null && "ukgeo".equals(biomeId.getNamespace());
+    }
+
+    private static boolean isWaterOrWetland(String biome) {
         return "coastal_ocean".equals(biome) || "freshwater".equals(biome) || "wetland".equals(biome);
     }
 
@@ -135,12 +209,12 @@ public final class UkGeoAnimals {
 
     private static boolean isGrassland(String biome) {
         return "improved_grassland".equals(biome)
-            || "neutral_grassland".equals(biome)
-            || "calcareous_grassland".equals(biome)
-            || "acid_grassland".equals(biome);
+                || "neutral_grassland".equals(biome)
+                || "calcareous_grassland".equals(biome)
+                || "acid_grassland".equals(biome);
     }
 
-    private static boolean isLowlandGrassland(String biome) {
+    private static boolean isLowlandOpen(String biome) {
         return "improved_grassland".equals(biome) || "neutral_grassland".equals(biome) || "calcareous_grassland".equals(biome);
     }
 
@@ -148,13 +222,37 @@ public final class UkGeoAnimals {
         return "heath".equals(biome) || "acid_grassland".equals(biome);
     }
 
+    private static boolean isArableEdge(String biome) {
+        return "arable".equals(biome) || "neutral_grassland".equals(biome) || "calcareous_grassland".equals(biome) || "urban".equals(biome);
+    }
+
     private static int positionHash(BlockPos pos, String salt) {
-        long value = pos.asLong() ^ salt.hashCode() * 0x9E3779B97F4A7C15L;
+        long value = pos.asLong() ^ (long) salt.hashCode() * 0x9E3779B97F4A7C15L;
         value ^= value >>> 33;
         value *= 0xff51afd7ed558ccdL;
         value ^= value >>> 33;
         value *= 0xc4ceb9fe1a85ec53L;
         value ^= value >>> 33;
         return (int) value;
+    }
+
+    private static ResourceLocation id(String namespace, String path) {
+        return ResourceLocation.fromNamespaceAndPath(namespace, path);
+    }
+
+    private static void debug(String message, Object... args) {
+        if (DEBUG_ANIMAL_SPAWNS) {
+            LOGGER.info(message, args);
+        }
+    }
+
+    private record SpawnDecision(boolean allowed, String reason) {
+        static SpawnDecision allow() {
+            return new SpawnDecision(true, "allow");
+        }
+
+        static SpawnDecision block(String reason) {
+            return new SpawnDecision(false, reason);
+        }
     }
 }

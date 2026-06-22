@@ -1,0 +1,24 @@
+{
+  "type": "neoforge:add_spawns",
+  "biomes": "#ukgeo_animals:vanilla_upland",
+  "spawners": [
+    {
+      "type": "minecraft:sheep",
+      "weight": 10,
+      "minCount": 2,
+      "maxCount": 4
+    },
+    {
+      "type": "minecraft:rabbit",
+      "weight": 6,
+      "minCount": 1,
+      "maxCount": 3
+    },
+    {
+      "type": "minecraft:wolf",
+      "weight": 1,
+      "minCount": 1,
+      "maxCount": 2
+    }
+  ]
+}

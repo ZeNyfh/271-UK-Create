@@ -1,0 +1,12 @@
+{
+  "type": "neoforge:add_spawns",
+  "biomes": "#ukgeo_animals:bison",
+  "spawners": [
+    {
+      "type": "wildernature:bison",
+      "weight": 1,
+      "minCount": 1,
+      "maxCount": 2
+    }
+  ]
+}

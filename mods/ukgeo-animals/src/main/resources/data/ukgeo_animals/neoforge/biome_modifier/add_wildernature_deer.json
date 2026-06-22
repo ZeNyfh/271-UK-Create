@@ -1,0 +1,12 @@
+{
+  "type": "neoforge:add_spawns",
+  "biomes": "#ukgeo_animals:deer",
+  "spawners": [
+    {
+      "type": "wildernature:deer",
+      "weight": 12,
+      "minCount": 2,
+      "maxCount": 4
+    }
+  ]
+}

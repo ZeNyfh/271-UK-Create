@@ -1,0 +1,9 @@
+{
+  "replace": false,
+  "values": [
+    "ukgeo:arable",
+    "ukgeo:improved_grassland",
+    "ukgeo:neutral_grassland",
+    "ukgeo:urban"
+  ]
+}

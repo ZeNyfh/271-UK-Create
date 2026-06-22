@@ -1,0 +1,5 @@
+{
+  "type": "neoforge:remove_spawns",
+  "biomes": "#ukgeo_animals:all_ukgeo",
+  "entity_types": "#ukgeo_animals:blocked_wildernature"
+}

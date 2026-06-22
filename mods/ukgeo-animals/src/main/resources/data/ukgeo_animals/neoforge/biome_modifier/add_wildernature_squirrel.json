@@ -1,0 +1,12 @@
+{
+  "type": "neoforge:add_spawns",
+  "biomes": "#ukgeo_animals:squirrel",
+  "spawners": [
+    {
+      "type": "wildernature:squirrel",
+      "weight": 12,
+      "minCount": 1,
+      "maxCount": 3
+    }
+  ]
+}
