@@ -34,6 +34,12 @@ def export_cmd(
     max_size: int = typer.Option(4096, "--max-size", help="Longest side of the exported preview images. Use 0 for native tile resolution."),
     style: str = typer.Option("auto", "--style", help="Height layer style: auto or gray."),
     clean: bool = typer.Option(False, "--clean", help="Delete the output folder before writing previews."),
+    tile_size: int = typer.Option(256, "--tile-size", help="Visual and sample tile size in pixels."),
+    workers: int = typer.Option(0, "--workers", help="Tile encoder workers. Use 0 for a bounded auto value."),
+    visual_format: str = typer.Option("png", "--visual-format", help="Visual tile format: png or webp. Sample tiles are always lossless PNG."),
+    force: bool = typer.Option(False, "--force", help="Regenerate tile/image files even if they already exist."),
+    clean_stale: bool = typer.Option(False, "--clean-stale", help="Delete stale tile files that are no longer referenced by the generated manifest."),
+    profile: bool = typer.Option(False, "--profile", help="Print rough per-layer export timings."),
 ) -> None:
     """Export stackable PNG layers consumed by the hover map."""
     if max_size == 0:
@@ -53,7 +59,20 @@ def export_cmd(
             def advance(step: str) -> None:
                 progress.update(task_id, description=_progress_label(step), advance=1)
 
-            written = export_hover_previews(root, out, max_size=max_size, style=style, clean=clean, progress=advance)
+            written = export_hover_previews(
+                root,
+                out,
+                max_size=max_size,
+                style=style,
+                clean=clean,
+                tile_size=tile_size,
+                workers=workers,
+                visual_format=visual_format,
+                force=force,
+                clean_stale=clean_stale,
+                profile=profile,
+                progress=advance,
+            )
     except (FileNotFoundError, ValueError) as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1) from exc

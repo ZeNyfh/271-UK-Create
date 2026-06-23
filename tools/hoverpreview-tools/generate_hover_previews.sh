@@ -9,6 +9,12 @@ OUT_DIR=""
 MAX_SIZE="${MAX_SIZE:-12000}"
 STYLE="${STYLE:-auto}"
 HOVERPREVIEW_GPU="${HOVERPREVIEW_GPU:-auto}"
+HOVERPREVIEW_TILE_SIZE="${HOVERPREVIEW_TILE_SIZE:-256}"
+HOVERPREVIEW_WORKERS="${HOVERPREVIEW_WORKERS:-0}"
+HOVERPREVIEW_VISUAL_FORMAT="${HOVERPREVIEW_VISUAL_FORMAT:-png}"
+HOVERPREVIEW_FORCE="${HOVERPREVIEW_FORCE:-0}"
+HOVERPREVIEW_CLEAN_STALE="${HOVERPREVIEW_CLEAN_STALE:-0}"
+HOVERPREVIEW_PROFILE="${HOVERPREVIEW_PROFILE:-0}"
 DATA_DIR="${DATA_DIR:-$REPO_ROOT/data}"
 
 OS_TERRAIN_ZIP="${OS_TERRAIN_ZIP:-$DATA_DIR/terr50_gagg_gb.zip}"
@@ -91,6 +97,54 @@ while [[ $# -gt 0 ]]; do
       STYLE="${1#*=}"
       shift
       ;;
+    --tile-size)
+      if [[ $# -lt 2 ]]; then
+        echo "--tile-size requires a value." >&2
+        exit 2
+      fi
+      HOVERPREVIEW_TILE_SIZE="$2"
+      shift 2
+      ;;
+    --tile-size=*)
+      HOVERPREVIEW_TILE_SIZE="${1#*=}"
+      shift
+      ;;
+    --workers)
+      if [[ $# -lt 2 ]]; then
+        echo "--workers requires a value." >&2
+        exit 2
+      fi
+      HOVERPREVIEW_WORKERS="$2"
+      shift 2
+      ;;
+    --workers=*)
+      HOVERPREVIEW_WORKERS="${1#*=}"
+      shift
+      ;;
+    --visual-format)
+      if [[ $# -lt 2 ]]; then
+        echo "--visual-format requires png or webp." >&2
+        exit 2
+      fi
+      HOVERPREVIEW_VISUAL_FORMAT="$2"
+      shift 2
+      ;;
+    --visual-format=*)
+      HOVERPREVIEW_VISUAL_FORMAT="${1#*=}"
+      shift
+      ;;
+    --force)
+      HOVERPREVIEW_FORCE=1
+      shift
+      ;;
+    --clean-stale)
+      HOVERPREVIEW_CLEAN_STALE=1
+      shift
+      ;;
+    --profile)
+      HOVERPREVIEW_PROFILE=1
+      shift
+      ;;
     --help|-h)
       cat <<'HELP'
 Usage: generate_hover_previews.sh [ROOT] [OUT_DIR] [--regenerate TASKS]
@@ -99,6 +153,7 @@ Tasks: preview, height, rivers, vegetation, geology, ores, iron-overlay, clean, 
 Examples:
   ./generate_hover_previews.sh --regenerate preview
   ./generate_hover_previews.sh --regenerate rivers,ores,preview
+  HOVERPREVIEW_TILE_SIZE=256 HOVERPREVIEW_WORKERS=0 ./generate_hover_previews.sh
   REGENERATE=all ./generate_hover_previews.sh
 
 Interactive menu is shown only when stdin is a TTY and neither --regenerate nor REGENERATE is set.
@@ -486,9 +541,26 @@ run_iron_overlay() {
 run_preview() {
   require_manifest
   check_gpu
-  local args=("$PYTHON" -m hoverpreview_tools.cli "$ROOT" --out "$OUT_DIR" --max-size "$MAX_SIZE" --style "$STYLE")
+  local args=(
+    "$PYTHON" -m hoverpreview_tools.cli "$ROOT"
+    --out "$OUT_DIR"
+    --max-size "$MAX_SIZE"
+    --style "$STYLE"
+    --tile-size "$HOVERPREVIEW_TILE_SIZE"
+    --workers "$HOVERPREVIEW_WORKERS"
+    --visual-format "$HOVERPREVIEW_VISUAL_FORMAT"
+  )
   if has_task clean; then
     args+=(--clean)
+  fi
+  if is_truthy "$HOVERPREVIEW_FORCE"; then
+    args+=(--force)
+  fi
+  if is_truthy "$HOVERPREVIEW_CLEAN_STALE"; then
+    args+=(--clean-stale)
+  fi
+  if is_truthy "$HOVERPREVIEW_PROFILE"; then
+    args+=(--profile)
   fi
   "${HOVER_ENV[@]}" "${args[@]}"
   echo "Wrote hover preview stack to $OUT_DIR"

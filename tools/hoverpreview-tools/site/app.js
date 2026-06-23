@@ -23,10 +23,12 @@ const DEFAULT_VISIBLE_OVERLAYS = new Set(["surface", "vegetation", "rivers"]);
 const DEFAULT_VISIBLE_ORES = new Set(["coal", "iron", "copper", "zinc", "gold"]);
 const MAX_DEVICE_PIXEL_RATIO = 2;
 const DECODE_CHUNK_PIXELS = 192;
-const MAX_CONCURRENT_BITMAP_LOADS = 2;
+const MAX_TILE_BITMAPS = 512;
+const MAX_SAMPLE_TILES = 192;
+const MAX_CONCURRENT_BITMAP_LOADS = 10;
 const CHUNK_LOAD_DEBOUNCE_MS = 60;
 const DEFAULT_TILE_SIZE = 256;
-const SAMPLE_LOAD_PRIORITY = 50000;
+const SAMPLE_LOAD_PRIORITY = -10000;
 const MIN_MAP_ZOOM = 0.09;
 const MAX_DISPLAY_ZOOM_PERCENT = 500;
 const MAX_MAP_ZOOM = MIN_MAP_ZOOM + MAX_DISPLAY_ZOOM_PERCENT / 100;
@@ -109,6 +111,9 @@ const state = {
   chunkLoadRequestTimer: 0,
   samples: new Map(),
   sampleLoads: new Map(),
+  sampleTiles: new Map(),
+  sampleTileLoads: new Map(),
+  sampleGeneration: 0,
   animals: new Map(),
   animalsLoaded: false,
   animalsLoadError: null,
@@ -334,8 +339,6 @@ async function loadManifest(url) {
     addLayer(layer);
   }
 
-  const height = state.layers.get("height");
-  if (height) loadSample(height.layer).catch(() => undefined);
   loadAnimalsList(manifest).catch(() => undefined);
 
   elements.empty.hidden = true;
@@ -898,7 +901,8 @@ function layerLoadPriority(layer, mip, region, crop) {
 }
 
 function fallbackLayerRegion(layer, crop, preferredMip) {
-  const candidates = Array.from(state.layerBitmaps.values()).reverse();
+  const candidates = Array.from(state.layerBitmaps.values())
+    .sort((a, b) => (Number(b.lastUsed) || 0) - (Number(a.lastUsed) || 0));
   for (const decoded of candidates) {
     if (!decoded.key.startsWith(`${layer.name}\n`)) continue;
     if (Number(decoded.mip.factor) === Number(preferredMip.factor)) continue;
@@ -984,7 +988,8 @@ async function loadLayerBitmap(layer, mip, region, key, priority) {
     if (typeof bitmap.close === "function") bitmap.close();
     return;
   }
-  state.layerBitmaps.set(key, { key, bitmap, mip, region });
+  state.layerBitmaps.set(key, { key, bitmap, mip, region, lastUsed: performance.now() });
+  pruneLayerBitmapCache(state.activeLayerBitmapKeys);
   scheduleChunkRender();
 }
 
@@ -1009,6 +1014,7 @@ async function fetchBlob(url) {
 function drawLayerBitmap(ctx, decoded, crop) {
   const drawCrop = intersectImageCrop(crop, decoded);
   if (!drawCrop) return;
+  decoded.lastUsed = performance.now();
   const factor = Number(decoded.mip.factor) || 1;
   const sx = drawCrop.left / factor - decoded.region.left;
   const sy = drawCrop.top / factor - decoded.region.top;
@@ -1031,8 +1037,18 @@ function releaseLayerBitmaps(layerName) {
 }
 
 function releaseUnusedLayerBitmaps(activeKeys) {
-  for (const [key, decoded] of state.layerBitmaps) {
-    if (activeKeys.has(key)) continue;
+  pruneLayerBitmapCache(activeKeys);
+}
+
+function pruneLayerBitmapCache(activeKeys = new Set()) {
+  if (state.layerBitmaps.size <= MAX_TILE_BITMAPS) return;
+
+  const candidates = Array.from(state.layerBitmaps.entries())
+    .filter(([key]) => !activeKeys.has(key))
+    .sort((a, b) => (Number(a[1].lastUsed) || 0) - (Number(b[1].lastUsed) || 0));
+
+  for (const [key, decoded] of candidates) {
+    if (state.layerBitmaps.size <= MAX_TILE_BITMAPS) break;
     if (typeof decoded.bitmap.close === "function") decoded.bitmap.close();
     state.layerBitmaps.delete(key);
   }
@@ -1063,6 +1079,13 @@ function clearBitmapCaches() {
   }
   state.samples.clear();
   state.sampleLoads.clear();
+  for (const tile of state.sampleTiles.values()) {
+    tile.canvas.width = 0;
+    tile.canvas.height = 0;
+  }
+  state.sampleTiles.clear();
+  state.sampleTileLoads.clear();
+  state.sampleGeneration += 1;
 }
 
 function screenToImage(clientX, clientY) {
@@ -1579,6 +1602,10 @@ function imageToViewer(imageX, imageY) {
 }
 
 async function loadSample(layer, imageX = null, imageY = null) {
+  if (layer.sample_tiles && Number.isFinite(imageX) && Number.isFinite(imageY)) {
+    return loadSampleTile(layer, imageX, imageY);
+  }
+
   const sampleFile = layer.browser_sample_file || layer.sample_file;
   if (!sampleFile && !layer.sample_tiles) return;
   const crop = sampleCropFor(layer, imageX, imageY);
@@ -1586,6 +1613,7 @@ async function loadSample(layer, imageX = null, imageY = null) {
   if (existing && sampleContains(existing, imageX, imageY)) return;
   const key = `${layer.name}\n${crop.left},${crop.top},${crop.width},${crop.height}`;
   if (state.sampleLoads.has(key)) return state.sampleLoads.get(key);
+  const generation = state.sampleGeneration;
   const load = (async () => {
     const decoded = await enqueueBitmapLoad(async () => {
       const entry = state.layers.get(layer.name);
@@ -1596,6 +1624,10 @@ async function loadSample(layer, imageX = null, imageY = null) {
       return decodeSampleBitmap(blob, crop);
     }, null, SAMPLE_LOAD_PRIORITY);
     if (!decoded) return;
+    if (generation !== state.sampleGeneration) {
+      if (typeof decoded.bitmap.close === "function") decoded.bitmap.close();
+      return;
+    }
     const entry = state.layers.get(layer.name);
     if (layer.name !== "height" && (!entry || !shouldLoadSample(entry))) {
       if (typeof decoded.bitmap.close === "function") decoded.bitmap.close();
@@ -1615,11 +1647,68 @@ async function loadSample(layer, imageX = null, imageY = null) {
       height: canvas.height,
       originX: crop.left,
       originY: crop.top,
-      heightLayer: layer.name === "height",
+      encoding: sampleEncodingFor(layer),
     });
-    if (layer.name !== "height" && state.lastStatusPoint) requestAnimationFrame(() => updateStatus(state.lastStatusPoint));
+    if (state.lastStatusPoint) requestAnimationFrame(() => updateStatus(state.lastStatusPoint));
   })().finally(() => state.sampleLoads.delete(key));
   state.sampleLoads.set(key, load);
+  return load;
+}
+
+async function loadSampleTile(layer, imageX, imageY) {
+  const tile = sampleTileFor(layer, imageX, imageY);
+  if (!tile) return;
+  const key = sampleTileCacheKey(layer, tile.tileX, tile.tileY);
+  if (state.sampleTiles.has(key)) return;
+  if (state.sampleTileLoads.has(key)) return state.sampleTileLoads.get(key);
+  const generation = state.sampleGeneration;
+
+  const load = (async () => {
+    const decoded = await enqueueBitmapLoad(async () => {
+      const entry = state.layers.get(layer.name);
+      if (layer.name !== "height" && (!entry || !shouldLoadSample(entry))) return null;
+      const blob = await fetchBlob(sampleRegionUrl(layer, tile));
+      const bitmap = await createImageBitmap(blob);
+      return { bitmap, width: bitmap.width, height: bitmap.height };
+    }, null, SAMPLE_LOAD_PRIORITY);
+
+    if (!decoded) return;
+    if (generation !== state.sampleGeneration) {
+      if (typeof decoded.bitmap.close === "function") decoded.bitmap.close();
+      return;
+    }
+    const entry = state.layers.get(layer.name);
+    if (layer.name !== "height" && (!entry || !shouldLoadSample(entry))) {
+      if (typeof decoded.bitmap.close === "function") decoded.bitmap.close();
+      return;
+    }
+
+    const canvas = document.createElement("canvas");
+    canvas.width = decoded.width;
+    canvas.height = decoded.height;
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    ctx.drawImage(decoded.bitmap, 0, 0);
+    if (typeof decoded.bitmap.close === "function") decoded.bitmap.close();
+
+    state.sampleTiles.set(key, {
+      key,
+      layerName: layer.name,
+      canvas,
+      ctx,
+      width: canvas.width,
+      height: canvas.height,
+      originX: tile.left,
+      originY: tile.top,
+      tileX: tile.tileX,
+      tileY: tile.tileY,
+      encoding: sampleEncodingFor(layer),
+      lastUsed: performance.now(),
+    });
+    pruneSampleTileCache();
+    if (state.lastStatusPoint) requestAnimationFrame(() => updateStatus(state.lastStatusPoint));
+  })().finally(() => state.sampleTileLoads.delete(key));
+
+  state.sampleTileLoads.set(key, load);
   return load;
 }
 
@@ -1639,20 +1728,8 @@ async function decodeSampleBitmap(blob, crop) {
 
 function sampleCropFor(layer, imageX, imageY) {
   if (layer.sample_tiles && Number.isFinite(imageX) && Number.isFinite(imageY)) {
-    const tileSize = Number(layer.sample_tiles.size) || DEFAULT_TILE_SIZE;
-    const centreX = Math.max(0, Math.min(state.imageWidth - 1, Math.floor(imageX)));
-    const centreY = Math.max(0, Math.min(state.imageHeight - 1, Math.floor(imageY)));
-    const left = Math.floor(centreX / tileSize) * tileSize;
-    const top = Math.floor(centreY / tileSize) * tileSize;
-    return {
-      tile: true,
-      left,
-      top,
-      width: Math.min(tileSize, state.imageWidth - left),
-      height: Math.min(tileSize, state.imageHeight - top),
-      tileX: Math.floor(centreX / tileSize),
-      tileY: Math.floor(centreY / tileSize),
-    };
+    const tile = sampleTileFor(layer, imageX, imageY);
+    if (tile) return { tile: true, ...tile };
   }
   if (layer.name === "height" || !Number.isFinite(imageX) || !Number.isFinite(imageY)) {
     return { full: true, left: 0, top: 0, width: state.imageWidth, height: state.imageHeight };
@@ -1671,6 +1748,29 @@ function sampleCropFor(layer, imageX, imageY) {
   };
 }
 
+function sampleTileFor(layer, imageX, imageY) {
+  if (!layer.sample_tiles || !Number.isFinite(imageX) || !Number.isFinite(imageY)) return null;
+  const tileSize = Number(layer.sample_tiles.size) || DEFAULT_TILE_SIZE;
+  const centreX = Math.max(0, Math.min(state.imageWidth - 1, Math.floor(imageX)));
+  const centreY = Math.max(0, Math.min(state.imageHeight - 1, Math.floor(imageY)));
+  const tileX = Math.floor(centreX / tileSize);
+  const tileY = Math.floor(centreY / tileSize);
+  const left = tileX * tileSize;
+  const top = tileY * tileSize;
+  return {
+    left,
+    top,
+    width: Math.min(tileSize, state.imageWidth - left),
+    height: Math.min(tileSize, state.imageHeight - top),
+    tileX,
+    tileY,
+  };
+}
+
+function sampleTileCacheKey(layer, tileX, tileY) {
+  return `${layer.name}\n${tileX},${tileY}`;
+}
+
 function sampleRegionUrl(layer, crop) {
   return new URL(
     String(layer.sample_tiles.template).replace("{x}", String(crop.tileX)).replace("{y}", String(crop.tileY)),
@@ -1686,33 +1786,82 @@ function sampleContains(sample, imageX, imageY) {
 }
 
 function releaseSample(layerName) {
-  if (layerName === "height") return;
   const sample = state.samples.get(layerName);
-  if (!sample) return;
-  sample.canvas.width = 0;
-  sample.canvas.height = 0;
-  state.samples.delete(layerName);
+  if (sample) {
+    sample.canvas.width = 0;
+    sample.canvas.height = 0;
+    state.samples.delete(layerName);
+  }
+  for (const [key, tile] of state.sampleTiles) {
+    if (tile.layerName !== layerName) continue;
+    tile.canvas.width = 0;
+    tile.canvas.height = 0;
+    state.sampleTiles.delete(key);
+  }
 }
 
 function samplePixel(layerName, imageX, imageY) {
   const rgba = samplePixelRgba(layerName, imageX, imageY);
   if (!rgba) return undefined;
-  const sample = state.samples.get(layerName);
-  if (!sample?.heightLayer) return rgba[0];
+  const entry = state.layers.get(layerName);
+  const encoding = sampleEncodingFor(entry?.layer);
+  if (layerName !== "height" && !isHeightEncoding(encoding)) return rgba[0];
   const encoded = rgba[0] + rgba[1] * 256;
   return encoded === 0 ? null : encoded - 32768;
 }
 
 function samplePixelRgba(layerName, imageX, imageY) {
+  const entry = state.layers.get(layerName);
+  if (entry?.layer?.sample_tiles) {
+    const tileInfo = sampleTileFor(entry.layer, imageX, imageY);
+    if (!tileInfo) return undefined;
+    const key = sampleTileCacheKey(entry.layer, tileInfo.tileX, tileInfo.tileY);
+    const tile = state.sampleTiles.get(key);
+    if (!tile) {
+      if (layerName === "height" || shouldLoadSample(entry)) loadSample(entry.layer, imageX, imageY).catch(() => undefined);
+      return undefined;
+    }
+    tile.lastUsed = performance.now();
+    const x = Math.max(0, Math.min(tile.width - 1, Math.floor(imageX) - tile.originX));
+    const y = Math.max(0, Math.min(tile.height - 1, Math.floor(imageY) - tile.originY));
+    return tile.ctx.getImageData(x, y, 1, 1).data;
+  }
+
   const sample = state.samples.get(layerName);
   if (!sample || !sampleContains(sample, imageX, imageY)) {
-    const entry = state.layers.get(layerName);
     if (entry && (layerName === "height" || shouldLoadSample(entry))) loadSample(entry.layer, imageX, imageY).catch(() => undefined);
     return undefined;
   }
   const x = Math.max(0, Math.min(sample.width - 1, Math.floor(imageX) - sample.originX));
   const y = Math.max(0, Math.min(sample.height - 1, Math.floor(imageY) - sample.originY));
   return sample.ctx.getImageData(x, y, 1, 1).data;
+}
+
+function sampleEncodingFor(layer) {
+  if (!layer) return "";
+  return String(
+    layer.sample_tiles?.encoding ||
+    layer.browser_sample_encoding ||
+    layer.sample_encoding ||
+    ""
+  ).toLowerCase();
+}
+
+function isHeightEncoding(encoding) {
+  return String(encoding || "").includes("signed-decimetres") || String(encoding || "").includes("height");
+}
+
+function pruneSampleTileCache() {
+  if (state.sampleTiles.size <= MAX_SAMPLE_TILES) return;
+  const candidates = Array.from(state.sampleTiles.entries())
+    .sort((a, b) => (Number(a[1].lastUsed) || 0) - (Number(b[1].lastUsed) || 0));
+
+  for (const [key, tile] of candidates) {
+    if (state.sampleTiles.size <= MAX_SAMPLE_TILES) break;
+    tile.canvas.width = 0;
+    tile.canvas.height = 0;
+    state.sampleTiles.delete(key);
+  }
 }
 
 function shouldLoadSample(entry) {

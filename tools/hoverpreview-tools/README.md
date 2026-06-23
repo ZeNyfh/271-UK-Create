@@ -18,12 +18,53 @@ By default, artifacts are written to `hoverpreviews/` in the current dataset
 directory. The export contains:
 
 - `hover_manifest.json` metadata.
-- `layers/` PNG map layers.
-- `mips/` downsampled layer images for fast zoomed-out rendering.
-- `tiles/` pre-cut visual tiles used by the browser for fast, low-memory
-  panning and zooming.
-- `samples/` images used by the website to report height and layer values under
-  the pointer.
+- `layers/` full-resolution visual layer images.
+- `mips/` downsampled visual layer images for fast zoomed-out rendering.
+- `tiles/` a slippy-map-style tile pyramid for every visual MIP level.
+- `samples/` exact hover-data sample images.
+- `sample_tiles/` exact lossless PNG sample tiles used for hover reads.
+
+The browser chooses a MIP level for the current zoom, loads only visible tiles,
+and keeps a bounded least-recently-used bitmap cache. Hover status reads come
+from `sample_tiles/`, not from visual RGB tiles, so categorical classes and
+height values stay exact even when visual MIPs are smoothed.
+
+Sample tiles are always PNG/lossless. Visual tiles default to PNG and may be
+written as WebP with `--visual-format webp`; do not use WebP for sample/data
+tiles because ore, vegetation, river, and height values must be exact.
+
+Useful export options:
+
+```bash
+./generate_hover_previews.sh --tile-size 256 --workers 8 --visual-format png
+./generate_hover_previews.sh --force --clean-stale --profile
+```
+
+Equivalent environment defaults are supported by the wrapper:
+
+```bash
+HOVERPREVIEW_TILE_SIZE=256 \
+HOVERPREVIEW_WORKERS=8 \
+HOVERPREVIEW_VISUAL_FORMAT=png \
+HOVERPREVIEW_MAX_SIZE=4096 \
+./generate_hover_previews.sh
+```
+
+CLI options exposed by `python -m hoverpreview_tools.cli`:
+
+- `--tile-size`: visual and sample tile size in pixels.
+- `--workers`: bounded tile encoder worker count; `0` means auto.
+- `--visual-format png|webp`: visual output format; sample tiles remain PNG.
+- `--force`: rewrite existing generated files.
+- `--clean-stale`: remove tile files no longer referenced by the manifest.
+- `--profile`: print rough per-layer generation timings.
+- Existing options `--out`, `--max-size`, `--style`, and `--clean` remain
+  supported.
+
+The generated manifest explicitly describes every layer’s visual MIPs, visual
+tile templates, sample tile templates, and sample encodings. Newer browser code
+uses that metadata instead of hardcoding paths; older exports still fall back to
+full/cropped sample images where tile metadata is missing.
 
 ## Optional GPU rendering
 
@@ -107,3 +148,20 @@ serving only `site/` do not match the published path layout.
 - Middle/right drag the map to pan.
 - Left drag measures a distance; left click copies the Minecraft `x z` pair to
   the clipboard.
+- Use the layer and ore controls to toggle overlays.
+- Use **Show animals** beside the ore control to include or hide habitat animal
+  lists in the hover status. Animal lookup uses the vegetation/landcover sample
+  value first and falls back to aliases from `animals.txt`.
+
+## Validation
+
+From the repository root:
+
+```bash
+cd tools/hoverpreview-tools
+python -m pytest
+node --check site/app.js
+```
+
+Full preview generation can be expensive on the complete UK dataset; use
+`./generate_hover_previews.sh --profile` when regenerating production assets.

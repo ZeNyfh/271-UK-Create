@@ -6,6 +6,8 @@ import json
 import math
 import os
 import shutil
+import time
+from concurrent.futures import ThreadPoolExecutor
 from collections.abc import Callable
 from typing import Any
 
@@ -19,7 +21,9 @@ from ukgeo.tiles import HEIGHT_NODATA
 
 HOVER_PREVIEW_FORMAT = "ukgeo-hoverpreviews-v1"
 HOVER_PREVIEW_INDEX = "hover_manifest.json"
-VISUAL_TILE_SIZE = 256
+DEFAULT_TILE_SIZE = 256
+VISUAL_TILE_SIZE = DEFAULT_TILE_SIZE
+SUPPORTED_VISUAL_FORMATS = {"png", "webp"}
 PREVIEW_RIVER_WIDTH_SCALE = 0.18
 PREVIEW_RIVER_MIN_RADIUS = 1
 PREVIEW_RIVER_MAX_RADIUS = 6
@@ -60,15 +64,36 @@ def export_hover_previews(
     max_size: int = 4096,
     style: str = "auto",
     clean: bool = False,
+    tile_size: int = DEFAULT_TILE_SIZE,
+    workers: int | None = None,
+    visual_format: str = "png",
+    force: bool = False,
+    clean_stale: bool = False,
+    profile: bool = False,
     progress: Callable[[str], None] | None = None,
 ) -> Path:
     manifest = read_manifest(root / "manifest.json")
-    tile_size = int(manifest["tile_size"])
+    source_tile_size = int(manifest["tile_size"])
+    preview_tile_size = _validate_tile_size(tile_size)
+    encoder_workers = _resolve_workers(workers)
+    visual_format = visual_format.lower().strip()
+    if visual_format not in SUPPORTED_VISUAL_FORMATS:
+        raise ValueError(f"Unsupported visual format {visual_format!r}; expected one of {sorted(SUPPORTED_VISUAL_FORMATS)}")
     scale, tiles_x, tiles_z = hover_preview_scale(manifest, max_size)
+    timings: list[tuple[str, float]] = []
 
     def report(step: str) -> None:
         if progress is not None:
             progress(step)
+
+    def timed(step: str) -> Callable[[], None]:
+        start = time.perf_counter()
+
+        def done() -> None:
+            if profile:
+                timings.append((step, time.perf_counter() - start))
+
+        return done
 
     if clean and out.exists():
         shutil.rmtree(out)
@@ -77,85 +102,137 @@ def export_hover_previews(
     (out / "mips").mkdir(parents=True, exist_ok=True)
 
     report("height")
-    height_values = _read_height_preview(root, manifest, tiles_x, tiles_z, tile_size, scale)
+    done = timed("height")
+    height_values = _read_height_preview(root, manifest, tiles_x, tiles_z, source_tile_size, scale)
     base_size = (height_values.shape[1], height_values.shape[0])
-    height_mips = _save_visual_layer(out, _height_image(height_values, style).convert("RGB"), "layers/height.png")
+    height_mips = _save_visual_layer(
+        out,
+        _height_image(height_values, style).convert("RGB"),
+        _visual_layer_path("layers/height", visual_format),
+        tile_size=preview_tile_size,
+        visual_format=visual_format,
+        workers=encoder_workers,
+        force=force,
+        resampling=Image.Resampling.BILINEAR,
+    )
     _height_sample_image(height_values).save(out / "samples" / "height_u16.png")
     height_browser_sample = _height_browser_sample_image(height_values)
     height_browser_sample.save(out / "samples" / "height_rgb.png")
-    height_sample_tiles = _save_sample_tiles(out, height_browser_sample, "samples/height_rgb.png")
+    height_sample_tiles = _save_sample_tiles(
+        out,
+        height_browser_sample,
+        "samples/height_rgb.png",
+        tile_size=preview_tile_size,
+        encoding="signed-decimetres-rgb-le-offset-32768",
+        workers=encoder_workers,
+        force=force,
+    )
     del height_values
     gc.collect()
+    done()
 
     layers: list[dict[str, Any]] = [
         {
             "name": "height",
             "kind": "base",
-            "file": "layers/height.png",
+            "file": height_mips[0]["file"],
             "mips": height_mips,
             "sample_file": "samples/height_u16.png",
             "browser_sample_file": "samples/height_rgb.png",
-            "browser_sample_encoding": "signed-decimetres-rg-le-offset-32768",
+            "browser_sample_encoding": "signed-decimetres-rgb-le-offset-32768",
             "sample_tiles": height_sample_tiles,
         },
     ]
 
     if "surface_geology" in manifest and (root / manifest["surface_geology"]["path"]).exists():
         report("surface")
-        values = _read_u8_preview(root, manifest["surface_geology"]["path"], tiles_x, tiles_z, tile_size, scale, missing_ok=False)
+        done = timed("surface")
+        values = _read_u8_preview(root, manifest["surface_geology"]["path"], tiles_x, tiles_z, source_tile_size, scale, missing_ok=False)
         visual = _fit_image(_categorical_overlay_image(values, manifest["surface_geology"].get("classes", {}), alpha=166, transparent_zero=False), base_size)
         sample = _fit_image(Image.fromarray(values, mode="L"), base_size)
-        mips = _save_visual_layer(out, visual, "layers/surface.png")
+        mips = _save_visual_layer(
+            out,
+            visual,
+            _visual_layer_path("layers/surface", visual_format),
+            tile_size=preview_tile_size,
+            visual_format=visual_format,
+            workers=encoder_workers,
+            force=force,
+            resampling=Image.Resampling.NEAREST,
+        )
         sample.save(out / "samples" / "surface_u8.png")
         layers.append({
             "name": "surface",
             "kind": "overlay",
-            "file": "layers/surface.png",
+            "file": mips[0]["file"],
             "mips": mips,
             "sample_file": "samples/surface_u8.png",
-            "sample_tiles": _save_sample_tiles(out, sample, "samples/surface_u8.png"),
+            "sample_tiles": _save_sample_tiles(out, sample, "samples/surface_u8.png", tile_size=preview_tile_size, encoding="u8", workers=encoder_workers, force=force),
         })
         del values, visual, sample
         gc.collect()
+        done()
 
     if "vegetation" in manifest and (root / manifest["vegetation"]["path"]).exists():
         report("vegetation")
+        done = timed("vegetation")
         values = read_vegetation_preview(root, manifest, scale, missing_ok=False)
         visual = _fit_image(_categorical_overlay_image(values, manifest["vegetation"].get("classes", {}), alpha=176, transparent_zero=True), base_size)
         sample = _fit_image(Image.fromarray(values, mode="L"), base_size)
-        mips = _save_visual_layer(out, visual, "layers/vegetation.png")
+        mips = _save_visual_layer(
+            out,
+            visual,
+            _visual_layer_path("layers/vegetation", visual_format),
+            tile_size=preview_tile_size,
+            visual_format=visual_format,
+            workers=encoder_workers,
+            force=force,
+            resampling=Image.Resampling.NEAREST,
+        )
         sample.save(out / "samples" / "vegetation_u8.png")
         layers.append({
             "name": "vegetation",
             "kind": "overlay",
-            "file": "layers/vegetation.png",
+            "file": mips[0]["file"],
             "mips": mips,
             "sample_file": "samples/vegetation_u8.png",
-            "sample_tiles": _save_sample_tiles(out, sample, "samples/vegetation_u8.png"),
+            "sample_tiles": _save_sample_tiles(out, sample, "samples/vegetation_u8.png", tile_size=preview_tile_size, encoding="u8", workers=encoder_workers, force=force),
         })
         del values, visual, sample
         gc.collect()
+        done()
 
     if "rivers" in manifest and (root / manifest["rivers"]["path"]).exists():
         report("rivers")
-        values = _read_u8_preview(root, manifest["rivers"]["path"], tiles_x, tiles_z, tile_size, scale, missing_ok=False)
-        width_values, width_metadata = _read_river_width_preview(root, manifest, tiles_x, tiles_z, tile_size, scale)
+        done = timed("rivers")
+        values = _read_u8_preview(root, manifest["rivers"]["path"], tiles_x, tiles_z, source_tile_size, scale, missing_ok=False)
+        width_values, width_metadata = _read_river_width_preview(root, manifest, tiles_x, tiles_z, source_tile_size, scale)
         visual = _fit_image(_river_overlay_image(values, width_values, width_metadata["source"]), base_size)
         sample = _fit_image(Image.fromarray(values, mode="L"), base_size)
-        mips = _save_visual_layer(out, visual, "layers/rivers.png")
+        mips = _save_visual_layer(
+            out,
+            visual,
+            _visual_layer_path("layers/rivers", visual_format),
+            tile_size=preview_tile_size,
+            visual_format=visual_format,
+            workers=encoder_workers,
+            force=force,
+            resampling=Image.Resampling.BILINEAR,
+        )
         sample.save(out / "samples" / "rivers_u8.png")
         layer_entry = {
             "name": "rivers",
             "kind": "overlay",
-            "file": "layers/rivers.png",
+            "file": mips[0]["file"],
             "mips": mips,
             "sample_file": "samples/rivers_u8.png",
-            "sample_tiles": _save_sample_tiles(out, sample, "samples/rivers_u8.png"),
+            "sample_tiles": _save_sample_tiles(out, sample, "samples/rivers_u8.png", tile_size=preview_tile_size, encoding="u8", workers=encoder_workers, force=force),
             "preview": width_metadata,
         }
         layers.append(layer_entry)
         del values, width_values, visual, sample
         gc.collect()
+        done()
 
     ore_dir = out / "layers" / "ores"
     ore_sample_dir = out / "samples" / "ores"
@@ -168,11 +245,21 @@ def export_hover_previews(
         if not (root / layer["path"]).exists():
             continue
         report(f"ore:{ore}")
-        values = _read_u8_preview(root, layer["path"], tiles_x, tiles_z, tile_size, scale, missing_ok=True)
+        done = timed(f"ore:{ore}")
+        values = _read_u8_preview(root, layer["path"], tiles_x, tiles_z, source_tile_size, scale, missing_ok=True)
         visual = _fit_image(_ore_overlay_image(values, ore), base_size)
         sample = _fit_image(Image.fromarray(values, mode="L"), base_size)
         sample_path = ore_sample_dir / f"{ore}_u8.png"
-        mips = _save_visual_layer(out, visual, f"layers/ores/{ore}.png")
+        mips = _save_visual_layer(
+            out,
+            visual,
+            _visual_layer_path(f"layers/ores/{ore}", visual_format),
+            tile_size=preview_tile_size,
+            visual_format=visual_format,
+            workers=encoder_workers,
+            force=force,
+            resampling=Image.Resampling.BILINEAR,
+        )
         sample.save(sample_path)
         sample_file = f"samples/ores/{ore}_u8.png"
         ore_layers.append(
@@ -180,14 +267,15 @@ def export_hover_previews(
                 "name": f"ore:{ore}",
                 "ore": ore,
                 "kind": "ore",
-                "file": f"layers/ores/{ore}.png",
+                "file": mips[0]["file"],
                 "mips": mips,
                 "sample_file": sample_file,
-                "sample_tiles": _save_sample_tiles(out, sample, sample_file),
+                "sample_tiles": _save_sample_tiles(out, sample, sample_file, tile_size=preview_tile_size, encoding="u8", workers=encoder_workers, force=force),
             }
         )
         del values, visual, sample
         gc.collect()
+        done()
     layers.extend(ore_layers)
 
     report("manifest")
@@ -196,7 +284,12 @@ def export_hover_previews(
         "scale": scale,
         "max_size": max_size,
         "style": style,
-        "tile_size": tile_size,
+        "tile_pyramid": {
+            "tile_size": preview_tile_size,
+            "visual_format": visual_format,
+            "sample_format": "png",
+        },
+        "tile_size": source_tile_size,
         "image_width": base_size[0],
         "image_height": base_size[1],
         "world": manifest["world"],
@@ -212,9 +305,24 @@ def export_hover_previews(
         },
         "layers": layers,
     }
+    index["generation"] = {
+        "tile_size": preview_tile_size,
+        "workers": encoder_workers,
+        "visual_format": visual_format,
+        "force": force,
+        "clean_stale": clean_stale,
+    }
+    if profile:
+        index["generation"]["timings_seconds"] = {step: round(seconds, 3) for step, seconds in timings}
     with (out / HOVER_PREVIEW_INDEX).open("w", encoding="utf-8") as fh:
         json.dump(index, fh, indent=2)
         fh.write("\n")
+    _write_cache_metadata(out, index["generation"], layers)
+    if clean_stale:
+        _clean_stale_outputs(out, layers)
+    if profile and progress is None:
+        for step, seconds in timings:
+            print(f"{step}: {seconds:.3f}s")
     return out
 
 
@@ -334,73 +442,213 @@ def _minecraft_origin(manifest: dict[str, Any]) -> dict[str, Any]:
     return origin
 
 
-def _save_visual_layer(root: Path, image: Image.Image, relative_path: str) -> list[dict[str, Any]]:
+def _validate_tile_size(value: int) -> int:
+    tile_size = int(value)
+    if tile_size <= 0:
+        raise ValueError("--tile-size must be positive")
+    return tile_size
+
+
+def _resolve_workers(value: int | None) -> int:
+    if value is None or value <= 0:
+        return max(1, min(8, os.cpu_count() or 1))
+    return max(1, int(value))
+
+
+def _visual_layer_path(stem: str, visual_format: str) -> str:
+    return f"{stem}.{visual_format}"
+
+
+def _save_visual_layer(
+    root: Path,
+    image: Image.Image,
+    relative_path: str,
+    *,
+    tile_size: int = DEFAULT_TILE_SIZE,
+    visual_format: str = "png",
+    workers: int = 1,
+    force: bool = True,
+    resampling: Image.Resampling = Image.Resampling.BILINEAR,
+) -> list[dict[str, Any]]:
     path = root / relative_path
     path.parent.mkdir(parents=True, exist_ok=True)
-    image.save(path)
+    _save_image(path, image, visual_format, force=force)
     mips: list[dict[str, Any]] = [
-        _visual_mip_entry(root, image, relative_path, factor=1, file=relative_path)
+        _visual_mip_entry(root, image, relative_path, factor=1, file=relative_path, tile_size=tile_size, visual_format=visual_format, workers=workers, force=force)
     ]
     factor = 2
     current = image
     while max(current.size) > 512:
         size = (max(1, math.ceil(image.width / factor)), max(1, math.ceil(image.height / factor)))
-        current = image.resize(size, Image.Resampling.BILINEAR)
+        current = image.resize(size, resampling)
         mip_path = root / "mips" / str(factor) / relative_path
         mip_path.parent.mkdir(parents=True, exist_ok=True)
-        current.save(mip_path)
+        _save_image(mip_path, current, visual_format, force=force)
         mips.append(
-            _visual_mip_entry(root, current, relative_path, factor=factor, file=f"mips/{factor}/{relative_path}")
+            _visual_mip_entry(root, current, relative_path, factor=factor, file=f"mips/{factor}/{relative_path}", tile_size=tile_size, visual_format=visual_format, workers=workers, force=force)
         )
         factor *= 2
     return mips
 
 
-def _visual_mip_entry(root: Path, image: Image.Image, relative_path: str, *, factor: int, file: str) -> dict[str, Any]:
-    tile_template = _save_visual_tiles(root, image, relative_path, factor)
+def _visual_mip_entry(
+    root: Path,
+    image: Image.Image,
+    relative_path: str,
+    *,
+    factor: int,
+    file: str,
+    tile_size: int = DEFAULT_TILE_SIZE,
+    visual_format: str = "png",
+    workers: int = 1,
+    force: bool = True,
+) -> dict[str, Any]:
+    tile_template = _save_visual_tiles(root, image, relative_path, factor, tile_size=tile_size, visual_format=visual_format, workers=workers, force=force)
     return {
         "factor": factor,
         "file": file,
         "width": image.width,
         "height": image.height,
         "tiles": {
-            "size": VISUAL_TILE_SIZE,
+            "size": tile_size,
             "template": tile_template,
-            "columns": math.ceil(image.width / VISUAL_TILE_SIZE),
-            "rows": math.ceil(image.height / VISUAL_TILE_SIZE),
+            "columns": math.ceil(image.width / tile_size),
+            "rows": math.ceil(image.height / tile_size),
+            "format": visual_format,
         },
     }
 
 
-def _save_visual_tiles(root: Path, image: Image.Image, relative_path: str, factor: int) -> str:
+def _save_visual_tiles(
+    root: Path,
+    image: Image.Image,
+    relative_path: str,
+    factor: int,
+    *,
+    tile_size: int = DEFAULT_TILE_SIZE,
+    visual_format: str = "png",
+    workers: int = 1,
+    force: bool = True,
+) -> str:
     stem = str(Path(relative_path).with_suffix(""))
     tile_dir = root / "tiles" / str(factor) / stem
     tile_dir.mkdir(parents=True, exist_ok=True)
-    for top in range(0, image.height, VISUAL_TILE_SIZE):
-        tile_z = top // VISUAL_TILE_SIZE
-        for left in range(0, image.width, VISUAL_TILE_SIZE):
-            tile_x = left // VISUAL_TILE_SIZE
-            tile = image.crop((left, top, min(image.width, left + VISUAL_TILE_SIZE), min(image.height, top + VISUAL_TILE_SIZE)))
-            tile.save(tile_dir / f"{tile_x}_{tile_z}.png")
-    return f"tiles/{factor}/{stem}/{{x}}_{{y}}.png"
+    jobs = []
+    for top in range(0, image.height, tile_size):
+        tile_z = top // tile_size
+        for left in range(0, image.width, tile_size):
+            tile_x = left // tile_size
+            box = (left, top, min(image.width, left + tile_size), min(image.height, top + tile_size))
+            jobs.append((box, tile_dir / f"{tile_x}_{tile_z}.{visual_format}"))
+    _save_tiles(image, jobs, visual_format, workers=workers, force=force)
+    return f"tiles/{factor}/{stem}/{{x}}_{{y}}.{visual_format}"
 
 
-def _save_sample_tiles(root: Path, image: Image.Image, relative_path: str) -> dict[str, Any]:
-    stem = str(Path(relative_path).with_suffix(""))
+def _save_sample_tiles(
+    root: Path,
+    image: Image.Image,
+    relative_path: str,
+    *,
+    tile_size: int = DEFAULT_TILE_SIZE,
+    encoding: str = "u8",
+    workers: int = 1,
+    force: bool = True,
+) -> dict[str, Any]:
+    path = Path(relative_path)
+    if path.parts and path.parts[0] == "samples":
+        path = Path(*path.parts[1:])
+    stem = str(path.with_suffix(""))
     tile_dir = root / "sample_tiles" / stem
     tile_dir.mkdir(parents=True, exist_ok=True)
-    for top in range(0, image.height, VISUAL_TILE_SIZE):
-        tile_z = top // VISUAL_TILE_SIZE
-        for left in range(0, image.width, VISUAL_TILE_SIZE):
-            tile_x = left // VISUAL_TILE_SIZE
-            tile = image.crop((left, top, min(image.width, left + VISUAL_TILE_SIZE), min(image.height, top + VISUAL_TILE_SIZE)))
-            tile.save(tile_dir / f"{tile_x}_{tile_z}.png")
+    jobs = []
+    for top in range(0, image.height, tile_size):
+        tile_z = top // tile_size
+        for left in range(0, image.width, tile_size):
+            tile_x = left // tile_size
+            box = (left, top, min(image.width, left + tile_size), min(image.height, top + tile_size))
+            jobs.append((box, tile_dir / f"{tile_x}_{tile_z}.png"))
+    _save_tiles(image, jobs, "png", workers=workers, force=force)
     return {
-        "size": VISUAL_TILE_SIZE,
+        "size": tile_size,
         "template": f"sample_tiles/{stem}/{{x}}_{{y}}.png",
-        "columns": math.ceil(image.width / VISUAL_TILE_SIZE),
-        "rows": math.ceil(image.height / VISUAL_TILE_SIZE),
+        "columns": math.ceil(image.width / tile_size),
+        "rows": math.ceil(image.height / tile_size),
+        "encoding": encoding,
+        "format": "png",
     }
+
+
+def _save_tiles(
+    image: Image.Image,
+    jobs: list[tuple[tuple[int, int, int, int], Path]],
+    image_format: str,
+    *,
+    workers: int = 1,
+    force: bool = True,
+) -> None:
+    if workers <= 1 or len(jobs) <= 1:
+        for box, path in jobs:
+            _save_tile(image, box, path, image_format, force=force)
+        return
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        list(executor.map(lambda job: _save_tile(image, job[0], job[1], image_format, force=force), jobs))
+
+
+def _save_tile(image: Image.Image, box: tuple[int, int, int, int], path: Path, image_format: str, *, force: bool) -> None:
+    if path.exists() and not force:
+        return
+    tile = image.crop(box)
+    _save_image(path, tile, image_format, force=force)
+
+
+def _save_image(path: Path, image: Image.Image, image_format: str, *, force: bool) -> None:
+    if path.exists() and not force:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if image_format == "webp":
+        image.save(path, format="WEBP", lossless=False, quality=82, method=4)
+    else:
+        image.save(path, format="PNG")
+
+
+def _write_cache_metadata(out: Path, generation: dict[str, Any], layers: list[dict[str, Any]]) -> None:
+    files: list[str] = [HOVER_PREVIEW_INDEX]
+    for layer in layers:
+        files.append(layer["file"])
+        files.extend(mip["file"] for mip in layer.get("mips", []))
+        if layer.get("sample_file"):
+            files.append(layer["sample_file"])
+        if layer.get("browser_sample_file"):
+            files.append(layer["browser_sample_file"])
+    with (out / ".hoverpreview_cache.json").open("w", encoding="utf-8") as fh:
+        json.dump({"generation": generation, "files": sorted(set(files))}, fh, indent=2)
+        fh.write("\n")
+
+
+def _clean_stale_outputs(out: Path, layers: list[dict[str, Any]]) -> None:
+    keep_templates: set[str] = set()
+    keep_files: set[Path] = {out / HOVER_PREVIEW_INDEX, out / ".hoverpreview_cache.json"}
+    for layer in layers:
+        keep_files.add(out / layer["file"])
+        if layer.get("sample_file"):
+            keep_files.add(out / layer["sample_file"])
+        if layer.get("browser_sample_file"):
+            keep_files.add(out / layer["browser_sample_file"])
+        for mip in layer.get("mips", []):
+            keep_files.add(out / mip["file"])
+            if mip.get("tiles", {}).get("template"):
+                keep_templates.add(str(mip["tiles"]["template"]).split("{x}")[0])
+        if layer.get("sample_tiles", {}).get("template"):
+            keep_templates.add(str(layer["sample_tiles"]["template"]).split("{x}")[0])
+    for folder in (out / "tiles", out / "sample_tiles"):
+        if not folder.exists():
+            continue
+        for path in folder.rglob("*"):
+            if path.is_dir():
+                continue
+            rel = path.relative_to(out).as_posix()
+            if path not in keep_files and not any(rel.startswith(prefix) for prefix in keep_templates):
+                path.unlink(missing_ok=True)
 
 
 def _fit_image(image: Image.Image, size: tuple[int, int]) -> Image.Image:

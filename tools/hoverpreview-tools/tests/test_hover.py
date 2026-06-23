@@ -4,8 +4,10 @@ from PIL import Image
 from hoverpreview_tools.hover_previews import (
     PREVIEW_RIVER_MAX_RADIUS,
     PREVIEW_RIVER_MIN_RADIUS,
+    hover_preview_scale,
     _minecraft_origin,
     _river_preview_radii,
+    _save_sample_tiles,
     _save_visual_layer,
 )
 
@@ -36,14 +38,55 @@ def test_hover_preview_index_origin_metadata_uses_nottingham_zero_zero():
 def test_save_visual_layer_writes_tile_metadata(tmp_path):
     image = Image.new("RGB", (300, 260), (12, 34, 56))
 
-    mips = _save_visual_layer(tmp_path, image, "layers/height.png")
+    mips = _save_visual_layer(tmp_path, image, "layers/height.png", tile_size=128, workers=1)
 
-    assert mips[0]["tiles"]["size"] == 256
-    assert mips[0]["tiles"]["columns"] == 2
-    assert mips[0]["tiles"]["rows"] == 2
+    assert mips[0]["tiles"]["size"] == 128
+    assert mips[0]["tiles"]["columns"] == 3
+    assert mips[0]["tiles"]["rows"] == 3
+    assert mips[0]["tiles"]["format"] == "png"
     assert mips[0]["tiles"]["template"] == "tiles/1/layers/height/{x}_{y}.png"
     assert (tmp_path / "tiles" / "1" / "layers" / "height" / "0_0.png").exists()
-    assert (tmp_path / "tiles" / "1" / "layers" / "height" / "1_1.png").exists()
+    assert (tmp_path / "tiles" / "1" / "layers" / "height" / "2_2.png").exists()
+
+
+def test_save_sample_tiles_metadata_is_lossless_and_explicit(tmp_path):
+    image = Image.new("L", (260, 258), 7)
+
+    metadata = _save_sample_tiles(
+        tmp_path,
+        image,
+        "samples/vegetation_u8.png",
+        tile_size=128,
+        encoding="u8",
+        workers=1,
+    )
+
+    assert metadata == {
+        "size": 128,
+        "template": "sample_tiles/vegetation_u8/{x}_{y}.png",
+        "columns": 3,
+        "rows": 3,
+        "encoding": "u8",
+        "format": "png",
+    }
+    assert (tmp_path / "sample_tiles" / "vegetation_u8" / "0_0.png").exists()
+    assert (tmp_path / "sample_tiles" / "vegetation_u8" / "2_2.png").exists()
+
+
+def test_hover_preview_scale_uses_padded_tile_bounds():
+    manifest = {
+        "tile_size": 512,
+        "world": {
+            "padded_width": 1025,
+            "padded_depth": 2049,
+        },
+    }
+
+    scale, tiles_x, tiles_z = hover_preview_scale(manifest, max_size=1024)
+
+    assert tiles_x == 3
+    assert tiles_z == 5
+    assert scale == 3
 
 
 def test_river_preview_radii_use_half_width_hierarchy():
