@@ -1260,6 +1260,8 @@ function classManifestKeys(layerName) {
   add(normalised);
   if (layerName === "surface" || normalised === "surface") add("surface_geology");
   if (isAnimalSourceLayer({ name: layerName })) {
+    add("biome_regions");
+    add("biome_region");
     add("vegetation");
     add("biome");
     add("biomes");
@@ -1389,8 +1391,10 @@ function animalsForSample(sample, candidates = []) {
   // Simple source of truth: the animals list corresponds to the vegetation class
   // under the cursor. Read the vegetation/landcover/biome sample layer directly
   // and try both its numeric class ID and its manifest class name/aliases.
-  for (const entry of state.layers.values()) {
-    if (!isAnimalSourceLayer(entry.layer)) continue;
+  const animalSourceEntries = Array.from(state.layers.values())
+    .filter((entry) => isAnimalSourceLayer(entry.layer))
+    .sort((a, b) => animalSourcePriority(a.layer) - animalSourcePriority(b.layer));
+  for (const entry of animalSourceEntries) {
     for (const candidate of animalCandidatesFromLayer(entry.layer.name, sample.imageX, sample.imageY)) {
       addCandidate(candidate);
     }
@@ -1417,6 +1421,13 @@ function animalsForSample(sample, candidates = []) {
 
   debugAnimals("No animals match", { candidates: allCandidates, keys: allCandidates.flatMap(animalKeyVariants), loadedKeys: Array.from(state.animals.keys()) });
   return "—";
+}
+
+function animalSourcePriority(layer) {
+  const name = normaliseAnimalKey(layer?.name || "");
+  if (name.includes("biome_region") || name === "biome" || name === "biomes") return 0;
+  if (name.includes("vegetation") || name.includes("landcover") || name.includes("land_cover")) return 1;
+  return 2;
 }
 
 function animalCandidatesFromLayer(layerName, imageX, imageY) {
