@@ -108,6 +108,13 @@ Generate vegetation class tiles from the LCM 2024 GeoTIFF zip:
   --jobs 4
 ```
 
+This command writes two vegetation-derived layers by default:
+
+- `vegetation/`: raw landcover classes for fine surface, flora, and hover detail.
+- `biome_regions/`: a coarser dominant-landcover layer used by the Minecraft `BiomeSource` so biomes form broad coherent regions instead of raw raster speckles.
+
+Tune the region layer with `--biome-region-factor`, `--biome-region-smoothing-passes`, and `--biome-region-min-area-cells`, or disable it with `--no-generate-biome-regions` for legacy manifests.
+
 To remake the full checked-out GB dataset into `./uk_world_data_gb`, run:
 
 ```bash
@@ -130,6 +137,7 @@ The first height implementation uses a guarded in-memory output mosaic; for low-
 .venv/bin/ukgeo preview ./uk_world_data --layer height --out preview.png
 .venv/bin/ukgeo preview ./uk_world_data --layer surface --out surface_geology.png
 .venv/bin/ukgeo preview ./uk_world_data --layer vegetation --out vegetation.png
+.venv/bin/ukgeo preview ./uk_world_data --layer biome_regions --out biome_regions.png
 .venv/bin/ukgeo preview ./uk_world_data --layer rivers --out rivers.png
 .venv/bin/ukgeo preview ./uk_world_data --layer ore:zinc --out zinc.png
 .venv/bin/ukgeo preview ./uk_world_data --layer ore:coal --style overlay --max-size 12000 --out coal_on_height.png
@@ -144,7 +152,7 @@ PREVIEWS=./hoverpreviews ../hoverpreview-tools/open_hover_map.sh ./uk_world_data
 
 The preview PNGs show the whole generated map extent, downscaled so the longest side is `--max-size` pixels. Use a larger `--max-size` for a more detailed whole-map image. `--max-size 0` writes native tile resolution, but the default 25k x 50k world is a very large image and can require several GB of RAM.
 
-`../hoverpreview-tools/generate_hover_previews.sh` writes a `hoverpreviews` folder containing stackable PNG layers (`layers/height.png`, `layers/surface.png`, `layers/vegetation.png`, `layers/rivers.png`, and one PNG per ore under `layers/ores/`) plus downsampled `mips/` versions and sample PNGs for hover text. `../hoverpreview-tools/open_hover_map.sh` reads those pre-rendered images instead of processing raw tile layers in the GUI, starts at a fit-to-window zoom, and dynamically picks lower-resolution mips when zoomed out. Mouse wheel zooms around the cursor, middle/right drag pans, and hovering shows Minecraft `x/z`, height, tile/cell, and British National Grid easting/northing. Left click copies the Minecraft `x z` pair to the clipboard.
+`../hoverpreview-tools/generate_hover_previews.sh` writes a `hoverpreviews` folder containing stackable PNG layers (`layers/height.png`, `layers/surface.png`, `layers/vegetation.png`, optional `layers/biome_regions.png`, `layers/rivers.png`, and one PNG per ore under `layers/ores/`) plus downsampled `mips/` versions and sample PNGs for hover text. `../hoverpreview-tools/open_hover_map.sh` reads those pre-rendered images instead of processing raw tile layers in the GUI, starts at a fit-to-window zoom, and dynamically picks lower-resolution mips when zoomed out. Mouse wheel zooms around the cursor, middle/right drag pans, and hovering shows Minecraft `x/z`, height, tile/cell, vegetation/biome-region data where available, and British National Grid easting/northing. Left click copies the Minecraft `x z` pair to the clipboard.
 
 To build the standalone hover app:
 
