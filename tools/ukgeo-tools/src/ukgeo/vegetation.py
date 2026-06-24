@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from concurrent.futures import ProcessPoolExecutor
+from collections import deque
 import math
 import zipfile
 
@@ -35,6 +36,28 @@ VEGETATION_CLASSES: dict[int, dict[str, str]] = {
     12: {"name": "rocky", "color": "#b9b0a2"},
 }
 
+BIOME_REGION_CLASSES: dict[int, dict[str, str]] = {
+    class_id: dict(meta) for class_id, meta in VEGETATION_CLASSES.items()
+}
+BIOME_REGION_CLASSES[0] = {"name": "ocean", "color": "#1f4f7a"}
+BIOME_REGION_CLASSES[10] = {"name": "freshwater", "color": "#2b8fc6"}
+
+BIOME_REGION_DEFAULT_FACTOR = 8
+BIOME_REGION_HARD_CLASSES = {0, 10}
+BIOME_REGION_CLASS_GROUPS = {
+    1: "woodland",
+    2: "woodland",
+    3: "farmed",
+    4: "grassland",
+    5: "grassland",
+    6: "grassland",
+    7: "upland",
+    8: "wetland",
+    9: "upland",
+    11: "farmed",
+    12: "upland",
+}
+
 LCM_TO_VEGETATION = np.zeros(256, dtype=np.uint8)
 LCM_TO_VEGETATION[1] = 1
 LCM_TO_VEGETATION[2] = 2
@@ -58,6 +81,10 @@ def make_vegetation_tiles(
     band: int = 1,
     cell_metres: float = 50.0,
     vegetation_smoothing: str = "none",
+    generate_biome_regions: bool = True,
+    biome_region_factor: int = BIOME_REGION_DEFAULT_FACTOR,
+    biome_region_smoothing_passes: int = 2,
+    biome_region_min_area_cells: int = 3,
     debug_geotiff: Path | None = None,
     jobs: int = 1,
 ) -> None:
@@ -122,6 +149,8 @@ def make_vegetation_tiles(
         vegetation_grid = _read_vegetation_grid(root, tiles_x, tiles_z, tile_size, width_cells, depth_cells)
         vegetation_grid = clean_vegetation_grid(vegetation_grid, smoothing=smoothing)
         _write_vegetation_grid(root, vegetation_grid, tiles_x, tiles_z, tile_size)
+    else:
+        vegetation_grid = None
 
     manifest["vegetation"] = {
         "path": "vegetation",
@@ -163,6 +192,48 @@ def make_vegetation_tiles(
             "21": "Suburban",
         },
     }
+    if generate_biome_regions:
+        if vegetation_grid is None:
+            vegetation_grid = _read_vegetation_grid(root, tiles_x, tiles_z, tile_size, width_cells, depth_cells)
+        region_factor = max(1, int(biome_region_factor))
+        region_cell_blocks = cell_blocks * region_factor
+        region_width_cells = math.ceil(width / region_cell_blocks)
+        region_depth_cells = math.ceil(depth / region_cell_blocks)
+        region_padded_width_cells = math.ceil(int(world["padded_width"]) / region_cell_blocks)
+        region_padded_depth_cells = math.ceil(int(world["padded_depth"]) / region_cell_blocks)
+        region_tiles_x = math.ceil(region_padded_width_cells / tile_size)
+        region_tiles_z = math.ceil(region_padded_depth_cells / tile_size)
+        console.print(
+            "Generating biome region layer: "
+            f"{region_width_cells}x{region_depth_cells} cells, {region_cell_blocks} blocks/cell."
+        )
+        biome_regions = generate_biome_region_grid(
+            vegetation_grid,
+            region_factor=region_factor,
+            smoothing_passes=biome_region_smoothing_passes,
+            min_area_cells=biome_region_min_area_cells,
+        )
+        region_root = out / "biome_regions"
+        region_root.mkdir(parents=True, exist_ok=True)
+        _write_vegetation_grid(region_root, biome_regions, region_tiles_x, region_tiles_z, tile_size, desc="write biome region tiles")
+        manifest["biome_regions"] = {
+            "path": "biome_regions",
+            "extension": ".u8.gz",
+            "dtype": "uint8",
+            "cell_blocks": region_cell_blocks,
+            "source_cell_blocks": cell_blocks,
+            "region_factor": region_factor,
+            "width_cells": region_width_cells,
+            "depth_cells": region_depth_cells,
+            "source": "vegetation",
+            "classes": {str(class_id): meta for class_id, meta in BIOME_REGION_CLASSES.items()},
+            "generation": {
+                "method": "coarsened_group_majority_component_cleanup",
+                "smoothing_passes": max(0, int(biome_region_smoothing_passes)),
+                "min_area_cells": max(1, int(biome_region_min_area_cells)),
+                "hard_classes": sorted(BIOME_REGION_HARD_CLASSES),
+            },
+        }
     write_manifest(manifest_path, manifest)
     if debug_geotiff:
         _write_debug_geotiff(debug_geotiff, out / "vegetation", manifest, tiles_x, tiles_z, tile_size, width_cells, depth_cells)
@@ -218,6 +289,175 @@ def clean_vegetation_grid(grid: np.ndarray, *, smoothing: str = "light", freshwa
     return result
 
 
+def generate_biome_region_grid(
+    grid: np.ndarray,
+    *,
+    region_factor: int = BIOME_REGION_DEFAULT_FACTOR,
+    smoothing_passes: int = 2,
+    min_area_cells: int = 3,
+) -> np.ndarray:
+    """Derive a coarse, Minecraft-biome-oriented vegetation region raster.
+
+    The raw vegetation grid remains the source for surface/flora detail. This
+    derived layer intentionally generalises it so biome IDs represent broad
+    dominant landcover regions instead of raw raster speckles.
+    """
+    if grid.size == 0:
+        return grid.astype(np.uint8, copy=True)
+    factor = max(1, int(region_factor))
+    regions = _coarsen_biome_regions(grid.astype(np.uint8, copy=False), factor)
+    regions = _remove_small_region_components(regions, min_area_cells=max(1, int(min_area_cells)))
+    for _ in range(max(0, int(smoothing_passes))):
+        regions = _smooth_biome_region_boundaries(regions)
+    return regions.astype(np.uint8, copy=False)
+
+
+def _coarsen_biome_regions(grid: np.ndarray, factor: int) -> np.ndarray:
+    if factor <= 1:
+        return grid.copy()
+    height, width = grid.shape
+    out_h = math.ceil(height / factor)
+    out_w = math.ceil(width / factor)
+    regions = np.zeros((out_h, out_w), dtype=np.uint8)
+    for cell_z in range(out_h):
+        z0 = cell_z * factor
+        z1 = min(height, z0 + factor)
+        for cell_x in range(out_w):
+            x0 = cell_x * factor
+            x1 = min(width, x0 + factor)
+            regions[cell_z, cell_x] = _dominant_biome_region_class(grid[z0:z1, x0:x1])
+    return regions
+
+
+def _dominant_biome_region_class(patch: np.ndarray) -> np.uint8:
+    counts = np.bincount(patch.ravel(), minlength=256)
+    total = int(patch.size)
+    if total <= 0:
+        return np.uint8(0)
+
+    freshwater = int(counts[10])
+    ocean = int(counts[0])
+    # Preserve meaningful water bodies, but do not let a single water cell turn a
+    # whole coarse land region into water.
+    if freshwater / total >= 0.12 and freshwater >= ocean:
+        return np.uint8(10)
+    if ocean / total >= 0.35:
+        return np.uint8(0)
+
+    group_counts: dict[str, int] = {}
+    for class_id, group in BIOME_REGION_CLASS_GROUPS.items():
+        count = int(counts[class_id])
+        if count:
+            group_counts[group] = group_counts.get(group, 0) + count
+    if not group_counts:
+        return np.uint8(0 if ocean else int(counts.argmax()))
+
+    dominant_group = max(group_counts.items(), key=lambda item: item[1])[0]
+    best_class = 0
+    best_count = -1
+    for class_id, group in BIOME_REGION_CLASS_GROUPS.items():
+        if group != dominant_group:
+            continue
+        count = int(counts[class_id])
+        if count > best_count:
+            best_class = class_id
+            best_count = count
+    return np.uint8(best_class)
+
+
+def _remove_small_region_components(grid: np.ndarray, *, min_area_cells: int) -> np.ndarray:
+    height, width = grid.shape
+    if height == 0 or width == 0:
+        return grid.copy()
+    result = grid.copy()
+    visited = np.zeros((height, width), dtype=bool)
+    min_by_class = {
+        8: max(1, min_area_cells - 1),
+        11: 1,
+        12: max(1, min_area_cells - 1),
+    }
+
+    for z in range(height):
+        for x in range(width):
+            if visited[z, x]:
+                continue
+            class_id = int(result[z, x])
+            component, neighbours = _collect_component(result, visited, x, z, class_id)
+            if class_id in BIOME_REGION_HARD_CLASSES:
+                continue
+            threshold = min_by_class.get(class_id, min_area_cells)
+            if len(component) >= threshold:
+                continue
+            replacement = _dominant_neighbour_class(neighbours, fallback=class_id)
+            if replacement == class_id:
+                continue
+            for cy, cx in component:
+                result[cy, cx] = np.uint8(replacement)
+    return result
+
+
+def _collect_component(
+    grid: np.ndarray,
+    visited: np.ndarray,
+    start_x: int,
+    start_z: int,
+    class_id: int,
+) -> tuple[list[tuple[int, int]], list[int]]:
+    height, width = grid.shape
+    queue: deque[tuple[int, int]] = deque([(start_z, start_x)])
+    visited[start_z, start_x] = True
+    component: list[tuple[int, int]] = []
+    neighbours: list[int] = []
+    while queue:
+        z, x = queue.popleft()
+        component.append((z, x))
+        for dz, dx in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+            nz = z + dz
+            nx = x + dx
+            if nz < 0 or nx < 0 or nz >= height or nx >= width:
+                continue
+            other = int(grid[nz, nx])
+            if other == class_id:
+                if not visited[nz, nx]:
+                    visited[nz, nx] = True
+                    queue.append((nz, nx))
+            else:
+                neighbours.append(other)
+    return component, neighbours
+
+
+def _dominant_neighbour_class(neighbours: list[int], *, fallback: int) -> int:
+    if not neighbours:
+        return fallback
+    counts = np.bincount(np.asarray(neighbours, dtype=np.uint8), minlength=256)
+    for hard_class in BIOME_REGION_HARD_CLASSES:
+        counts[hard_class] = 0
+    if int(counts.max()) <= 0:
+        return fallback
+    return int(counts.argmax())
+
+
+def _smooth_biome_region_boundaries(grid: np.ndarray) -> np.ndarray:
+    height, width = grid.shape
+    output = grid.copy()
+    if height == 0 or width == 0:
+        return output
+    padded = np.pad(grid, ((1, 1), (1, 1)), mode="edge")
+    for z in range(height):
+        for x in range(width):
+            current = int(grid[z, x])
+            if current in BIOME_REGION_HARD_CLASSES:
+                continue
+            window = padded[z : z + 3, x : x + 3].ravel()
+            counts = np.bincount(window, minlength=256)
+            for hard_class in BIOME_REGION_HARD_CLASSES:
+                counts[hard_class] = 0
+            best = int(counts.argmax())
+            if best != current and int(counts[best]) >= 6:
+                output[z, x] = np.uint8(best)
+    return output
+
+
 def _majority_smooth_nonfreshwater(grid: np.ndarray, *, freshwater_class: int) -> np.ndarray:
     height, width = grid.shape
     output = grid.copy()
@@ -271,9 +511,9 @@ def _read_vegetation_grid(tile_root: Path, tiles_x: int, tiles_z: int, tile_size
     return grid
 
 
-def _write_vegetation_grid(tile_root: Path, grid: np.ndarray, tiles_x: int, tiles_z: int, tile_size: int) -> None:
+def _write_vegetation_grid(tile_root: Path, grid: np.ndarray, tiles_x: int, tiles_z: int, tile_size: int, *, desc: str = "write cleaned vegetation tiles") -> None:
     height, width = grid.shape
-    for tile_z in tqdm(range(tiles_z), desc="write cleaned vegetation tiles"):
+    for tile_z in tqdm(range(tiles_z), desc=desc):
         for tile_x in range(tiles_x):
             tile = np.zeros((tile_size, tile_size), dtype=np.uint8)
             y0 = tile_z * tile_size

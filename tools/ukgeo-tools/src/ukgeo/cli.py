@@ -250,6 +250,10 @@ def make_vegetation_tiles(
     band: int = typer.Option(1, "--band"),
     cell_metres: float = typer.Option(50.0, "--cell-metres", help="Raster cell size in metres (default 50 m)."),
     vegetation_smoothing: str = typer.Option("none", "--vegetation-smoothing", help="none, light, or medium. Freshwater is preserved exactly."),
+    generate_biome_regions: bool = typer.Option(True, "--generate-biome-regions/--no-generate-biome-regions", help="Write a coarse biome_regions layer for Minecraft biome selection."),
+    biome_region_factor: int = typer.Option(8, "--biome-region-factor", help="Raw vegetation cells per biome region cell."),
+    biome_region_smoothing_passes: int = typer.Option(2, "--biome-region-smoothing-passes", help="Conservative boundary smoothing passes for biome regions."),
+    biome_region_min_area_cells: int = typer.Option(3, "--biome-region-min-area-cells", help="Tiny biome region components smaller than this are absorbed."),
     debug_geotiff: Path | None = typer.Option(None, "--debug-geotiff"),
     jobs: int = typer.Option(1, "--jobs", help="Vegetation tile rows to process in parallel."),
 ) -> None:
@@ -260,6 +264,10 @@ def make_vegetation_tiles(
         band=band,
         cell_metres=cell_metres,
         vegetation_smoothing=vegetation_smoothing,
+        generate_biome_regions=generate_biome_regions,
+        biome_region_factor=biome_region_factor,
+        biome_region_smoothing_passes=biome_region_smoothing_passes,
+        biome_region_min_area_cells=biome_region_min_area_cells,
         debug_geotiff=debug_geotiff,
         jobs=jobs,
     )
@@ -410,6 +418,15 @@ def sample(root: Path, x: int = typer.Option(..., "--x"), z: int = typer.Option(
             class_id = int(read_u8_tile(path, manifest["tile_size"])[vlz, vlx])
             meta = vegetation.get("classes", {}).get(str(class_id), {})
             console.print(f"vegetation: {meta.get('name', class_id)} ({class_id})")
+    if "biome_regions" in manifest:
+        biome_regions = manifest["biome_regions"]
+        cell_blocks = int(biome_regions.get("cell_blocks", 1))
+        btx, btz, blx, blz = minecraft_to_layer_cell(x, z, bounds, cell_blocks=cell_blocks)
+        path = root / biome_regions["path"] / f"{btx:03d}_{btz:03d}.u8.gz"
+        if path.exists():
+            class_id = int(read_u8_tile(path, manifest["tile_size"])[blz, blx])
+            meta = biome_regions.get("classes", {}).get(str(class_id), {})
+            console.print(f"biome_region: {meta.get('name', class_id)} ({class_id})")
     for ore, layer in manifest.get("ore_layers", {}).items():
         path = root / layer["path"] / f"{tx:03d}_{tz:03d}.u8.gz"
         if path.exists():

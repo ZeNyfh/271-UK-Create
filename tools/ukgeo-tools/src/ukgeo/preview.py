@@ -14,11 +14,11 @@ def u8_layer_grid(manifest: dict, layer: str) -> tuple[int, int, int, int, int]:
     tile_size = int(manifest["tile_size"])
     padded_width = int(manifest["world"]["padded_width"])
     padded_depth = int(manifest["world"]["padded_depth"])
-    if layer == "vegetation":
-        vegetation = manifest["vegetation"]
-        cell_blocks = max(1, int(vegetation.get("cell_blocks", 1)))
-        data_width = int(vegetation.get("width_cells", math.ceil(int(manifest["world"]["width"]) / cell_blocks)))
-        data_depth = int(vegetation.get("depth_cells", math.ceil(int(manifest["world"]["depth"]) / cell_blocks)))
+    if layer in manifest and "cell_blocks" in manifest[layer]:
+        metadata = manifest[layer]
+        cell_blocks = max(1, int(metadata.get("cell_blocks", 1)))
+        data_width = int(metadata.get("width_cells", math.ceil(int(manifest["world"]["width"]) / cell_blocks)))
+        data_depth = int(metadata.get("depth_cells", math.ceil(int(manifest["world"]["depth"]) / cell_blocks)))
         tiles_x = math.ceil(padded_width / (tile_size * cell_blocks))
         tiles_z = math.ceil(padded_depth / (tile_size * cell_blocks))
         return tiles_x, tiles_z, data_width, data_depth, cell_blocks
@@ -33,12 +33,12 @@ def upscale_cells_to_blocks(cells: np.ndarray, cell_blocks: int) -> np.ndarray:
     return np.repeat(np.repeat(cells, cell_blocks, axis=0), cell_blocks, axis=1)
 
 
-def read_vegetation_preview(root: Path, manifest: dict, scale: int, *, missing_ok: bool = False) -> np.ndarray:
-    vegetation = manifest["vegetation"]
-    tiles_x, tiles_z, width_cells, depth_cells, cell_blocks = u8_layer_grid(manifest, "vegetation")
+def read_cell_u8_preview(root: Path, manifest: dict, layer: str, scale: int, *, missing_ok: bool = False) -> np.ndarray:
+    metadata = manifest[layer]
+    tiles_x, tiles_z, width_cells, depth_cells, cell_blocks = u8_layer_grid(manifest, layer)
     values = _read_u8_preview(
         root,
-        vegetation["path"],
+        metadata["path"],
         tiles_x,
         tiles_z,
         int(manifest["tile_size"]),
@@ -50,6 +50,10 @@ def read_vegetation_preview(root: Path, manifest: dict, scale: int, *, missing_o
     if cell_blocks > 1:
         values = upscale_cells_to_blocks(values, cell_blocks)
     return values
+
+
+def read_vegetation_preview(root: Path, manifest: dict, scale: int, *, missing_ok: bool = False) -> np.ndarray:
+    return read_cell_u8_preview(root, manifest, "vegetation", scale, missing_ok=missing_ok)
 
 
 ORE_COLORS: dict[str, tuple[int, int, int]] = {
@@ -102,6 +106,11 @@ def make_preview(root: Path, layer: str, out: Path, max_size: int = 4096, style:
             raise FileNotFoundError("No vegetation layer is present. Run ukgeo make-vegetation-tiles first.")
         values = read_vegetation_preview(root, manifest, scale, missing_ok=False)
         output = _surface_image(values, manifest["vegetation"].get("classes", {}), legend_scale)
+    elif layer in {"biome_regions", "biome-region", "biome_regions"}:
+        if "biome_regions" not in manifest:
+            raise FileNotFoundError("No biome region layer is present. Run ukgeo make-vegetation-tiles first.")
+        values = read_cell_u8_preview(root, manifest, "biome_regions", scale, missing_ok=False)
+        output = _surface_image(values, manifest["biome_regions"].get("classes", {}), legend_scale)
     elif layer in {"ores", "ore:all"}:
         height = _read_height_preview(root, manifest, tiles_x, tiles_z, tile_size, scale)
         output = _all_ores_image(root, manifest, tiles_x, tiles_z, tile_size, scale, height, legend_scale)
@@ -116,7 +125,7 @@ def make_preview(root: Path, layer: str, out: Path, max_size: int = 4096, style:
         else:
             output = _ore_image(values, style)
     else:
-        raise ValueError("layer must be height, surface, vegetation, rivers, ores, ore:all, or ore:<name>")
+        raise ValueError("layer must be height, surface, vegetation, biome_regions, rivers, ores, ore:all, or ore:<name>")
     out.parent.mkdir(parents=True, exist_ok=True)
     output.save(out)
 
