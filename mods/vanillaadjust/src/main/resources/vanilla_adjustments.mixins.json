@@ -8,9 +8,12 @@
     "FlowingFluidMixin",
     "IceBlockMixin",
     "FireworkRocketItemMixin",
+    "LevelChunkMixin",
+    "LevelMixin",
     "PointedDripstoneBlockMixin",
     "ServerGamePacketListenerImplMixin",
     "ServerLevelMixin",
+    "WaterFluidMixin",
     "WolfMixin"
   ],
   "injectors": {

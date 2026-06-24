@@ -22,6 +22,8 @@ public abstract class FlowingFluidMixin {
         }
         if (PlayerPlacedWaterSourceHandler.shouldBlockWaterSourceConversion(level, pos)) {
             callbackInfo.setReturnValue(((FlowingFluid)(Object)this).getFlowing(7, false));
+        } else {
+            PlayerPlacedWaterSourceHandler.allowNextNaturalSourceWaterPlacement(level, pos, "natural fluid source conversion");
         }
     }
 }

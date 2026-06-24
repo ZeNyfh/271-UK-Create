@@ -26,6 +26,7 @@ public class Vanilla_adjustments {
         NeoForge.EVENT_BUS.register(new EnderPearlRadiusLimiter());
         NeoForge.EVENT_BUS.register(new DeepslateFluidGeneratorHandler());
         NeoForge.EVENT_BUS.register(new WaterIceOriginEventHandler());
+        NeoForge.EVENT_BUS.register(new ContraptionWaterSourceConversionHandler());
     }
 
     @SubscribeEvent
