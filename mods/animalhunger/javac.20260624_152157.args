@@ -1,0 +1,7 @@
+--release
+21
+-cp
+build/moddev/artifacts/neoforge-21.1.230-merged.jar:build/classes/java/main:/tmp/jadestub-classes
+-d
+/tmp/animalhunger-jade-test
+src/main/java/com/zenyfh/animalhunger/jade/AnimalHungerJadePlugin.java

@@ -1,0 +1,31 @@
+{
+  "replace": false,
+  "values": [
+    "#animalhunger:foods/cow",
+    "#animalhunger:foods/sheep",
+    "#animalhunger:foods/pig",
+    "#animalhunger:foods/chicken",
+    "#animalhunger:foods/rabbit",
+    "#animalhunger:foods/wolf",
+    "#animalhunger:foods/fox",
+    "#animalhunger:foods/bat",
+    "#animalhunger:foods/horse",
+    "#animalhunger:foods/goat",
+    "#animalhunger:foods/camel",
+    "#animalhunger:foods/cat",
+    "#animalhunger:foods/parrot",
+    "#animalhunger:foods/turtle",
+    "#animalhunger:foods/bee",
+    "#animalhunger:foods/panda",
+    "#animalhunger:foods/frog",
+    "#animalhunger:foods/armadillo",
+    "#animalhunger:foods/wildernature/deer",
+    "#animalhunger:foods/wildernature/bison",
+    "#animalhunger:foods/wildernature/boar",
+    "#animalhunger:foods/wildernature/dog",
+    "#animalhunger:foods/wildernature/hedgehog",
+    "#animalhunger:foods/wildernature/minisheep",
+    "#animalhunger:foods/wildernature/owl",
+    "#animalhunger:foods/wildernature/squirrel"
+  ]
+}

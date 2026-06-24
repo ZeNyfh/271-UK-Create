@@ -1,0 +1,87 @@
+plugins {
+    id 'java-library'
+    id 'idea'
+    id 'net.neoforged.moddev' version '2.0.141'
+}
+
+version = mod_version
+group = mod_group_id
+
+repositories {
+    mavenLocal()
+    maven { url = 'https://api.modrinth.com/maven' }
+}
+
+base {
+    archivesName = mod_id
+}
+
+java.toolchain.languageVersion = JavaLanguageVersion.of(21)
+
+def jadeJarPath = providers.environmentVariable('JADE_API_JAR')
+        .orElse('/media/zenyfh/GoodHDD/Games/Minecraft/Instances/UK Create (1)/mods/Jade-1.21.1-NeoForge-15.10.5.jar')
+def jadeJar = file(jadeJarPath.get())
+
+dependencies {
+    // Keep supporting a local Jade jar for offline/dev instances, but also
+    // declare the public Modrinth Maven artifact so fresh checkouts compile.
+    if (jadeJar.exists()) {
+        compileOnly files(jadeJar)
+    } else {
+        compileOnly 'maven.modrinth:jade:15.10.5+neoforge'
+    }
+}
+
+neoForge {
+    version = project.neo_version
+    parchment {
+        mappingsVersion = project.parchment_mappings_version
+        minecraftVersion = project.parchment_minecraft_version
+    }
+    runs {
+        client { client() }
+        server {
+            server()
+            programArgument '--nogui'
+        }
+        configureEach {
+            systemProperty 'forge.logging.markers', 'REGISTRIES'
+            logLevel = org.slf4j.event.Level.INFO
+        }
+    }
+    mods {
+        "${mod_id}" {
+            sourceSet(sourceSets.main)
+        }
+    }
+}
+
+var generateModMetadata = tasks.register("generateModMetadata", ProcessResources) {
+    var replaceProperties = [
+        minecraft_version: minecraft_version,
+        minecraft_version_range: minecraft_version_range,
+        neo_version: neo_version,
+        neo_version_range: neo_version_range,
+        loader_version_range: loader_version_range,
+        mod_id: mod_id,
+        mod_name: mod_name,
+        mod_license: mod_license,
+        mod_version: mod_version,
+        mod_authors: mod_authors,
+        mod_description: mod_description
+    ]
+    inputs.properties replaceProperties
+    expand replaceProperties
+    from "src/main/templates"
+    into "build/generated/sources/modMetadata"
+}
+
+sourceSets.main.resources.srcDir generateModMetadata
+neoForge.ideSyncTask generateModMetadata
+
+idea {
+    module {
+        downloadSources = true
+        downloadJavadoc = true
+    }
+}

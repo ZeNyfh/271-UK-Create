@@ -1,0 +1,18 @@
+{
+  "replace": false,
+  "values": [
+    "minecraft:sweet_berries",
+    "minecraft:glow_berries",
+    "minecraft:apple",
+    "minecraft:brown_mushroom",
+    "minecraft:red_mushroom",
+    "minecraft:wheat_seeds",
+    "minecraft:pumpkin_seeds",
+    "minecraft:melon_seeds",
+    "minecraft:beetroot_seeds",
+    "minecraft:torchflower_seeds",
+    "minecraft:pitcher_pod",
+    "minecraft:spider_eye",
+    "minecraft:egg"
+  ]
+}

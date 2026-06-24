@@ -1,0 +1,85 @@
+{
+  "textures": {
+    "side": "animalhunger:block/trough_side",
+    "top": "animalhunger:block/trough_top",
+    "inner": "animalhunger:block/trough_inner",
+    "end": "animalhunger:block/trough_end",
+    "contents": "minecraft:block/composter_compost",
+    "particle": "animalhunger:block/trough_side"
+  },
+  "elements": [
+    {
+      "from": [2, 0, 2],
+      "to": [14, 2, 14],
+      "faces": {
+        "down": { "texture": "#side" },
+        "up": { "texture": "#inner" },
+        "north": { "texture": "#side" },
+        "south": { "texture": "#side" },
+        "west": { "texture": "#side" },
+        "east": { "texture": "#side" }
+      }
+    },
+    {
+      "from": [0, 0, 0],
+      "to": [2, 12, 16],
+      "faces": {
+        "north": { "texture": "#end" },
+        "south": { "texture": "#end" },
+        "west": { "texture": "#side" },
+        "east": { "texture": "#inner" },
+        "up": { "texture": "#top" }
+      }
+    },
+    {
+      "from": [14, 0, 0],
+      "to": [16, 12, 16],
+      "faces": {
+        "north": { "texture": "#end" },
+        "south": { "texture": "#end" },
+        "west": { "texture": "#inner" },
+        "east": { "texture": "#side" },
+        "up": { "texture": "#top" }
+      }
+    },
+    {
+      "from": [2, 0, 0],
+      "to": [14, 12, 2],
+      "faces": {
+        "north": { "texture": "#side" },
+        "south": { "texture": "#inner" },
+        "west": { "texture": "#side" },
+        "east": { "texture": "#side" },
+        "up": { "texture": "#top" }
+      }
+    },
+    {
+      "from": [2, 0, 14],
+      "to": [14, 12, 16],
+      "faces": {
+        "north": { "texture": "#inner" },
+        "south": { "texture": "#side" },
+        "west": { "texture": "#side" },
+        "east": { "texture": "#side" },
+        "up": { "texture": "#top" }
+      }
+    },
+    {
+      "from": [2, 3, 2],
+      "to": [14, 5, 14],
+      "faces": {
+        "up": { "texture": "#contents" },
+        "down": { "texture": "#contents" },
+        "north": { "texture": "#contents" },
+        "south": { "texture": "#contents" },
+        "west": { "texture": "#contents" },
+        "east": { "texture": "#contents" }
+      }
+    }
+  ],
+  "display": {
+    "thirdperson_righthand": { "rotation": [75, 45, 0], "translation": [0, 2.5, 0], "scale": [0.375, 0.375, 0.375] },
+    "firstperson_righthand": { "rotation": [0, 45, 0], "scale": [0.40, 0.40, 0.40] },
+    "gui": { "rotation": [30, 225, 0], "translation": [0, 0, 0], "scale": [0.625, 0.625, 0.625] }
+  }
+}

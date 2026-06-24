@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "PPP",
+    "PFP",
+    "PPP"
+  ],
+  "key": {
+    "P": { "tag": "minecraft:planks" },
+    "F": { "tag": "animalhunger:any_animal_food" }
+  },
+  "result": {
+    "id": "animalhunger:trough",
+    "count": 1
+  }
+}

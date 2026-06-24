@@ -1,0 +1,12 @@
+{
+  "block.animalhunger.trough": "Trough",
+  "item.animalhunger.trough": "Trough",
+  "container.animalhunger.trough": "Trough",
+  "screen.animalhunger.trough.can_feed": "Can feed",
+  "screen.animalhunger.trough.no_animals": "No valid animals",
+  "screen.animalhunger.trough.more_animals": "+%s more",
+  "jade.animalhunger.hunger": "Animal Hunger: %s/%s",
+  "jade.animalhunger.hunger_starving": "Animal Hunger: %s/%s Starving",
+  "config.jade.plugin_animalhunger.animal_hunger": "Animal Hunger",
+  "config.jade.plugin_animalhunger.hunger": "Animal Hunger"
+}

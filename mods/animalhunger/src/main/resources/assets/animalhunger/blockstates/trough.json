@@ -1,0 +1,6 @@
+{
+  "variants": {
+    "has_food=false": { "model": "animalhunger:block/trough" },
+    "has_food=true": { "model": "animalhunger:block/trough_filled" }
+  }
+}

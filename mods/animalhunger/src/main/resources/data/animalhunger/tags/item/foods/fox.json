@@ -1,0 +1,13 @@
+{
+  "replace": false,
+  "values": [
+    "minecraft:sweet_berries",
+    "minecraft:glow_berries",
+    "minecraft:chicken",
+    "minecraft:rabbit",
+    "minecraft:egg",
+    "minecraft:cod",
+    "minecraft:salmon",
+    "minecraft:tropical_fish"
+  ]
+}
