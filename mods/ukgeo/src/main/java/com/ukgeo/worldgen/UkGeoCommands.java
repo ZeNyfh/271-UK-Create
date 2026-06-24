@@ -48,6 +48,7 @@ public final class UkGeoCommands {
                                     .append(" surfaceY=").append(generator.surfaceY(x, z))
                                     .append(" surfaceGeology=").append(generator.sampleSurface(x, z))
                                     .append(" vegetation=").append(generator.sampleVegetation(x, z))
+                                    .append(" biomeRegion=").append(generator.sampleBiomeRegion(x, z))
                                     .append(" river=").append(generator.sampleRiver(x, z))
                                     .append(" oilMb=").append(generator.sampleOilAmount(ctx.getSource().getLevel().getSeed(), x, z));
                                 for (Map.Entry<String, Integer> entry : generator.sampleOres(x, z).entrySet()) {

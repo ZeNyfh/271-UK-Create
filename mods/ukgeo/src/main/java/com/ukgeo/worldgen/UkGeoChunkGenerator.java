@@ -1860,10 +1860,13 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
                 U8OreTileLayer vegetationLayer = manifest.vegetationPath == null
                     ? null
                     : new U8OreTileLayer(manifest, "vegetation", manifest.vegetationPath, manifest.vegetationCellBlocks, manifest.paddedWidth, manifest.paddedDepth);
+                U8OreTileLayer biomeRegionLayer = manifest.biomeRegionsPath == null
+                    ? null
+                    : new U8OreTileLayer(manifest, "biome_regions", manifest.biomeRegionsPath, manifest.biomeRegionsCellBlocks, manifest.paddedWidth, manifest.paddedDepth);
                 U8OreTileLayer riverLayer = manifest.riversPath == null ? null : new U8OreTileLayer(manifest, "rivers", manifest.riversPath);
                 U8OreTileLayer riverOrderLayer = manifest.riverOrderPath == null ? null : new U8OreTileLayer(manifest, "river_order", manifest.riverOrderPath);
                 U8OreTileLayer riverHalfWidthLayer = manifest.riverHalfWidthPath == null ? null : new U8OreTileLayer(manifest, "river_half_width", manifest.riverHalfWidthPath);
-                runtimeData = new RuntimeData(manifest, new R16HeightTileLayer(manifest), surfaceLayer, vegetationLayer, riverLayer, riverOrderLayer, riverHalfWidthLayer, layers, OreSettings.defaults());
+                runtimeData = new RuntimeData(manifest, new R16HeightTileLayer(manifest), surfaceLayer, vegetationLayer, biomeRegionLayer, riverLayer, riverOrderLayer, riverHalfWidthLayer, layers, OreSettings.defaults());
                 UkGeoMod.LOGGER.info("Loaded ukgeo manifest at {} with {}x{} tiles", root, manifest.tilesX(), manifest.tilesZ());
             } catch (IOException | RuntimeException ex) {
                 UkGeoMod.LOGGER.warn("UK world data is missing or invalid at {}; using fallback terrain: {}", root, ex.getMessage());
@@ -1878,7 +1881,7 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         if (data == null) {
             return "uk_world_data unavailable; fallback terrain active";
         }
-        return "tiles=%dx%d tileSize=%d bounds=x %d..%d z %d..%d origin=%s heightScale=%.3f lowExtra=%.3f highScale=%.3f nodataY=%d riverRadius=%d riverDepth=%d vegetation=%s heightCache=%s".formatted(
+        return "tiles=%dx%d tileSize=%d bounds=x %d..%d z %d..%d origin=%s heightScale=%.3f lowExtra=%.3f highScale=%.3f nodataY=%d riverRadius=%d riverDepth=%d vegetation=%s biomeRegions=%s heightCache=%s".formatted(
             data.manifest.tilesX(),
             data.manifest.tilesZ(),
             data.manifest.tileSize,
@@ -1894,6 +1897,7 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
             riverWidenRadius,
             riverCarveDepth,
             data.vegetationLayer == null ? "none" : "loaded",
+            data.biomeRegionLayer == null ? "none" : "loaded",
             data.height.cacheStats()
         );
     }
@@ -1946,6 +1950,22 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         int classId = data.vegetationLayer.sampleOrDefault(x, z, 0);
         VegetationClass vegetationClass = data.manifest.vegetationClasses.get(classId);
         return vegetationClass == null ? Integer.toString(classId) : vegetationClass.name() + "(" + classId + ")";
+    }
+
+    public String sampleBiomeRegion(int x, int z) {
+        RuntimeData data = data();
+        if (data == null || data.biomeRegionLayer == null) {
+            return "none";
+        }
+        if (!hasHeightData(data, null, x, z)) {
+            return "none (no height data)";
+        }
+        int classId = data.biomeRegionLayer.sampleOrDefault(x, z, 0);
+        VegetationClass biomeRegionClass = data.manifest.biomeRegionClasses.get(classId);
+        if (biomeRegionClass == null) {
+            biomeRegionClass = data.manifest.vegetationClasses.get(classId);
+        }
+        return biomeRegionClass == null ? Integer.toString(classId) : biomeRegionClass.name() + "(" + classId + ")";
     }
 
     public int sampleRiver(int x, int z) {
@@ -3248,6 +3268,7 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         R16HeightTileLayer height,
         U8OreTileLayer surfaceLayer,
         U8OreTileLayer vegetationLayer,
+        U8OreTileLayer biomeRegionLayer,
         U8OreTileLayer riverLayer,
         U8OreTileLayer riverOrderLayer,
         U8OreTileLayer riverHalfWidthLayer,

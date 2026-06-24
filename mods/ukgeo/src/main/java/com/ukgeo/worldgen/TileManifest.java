@@ -33,6 +33,9 @@ public final class TileManifest {
     public final String vegetationPath;
     public final int vegetationCellBlocks;
     public final Map<Integer, VegetationClass> vegetationClasses;
+    public final String biomeRegionsPath;
+    public final int biomeRegionsCellBlocks;
+    public final Map<Integer, VegetationClass> biomeRegionClasses;
     public final String riversPath;
     public final String riverOrderPath;
     public final String riverHalfWidthPath;
@@ -81,19 +84,20 @@ public final class TileManifest {
         if (vegetation != null) {
             this.vegetationPath = vegetation.get("path").getAsString();
             this.vegetationCellBlocks = vegetation.has("cell_blocks") ? Math.max(1, vegetation.get("cell_blocks").getAsInt()) : 1;
-            JsonObject classes = vegetation.getAsJsonObject("classes");
-            if (classes != null) {
-                for (Map.Entry<String, JsonElement> entry : classes.entrySet()) {
-                    int id = Integer.parseInt(entry.getKey());
-                    JsonObject value = entry.getValue().getAsJsonObject();
-                    String name = value.has("name") ? value.get("name").getAsString() : entry.getKey();
-                    String color = value.has("color") ? value.get("color").getAsString() : "#777777";
-                    this.vegetationClasses.put(id, new VegetationClass(id, name, color));
-                }
-            }
+            this.vegetationClasses.putAll(parseVegetationClasses(vegetation));
         } else {
             this.vegetationPath = null;
             this.vegetationCellBlocks = 1;
+        }
+        this.biomeRegionClasses = new LinkedHashMap<>();
+        JsonObject biomeRegions = json.getAsJsonObject("biome_regions");
+        if (biomeRegions != null) {
+            this.biomeRegionsPath = biomeRegions.get("path").getAsString();
+            this.biomeRegionsCellBlocks = biomeRegions.has("cell_blocks") ? Math.max(1, biomeRegions.get("cell_blocks").getAsInt()) : this.vegetationCellBlocks;
+            this.biomeRegionClasses.putAll(parseVegetationClasses(biomeRegions));
+        } else {
+            this.biomeRegionsPath = null;
+            this.biomeRegionsCellBlocks = 1;
         }
         JsonObject rivers = json.getAsJsonObject("rivers");
         if (rivers == null) {
@@ -151,5 +155,20 @@ public final class TileManifest {
             return Double.NaN;
         }
         return object.get(key).getAsDouble();
+    }
+
+    private static Map<Integer, VegetationClass> parseVegetationClasses(JsonObject layer) {
+        Map<Integer, VegetationClass> result = new LinkedHashMap<>();
+        JsonObject classes = layer.getAsJsonObject("classes");
+        if (classes != null) {
+            for (Map.Entry<String, JsonElement> entry : classes.entrySet()) {
+                int id = Integer.parseInt(entry.getKey());
+                JsonObject value = entry.getValue().getAsJsonObject();
+                String name = value.has("name") ? value.get("name").getAsString() : entry.getKey();
+                String color = value.has("color") ? value.get("color").getAsString() : "#777777";
+                result.put(id, new VegetationClass(id, name, color));
+            }
+        }
+        return result;
     }
 }

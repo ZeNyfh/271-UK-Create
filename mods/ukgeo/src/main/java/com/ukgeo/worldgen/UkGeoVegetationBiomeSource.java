@@ -121,8 +121,10 @@ public final class UkGeoVegetationBiomeSource extends BiomeSource {
         if (data.riverLayer != null && data.riverLayer.sampleOrDefault(blockX, blockZ, 0) > 0) {
             return river;
         }
-        int vegetationClass = data.vegetationLayer == null ? -1 : data.vegetationLayer.sampleOrDefault(blockX, blockZ, -1);
-        return biomeForVegetationClass(vegetationClass);
+        int biomeClass = data.biomeRegionLayer != null
+            ? data.biomeRegionLayer.sampleOrDefault(blockX, blockZ, -1)
+            : data.vegetationLayer == null ? -1 : data.vegetationLayer.sampleOrDefault(blockX, blockZ, -1);
+        return biomeForVegetationClass(biomeClass);
     }
 
     private Holder<Biome> biomeForVegetationClass(int vegetationClass) {
@@ -161,8 +163,11 @@ public final class UkGeoVegetationBiomeSource extends BiomeSource {
                 U8OreTileLayer vegetationLayer = manifest.vegetationPath == null
                     ? null
                     : new U8OreTileLayer(manifest, "vegetation", manifest.vegetationPath, manifest.vegetationCellBlocks, manifest.paddedWidth, manifest.paddedDepth);
+                U8OreTileLayer biomeRegionLayer = manifest.biomeRegionsPath == null
+                    ? null
+                    : new U8OreTileLayer(manifest, "biome_regions", manifest.biomeRegionsPath, manifest.biomeRegionsCellBlocks, manifest.paddedWidth, manifest.paddedDepth);
                 U8OreTileLayer riverLayer = manifest.riversPath == null ? null : new U8OreTileLayer(manifest, "rivers", manifest.riversPath);
-                runtimeData = new RuntimeData(height, vegetationLayer, riverLayer);
+                runtimeData = new RuntimeData(height, vegetationLayer, biomeRegionLayer, riverLayer);
             } catch (IOException | RuntimeException ex) {
                 UkGeoMod.LOGGER.warn("UK vegetation biome data is missing or invalid; using fallback biome: {}", ex.getMessage());
                 runtimeData = null;
@@ -171,6 +176,6 @@ public final class UkGeoVegetationBiomeSource extends BiomeSource {
         }
     }
 
-    private record RuntimeData(R16HeightTileLayer height, U8OreTileLayer vegetationLayer, U8OreTileLayer riverLayer) {
+    private record RuntimeData(R16HeightTileLayer height, U8OreTileLayer vegetationLayer, U8OreTileLayer biomeRegionLayer, U8OreTileLayer riverLayer) {
     }
 }
