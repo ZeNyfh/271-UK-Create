@@ -4,6 +4,7 @@ from PIL import Image
 from hoverpreview_tools.hover_previews import (
     PREVIEW_RIVER_MAX_RADIUS,
     PREVIEW_RIVER_MIN_RADIUS,
+    hover_preview_steps,
     hover_preview_scale,
     _minecraft_origin,
     _river_preview_radii,
@@ -100,3 +101,20 @@ def test_river_preview_radii_use_half_width_hierarchy():
     assert radii[0, 2] == PREVIEW_RIVER_MAX_RADIUS
     assert radii[0, 3] == PREVIEW_RIVER_MIN_RADIUS
     assert radii[0, 4] == 0
+
+
+def test_hover_preview_steps_include_biome_regions(tmp_path):
+    root = tmp_path
+    (root / "height").mkdir()
+    (root / "vegetation").mkdir()
+    (root / "biome_regions").mkdir()
+    manifest = {
+        "height": {"path": "height"},
+        "vegetation": {"path": "vegetation"},
+        "biome_regions": {"path": "biome_regions"},
+    }
+
+    steps = hover_preview_steps(root, manifest)
+
+    assert "vegetation" in steps
+    assert "biome_regions" in steps

@@ -15,7 +15,7 @@ import numpy as np
 from PIL import Image
 
 from ukgeo.manifest import read_manifest
-from ukgeo.preview import ORE_COLORS, _height_image as _cpu_height_image, _hex_color, _read_height_preview, _read_u8_preview, read_vegetation_preview
+from ukgeo.preview import ORE_COLORS, _height_image as _cpu_height_image, _hex_color, _read_height_preview, _read_u8_preview, read_cell_u8_preview, read_vegetation_preview
 from ukgeo.tiles import HEIGHT_NODATA
 
 
@@ -47,6 +47,8 @@ def hover_preview_steps(root: Path, manifest: dict[str, Any]) -> list[str]:
         steps.append("surface")
     if "vegetation" in manifest and (root / manifest["vegetation"]["path"]).exists():
         steps.append("vegetation")
+    if "biome_regions" in manifest and (root / manifest["biome_regions"]["path"]).exists():
+        steps.append("biome_regions")
     if "rivers" in manifest and (root / manifest["rivers"]["path"]).exists():
         steps.append("rivers")
     for ore, layer in manifest.get("ore_layers", {}).items():
@@ -202,6 +204,36 @@ def export_hover_previews(
         gc.collect()
         done()
 
+    if "biome_regions" in manifest and (root / manifest["biome_regions"]["path"]).exists():
+        report("biome_regions")
+        done = timed("biome_regions")
+        values = read_cell_u8_preview(root, manifest, "biome_regions", scale, missing_ok=False)
+        visual = _fit_image(_categorical_overlay_image(values, manifest["biome_regions"].get("classes", {}), alpha=150, transparent_zero=True), base_size)
+        sample = _fit_image(Image.fromarray(values, mode="L"), base_size)
+        mips = _save_visual_layer(
+            out,
+            visual,
+            _visual_layer_path("layers/biome_regions", visual_format),
+            tile_size=preview_tile_size,
+            visual_format=visual_format,
+            workers=encoder_workers,
+            force=force,
+            resampling=Image.Resampling.NEAREST,
+        )
+        sample.save(out / "samples" / "biome_regions_u8.png")
+        layers.append({
+            "name": "biome_regions",
+            "kind": "overlay",
+            "label": "Biome Regions",
+            "file": mips[0]["file"],
+            "mips": mips,
+            "sample_file": "samples/biome_regions_u8.png",
+            "sample_tiles": _save_sample_tiles(out, sample, "samples/biome_regions_u8.png", tile_size=preview_tile_size, encoding="u8", workers=encoder_workers, force=force),
+        })
+        del values, visual, sample
+        gc.collect()
+        done()
+
     if "rivers" in manifest and (root / manifest["rivers"]["path"]).exists():
         report("rivers")
         done = timed("rivers")
@@ -297,6 +329,7 @@ def export_hover_previews(
         "minecraft_origin": _minecraft_origin(manifest),
         "surface_geology": manifest.get("surface_geology", {}),
         "vegetation": manifest.get("vegetation", {}),
+        "biome_regions": manifest.get("biome_regions", {}),
         "preview": {
             "river_width_source": next((layer["preview"]["source"] for layer in layers if layer["name"] == "rivers"), None),
             "river_width_scale": PREVIEW_RIVER_WIDTH_SCALE,
