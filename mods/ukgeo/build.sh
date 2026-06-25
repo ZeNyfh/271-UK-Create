@@ -12,6 +12,6 @@ cd "$(dirname "$0")"
 ./gradlew build
 
 JAR="$(ls -t build/libs/*.jar | head -n 1)"
-rm -f "$MOD_DIR"/pollution-*.jar
+rm -f "$MOD_DIR"/ukgeo-[0-9]*.jar
 cp -f "$JAR" "$MOD_DIR/"
 echo "Copied $(basename "$JAR") -> $MOD_DIR/"
