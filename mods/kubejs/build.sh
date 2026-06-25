@@ -12,5 +12,6 @@ if ! compgen -G "server_scripts/*.js" > /dev/null; then
 fi
 
 mkdir -p "$TARGET_DIR"
+find "$TARGET_DIR" -maxdepth 1 -type f -name '*.js' -delete
 cp -v server_scripts/*.js "$TARGET_DIR/"
 echo "Updated KubeJS server scripts -> $TARGET_DIR/"

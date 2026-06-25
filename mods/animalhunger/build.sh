@@ -9,7 +9,7 @@ if [ -x "$LOCAL_JAVA/bin/java" ]; then
 fi
 
 cd "$(dirname "$0")"
-./gradlew build
+./gradlew clean build
 
 JAR="$(ls -t build/libs/*.jar | head -n 1)"
 find "$MOD_DIR" -maxdepth 1 -type f -iname 'animalhunger-*.jar' -delete
