@@ -1959,13 +1959,24 @@ function shouldLoadSample(entry) {
 async function copyCoordinates(event) {
   const sample = sampleFromEvent(event);
   if (!sample) return;
-  const text = `${sample.minecraftX} ${sample.minecraftZ}`;
+  const minecraftY = minecraftHeightForCopy(sample);
+  const text = `${sample.minecraftX} ${minecraftY} ${sample.minecraftZ}`;
   try {
     await navigator.clipboard.writeText(text);
     setStatus(`Copied Minecraft coordinates: ${text}`);
   } catch {
     setStatus(`Minecraft coordinates: ${text}`);
   }
+}
+
+function minecraftHeightForCopy(sample) {
+  if (Number.isFinite(sample.minecraftHeight)) return sample.minecraftHeight;
+
+  const displayedHeight = Number(minecraftHeightText(sample));
+  if (Number.isFinite(displayedHeight)) return displayedHeight;
+
+  const model = minecraftHeightModel();
+  return Number.isFinite(model.seaLevelY) ? model.seaLevelY : 62;
 }
 
 function setStatus(message) {
