@@ -5,6 +5,7 @@ import com.foodspoilage.recipe.RecipeComplexityManager;
 import com.foodspoilage.config.FoodSpoilageConfig;
 import com.foodspoilage.spoilage.FoodClassificationManager;
 import com.foodspoilage.spoilage.FoodStackData;
+import com.foodspoilage.spoilage.FoodSpoilagePerf;
 import com.foodspoilage.spoilage.InventorySpoilageHooks;
 import com.foodspoilage.spoilage.SpoilageManager;
 import com.foodspoilage.spoilage.SpoilageStage;
@@ -110,14 +111,15 @@ public final class FoodSpoilageEvents {
             return;
         }
         if (event.getEntity() instanceof ItemEntity itemEntity) {
-            if (itemEntity.tickCount % 100 != 0) {
+            if (Math.floorMod(itemEntity.getId(), 100) != Math.floorMod(itemEntity.tickCount, 100)) {
                 return;
             }
+            FoodSpoilagePerf.itemEntityCheck();
             itemEntity.setItem(SpoilageManager.transformIfRotten(itemEntity.getItem()));
             SpoilageManager.refresh(itemEntity.getItem());
             return;
         }
-        if (event.getEntity() instanceof Player player && player.tickCount % 20 == 0) {
+        if (event.getEntity() instanceof Player player && Math.floorMod(player.getId(), 100) == Math.floorMod(player.tickCount, 100)) {
             InventorySpoilageHooks.scanPlayerInventory(player);
             InventorySpoilageHooks.scanMenu(player.containerMenu);
         }

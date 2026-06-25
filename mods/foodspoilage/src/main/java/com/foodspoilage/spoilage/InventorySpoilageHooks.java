@@ -16,37 +16,50 @@ public final class InventorySpoilageHooks {
     private InventorySpoilageHooks() {
     }
 
-    public static void onStackEnteredInventory(ItemStack stack) {
+    public static boolean onStackEnteredInventory(ItemStack stack) {
         if (stack == null || stack.isEmpty()) {
-            return;
+            return false;
         }
+        boolean hadData = SpoilageManager.existingData(stack) != null;
         SpoilageManager.ensureInitialized(stack);
+        return !hadData && SpoilageManager.existingData(stack) != null;
     }
 
-    public static void scanContainer(Container container) {
+    public static boolean scanContainer(Container container) {
         if (container == null) {
-            return;
+            return false;
         }
+        boolean changed = false;
         int size = container.getContainerSize();
         for (int slot = 0; slot < size; slot++) {
-            onStackEnteredInventory(container.getItem(slot));
+            changed |= onStackEnteredInventory(container.getItem(slot));
         }
-        container.setChanged();
+        if (changed) {
+            container.setChanged();
+        }
+        return changed;
     }
 
-    public static void scanPlayerInventory(Player player) {
+    public static boolean scanPlayerInventory(Player player) {
         if (player == null || player.level().isClientSide()) {
-            return;
+            return false;
         }
-        scanContainer(player.getInventory());
+        long startNanos = System.nanoTime();
+        boolean changed = scanContainer(player.getInventory());
+        FoodSpoilagePerf.playerInventoryScan(System.nanoTime() - startNanos, changed);
+        return changed;
     }
 
-    public static void scanMenu(AbstractContainerMenu menu) {
+    public static boolean scanMenu(AbstractContainerMenu menu) {
         if (menu == null) {
-            return;
+            return false;
         }
+        long startNanos = System.nanoTime();
+        boolean changed = false;
         for (Slot slot : menu.slots) {
-            onStackEnteredInventory(slot.getItem());
+            changed |= onStackEnteredInventory(slot.getItem());
         }
+        FoodSpoilagePerf.menuScan(System.nanoTime() - startNanos, changed);
+        return changed;
     }
 }
