@@ -1,5 +1,7 @@
 package git.zenyfh.vanilla_adjustments;
 
+import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
+import it.unimi.dsi.fastutil.longs.LongSet;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.resources.ResourceKey;
@@ -13,7 +15,19 @@ import net.minecraft.world.level.material.FluidState;
 
 public final class PlayerPlacedWaterSourceHandler {
     private static final ThreadLocal<NaturalSourcePlacement> NATURAL_SOURCE_PLACEMENT = new ThreadLocal<>();
+    private static final ThreadLocal<Integer> CONTRAPTION_CONTEXT_DEPTH = ThreadLocal.withInitial(() -> 0);
+    private static final boolean DEBUG_FLUID_PERF = Boolean.getBoolean("vanillaadjust.debugFluidPerf");
+    private static final boolean ENABLE_STACK_TRACE_FALLBACK = Boolean.getBoolean("vanillaadjust.enableContraptionStackTraceFallback");
+    private static final long CLUSTER_MARK_LOG_INTERVAL = Long.getLong("vanillaadjust.clusterMarkLogInterval", 250L);
     private static final int CONTRAPTION_WATER_MARK_RADIUS = 2;
+    private static ResourceKey<Level> recentClusterDimension;
+    private static long recentClusterTick = Long.MIN_VALUE;
+    private static final LongSet RECENT_CLUSTER_CENTERS = new LongOpenHashSet();
+    private static long fluidSourceChecks;
+    private static long blockedConversions;
+    private static long contraptionContextActivations;
+    private static long stackTraceFallbackUses;
+    private static long clusterMarkBatches;
 
     private PlayerPlacedWaterSourceHandler() {
     }
@@ -110,6 +124,7 @@ public final class PlayerPlacedWaterSourceHandler {
     }
 
     public static boolean shouldBlockWaterSourceConversion(Level level, BlockPos targetPos) {
+        fluidSourceChecks++;
         if (!VanillaAdjustConfig.PLAYER_PLACED_WATER_SOURCE_LIMIT_ENABLED.get() || level.isClientSide()) {
             return false;
         }
@@ -133,6 +148,7 @@ public final class PlayerPlacedWaterSourceHandler {
                 // behaviour is to prevent water from upgrading to a new source there at all.
                 debug("blocked source conversion in non-ServerLevel %s at %s", level.getClass().getName(), targetPos);
             }
+            blockedConversions++;
             return true;
         }
 
@@ -159,6 +175,7 @@ public final class PlayerPlacedWaterSourceHandler {
 
         boolean blocked = nonNaturalSources > 0;
         if (blocked) {
+            blockedConversions++;
             debug(
                     "blocked source conversion at %s %s natural=%d nonNatural=%d",
                     serverLevel.dimension().location(),
@@ -196,6 +213,7 @@ public final class PlayerPlacedWaterSourceHandler {
      * repair the result after the fluid has already converted.
      */
     public static boolean shouldBlockCreateFluidSource(Level level, BlockPos sourcePos, BlockState sourceState) {
+        fluidSourceChecks++;
         if (!VanillaAdjustConfig.PLAYER_PLACED_WATER_SOURCE_LIMIT_ENABLED.get()
                 || level.isClientSide()
                 || !isWater(sourceState.getFluidState())) {
@@ -209,6 +227,7 @@ public final class PlayerPlacedWaterSourceHandler {
             } else {
                 debug("blocked CreateFluidSourceEvent in non-ServerLevel %s at %s", level.getClass().getName(), sourcePos);
             }
+            blockedConversions++;
             return true;
         }
 
@@ -217,6 +236,7 @@ public final class PlayerPlacedWaterSourceHandler {
         }
 
         if (isMarkedNonNaturalWater(serverLevel, sourcePos) || hasNearbyMarkedNonNaturalWater(serverLevel, sourcePos)) {
+            blockedConversions++;
             debug("blocked CreateFluidSourceEvent from non-natural water at %s %s", serverLevel.dimension().location(), sourcePos);
             return true;
         }
@@ -312,22 +332,61 @@ public final class PlayerPlacedWaterSourceHandler {
     }
 
     private static void markNearbyWaterAsContraptionWater(ServerLevel level, BlockPos center, String reason) {
-        int marked = 0;
+        if (!beginClusterMark(level, center)) {
+            return;
+        }
+        LongSet waterPositions = new LongOpenHashSet();
         BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
         for (int dx = -CONTRAPTION_WATER_MARK_RADIUS; dx <= CONTRAPTION_WATER_MARK_RADIUS; dx++) {
             for (int dy = -1; dy <= 1; dy++) {
                 for (int dz = -CONTRAPTION_WATER_MARK_RADIUS; dz <= CONTRAPTION_WATER_MARK_RADIUS; dz++) {
                     cursor.set(center.getX() + dx, center.getY() + dy, center.getZ() + dz);
                     if (isWater(level.getFluidState(cursor))) {
-                        markNonNaturalWater(level, cursor.immutable(), reason);
-                        marked++;
+                        waterPositions.add(cursor.asLong());
                     }
                 }
             }
         }
-        if (marked > 0) {
-            debug("marked %d nearby contraption water blocks around %s %s reason=%s", marked, level.dimension().location(), center, reason);
+        PlayerPlacedWaterSourceSavedData data = PlayerPlacedWaterSourceSavedData.get(level);
+        int marked = data.addNonNaturalWaterBatch(waterPositions);
+        for (long pos : waterPositions) {
+            data.removeNonNaturalIce(pos);
         }
+        if (marked > 0) {
+            clusterMarkBatches++;
+            debug("marked %d nearby contraption water blocks around %s %s reason=%s", marked, level.dimension().location(), center, reason);
+            maybeLogFluidPerf();
+        }
+    }
+
+    private static boolean beginClusterMark(ServerLevel level, BlockPos center) {
+        long gameTime = level.getGameTime();
+        synchronized (RECENT_CLUSTER_CENTERS) {
+            if (recentClusterTick != gameTime || recentClusterDimension == null || !recentClusterDimension.equals(level.dimension())) {
+                RECENT_CLUSTER_CENTERS.clear();
+                recentClusterTick = gameTime;
+                recentClusterDimension = level.dimension();
+            }
+            return RECENT_CLUSTER_CENTERS.add(center.asLong());
+        }
+    }
+
+    public static void enterContraptionContext() {
+        CONTRAPTION_CONTEXT_DEPTH.set(CONTRAPTION_CONTEXT_DEPTH.get() + 1);
+        contraptionContextActivations++;
+    }
+
+    public static void exitContraptionContext() {
+        int depth = CONTRAPTION_CONTEXT_DEPTH.get();
+        if (depth <= 1) {
+            CONTRAPTION_CONTEXT_DEPTH.remove();
+        } else {
+            CONTRAPTION_CONTEXT_DEPTH.set(depth - 1);
+        }
+    }
+
+    public static boolean inContraptionContext() {
+        return CONTRAPTION_CONTEXT_DEPTH.get() > 0;
     }
 
     private static boolean consumeAllowedNaturalSourceWaterPlacement(ServerLevel level, BlockPos pos) {
@@ -347,6 +406,13 @@ public final class PlayerPlacedWaterSourceHandler {
     }
 
     private static boolean isLikelyContraptionWaterPlacement() {
+        if (inContraptionContext()) {
+            return true;
+        }
+        if (!ENABLE_STACK_TRACE_FALLBACK) {
+            return false;
+        }
+        stackTraceFallbackUses++;
         StackTraceElement[] stack = Thread.currentThread().getStackTrace();
         for (StackTraceElement element : stack) {
             String className = element.getClassName().toLowerCase();
@@ -363,6 +429,22 @@ public final class PlayerPlacedWaterSourceHandler {
             }
         }
         return false;
+    }
+
+    private static void maybeLogFluidPerf() {
+        if (!DEBUG_FLUID_PERF) {
+            return;
+        }
+        if (clusterMarkBatches > 0 && clusterMarkBatches % CLUSTER_MARK_LOG_INTERVAL == 0) {
+            Vanilla_adjustments.LOGGER.info(
+                    "VanillaAdjust fluid perf sourceChecks={} blockedConversions={} contraptionContextActivations={} stackTraceFallbackUses={} clusterMarkBatches={}",
+                    fluidSourceChecks,
+                    blockedConversions,
+                    contraptionContextActivations,
+                    stackTraceFallbackUses,
+                    clusterMarkBatches
+            );
+        }
     }
 
     public static boolean isPlayerPlacedWaterSource(ServerLevel level, BlockPos pos) {

@@ -56,6 +56,19 @@ public final class PlayerPlacedWaterSourceSavedData extends SavedData {
         return false;
     }
 
+    public int addNonNaturalWaterBatch(LongSet positions) {
+        int added = 0;
+        for (long pos : positions) {
+            if (nonNaturalWaterSources.add(pos)) {
+                added++;
+            }
+        }
+        if (added > 0) {
+            setDirty();
+        }
+        return added;
+    }
+
     public boolean removeNonNaturalWater(long pos) {
         if (nonNaturalWaterSources.remove(pos)) {
             setDirty();
