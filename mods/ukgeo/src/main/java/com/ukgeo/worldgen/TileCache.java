@@ -8,6 +8,9 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 public final class TileCache<K, V> {
+    private static final boolean DEBUG_TILE_CACHE = Boolean.getBoolean("ukgeo.debugTileCache");
+    private static final long SLOW_TILE_LOAD_WARN_MS = Long.getLong("ukgeo.slowTileLoadWarnMs", 100L);
+    private static final long TILE_CACHE_LOG_INTERVAL = Long.getLong("ukgeo.tileCacheLogInterval", 4096L);
     private final int maxEntries;
     private final LinkedHashMap<K, V> cache;
     private final ConcurrentHashMap<K, CompletableFuture<V>> inFlightLoads = new ConcurrentHashMap<>();
@@ -29,9 +32,11 @@ public final class TileCache<K, V> {
             V value = cache.get(key);
             if (value != null) {
                 hits++;
+                maybeLogStats();
                 return value;
             }
             misses++;
+            maybeLogStats();
         }
 
         CompletableFuture<V> loadFuture = new CompletableFuture<>();
@@ -41,7 +46,12 @@ public final class TileCache<K, V> {
         }
 
         try {
+            long startNanos = System.nanoTime();
             V loaded = loader.load(key);
+            long elapsedMs = (System.nanoTime() - startNanos) / 1_000_000L;
+            if (DEBUG_TILE_CACHE && elapsedMs >= SLOW_TILE_LOAD_WARN_MS) {
+                UkGeoMod.LOGGER.warn("UKGeo tile cache slow load key={} elapsed={}ms threshold={}ms", key, elapsedMs, SLOW_TILE_LOAD_WARN_MS);
+            }
             synchronized (this) {
                 V existing = cache.get(key);
                 if (existing != null) {
@@ -80,6 +90,16 @@ public final class TileCache<K, V> {
 
     public synchronized String stats() {
         return "entries=%d hits=%d misses=%d".formatted(cache.size(), hits, misses);
+    }
+
+    private synchronized void maybeLogStats() {
+        if (!DEBUG_TILE_CACHE) {
+            return;
+        }
+        long total = hits + misses;
+        if (total > 0 && total % TILE_CACHE_LOG_INTERVAL == 0) {
+            UkGeoMod.LOGGER.info("UKGeo tile cache {}", stats());
+        }
     }
 
     @FunctionalInterface

@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -19,6 +20,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.LongAdder;
 import net.minecraft.Util;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
@@ -81,11 +83,19 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     private static final boolean ENABLE_DEEP_CARVERS = !Boolean.getBoolean("ukgeo.disableDeepCaves");
     private static final boolean ENABLE_BIOME_FEATURE_DECORATION = !Boolean.getBoolean("ukgeo.disableBiomeFeatureDecoration");
     private static final boolean DEBUG_BIOME_DECORATION = Boolean.getBoolean("ukgeo.debugBiomeDecoration") || DEBUG_GEN_TIMINGS;
-    private static final long SLOW_BIOME_DECORATION_WARN_MS = Long.getLong("ukgeo.slowBiomeDecorationWarnMs", 5_000L);
+    private static final boolean DEBUG_STRUCTURE_CLEANUP = Boolean.getBoolean("ukgeo.debugStructureCleanup") || DEBUG_GEN_TIMINGS;
+    private static final long SLOW_FILL_FROM_NOISE_WARN_MS = Long.getLong("ukgeo.slowFillFromNoiseWarnMs", 500L);
+    private static final long SLOW_APPLY_BIOME_DECORATION_WARN_MS = Long.getLong("ukgeo.slowApplyBiomeDecorationWarnMs", 500L);
+    private static final long SLOW_BIOME_DECORATION_WARN_MS = Long.getLong("ukgeo.slowBiomeDecorationWarnMs", 1_000L);
     private static final long FULL_BIOME_DECORATION_AUTO_DISABLE_MS = Long.getLong("ukgeo.fullBiomeDecorationAutoDisableMs", 3_000L);
     private static final boolean ENABLE_SAFE_MODDED_PLANTS = !Boolean.getBoolean("ukgeo.disableSafeModdedPlants");
     private static final boolean ENABLE_ANCIENT_CITY_AIR_CLEANUP = !Boolean.getBoolean("ukgeo.disableAncientCityAirCleanup");
-    private static final int ANCIENT_CITY_AIR_CLEANUP_MAX_Y = Integer.getInteger("ukgeo.ancientCityAirCleanupMaxY", 128);
+    private static final int ANCIENT_CITY_AIR_CLEANUP_MIN_Y = Integer.getInteger("ukgeo.ancientCityAirCleanupMinY", -80);
+    private static final int ANCIENT_CITY_AIR_CLEANUP_MAX_Y = Integer.getInteger("ukgeo.ancientCityAirCleanupMaxY", 96);
+    private static final int MAX_PENDING_CHUNK_PLANS = Integer.getInteger("ukgeo.maxPendingChunkPlans", 4096);
+    private static final int MAX_BASE_COLUMN_CACHE = Integer.getInteger("ukgeo.maxBaseColumnCache", 8192);
+    private static final int MAX_TREE_FEATURE_CACHE = Integer.getInteger("ukgeo.maxTreeFeatureCache", 4096);
+    private static final int PERF_LOG_INTERVAL_CHUNKS = Integer.getInteger("ukgeo.perfLogIntervalChunks", 200);
     private static final int DEBUG_WATER_X = Integer.getInteger("ukgeo.debugWaterX", 30);
     private static final int DEBUG_WATER_Z = Integer.getInteger("ukgeo.debugWaterZ", 72);
     private static final int DEBUG_WATER_Y = Integer.getInteger("ukgeo.debugWaterY", 67);
@@ -145,6 +155,48 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     private static final AtomicInteger debugHeightBoundsLogs = new AtomicInteger();
     private static final Set<String> debuggedOreHeights = ConcurrentHashMap.newKeySet();
     private static final Set<String> debuggedCarverBiomes = ConcurrentHashMap.newKeySet();
+    private static final PerfCounters PERF = new PerfCounters();
+    private static final String[] MODDED_ARABLE_PLANTS = {
+        "farmersdelight:wild_cabbages",
+        "farmersdelight:wild_onions",
+        "farmersdelight:wild_tomatoes",
+        "farmersdelight:wild_carrots",
+        "farmersdelight:wild_potatoes",
+        "farmersdelight:wild_beetroots"
+    };
+    private static final String[] MODDED_GRASSLAND_PLANTS = {
+        "farmersdelight:wild_cabbages",
+        "farmersdelight:wild_onions",
+        "farmersdelight:wild_carrots",
+        "farmersdelight:wild_potatoes",
+        "wildernature:bluebell",
+        "wildernature:lavender",
+        "wildernature:thistle"
+    };
+    private static final String[] MODDED_HEATH_PLANTS = {
+        "wildernature:heather",
+        "wildernature:lavender",
+        "wildernature:thistle",
+        "wildernature:bluebell"
+    };
+    private static final String[] MODDED_WETLAND_PLANTS = {
+        "wildernature:cattail",
+        "wildernature:reed",
+        "wildernature:sedge"
+    };
+    private static final String[] MODDED_BROADLEAF_PLANTS = {
+        "farmersdelight:brown_mushroom_colony",
+        "farmersdelight:red_mushroom_colony",
+        "wildernature:bluebell",
+        "wildernature:small_fern",
+        "wildernature:fern"
+    };
+    private static final String[] MODDED_CONIFER_PLANTS = {
+        "farmersdelight:brown_mushroom_colony",
+        "farmersdelight:red_mushroom_colony",
+        "wildernature:small_fern",
+        "wildernature:fern"
+    };
     private static final List<ResourceKey<PlacedFeature>> VANILLA_TREE_FEATURES = List.of(
         VegetationPlacements.TREES_PLAINS,
         VegetationPlacements.TREES_BIRCH_AND_OAK,
@@ -203,8 +255,8 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     private static final AtomicBoolean FULL_BIOME_DECORATION_RUNTIME_DISABLED = new AtomicBoolean();
     private static final AtomicInteger ACTIVE_FULL_BIOME_DECORATIONS = new AtomicInteger();
     private final ConcurrentHashMap<Long, ChunkTerrainPlanner.Plan> decorationWaterPlans = new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<BaseQueryKey, BaseColumnPlan> baseColumnCache = new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<Long, Set<ResourceKey<PlacedFeature>>> chunkTreeFeatureCache = new ConcurrentHashMap<>();
+    private final BoundedCache<BaseQueryKey, BaseColumnPlan> baseColumnCache = new BoundedCache<>(MAX_BASE_COLUMN_CACHE);
+    private final BoundedCache<Long, Set<ResourceKey<PlacedFeature>>> chunkTreeFeatureCache = new BoundedCache<>(MAX_TREE_FEATURE_CACHE);
 
     public UkGeoChunkGenerator(
         BiomeSource biomeSource,
@@ -390,10 +442,14 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
                 )
             .thenApply(plan -> {
                 chunkPlans.put(noiseChunk.getPos().toLong(), plan);
+                trimChunkPlanMap(chunkPlans, noiseChunk.getPos());
                 long applyStartNanos = System.nanoTime();
                 ChunkTerrainPlanner.apply(plan, noiseChunk, caveMask);
                 logTiming("fillFromNoise.apply", noiseChunk.getPos(), applyStartNanos);
+                long elapsedNanos = System.nanoTime() - fillStartNanos;
+                PERF.recordFill(elapsedNanos);
                 logTiming("fillFromNoise.total", noiseChunk.getPos(), fillStartNanos);
+                logSlowTiming("fillFromNoise.total", noiseChunk.getPos(), elapsedNanos, SLOW_FILL_FROM_NOISE_WARN_MS);
                 return noiseChunk;
             }));
     }
@@ -2015,6 +2071,7 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         ChunkTerrainPlanner.Plan plan = chunkPlans.remove(chunk.getPos().toLong());
         if (plan != null) {
             decorationWaterPlans.put(chunk.getPos().toLong(), plan);
+            trimChunkPlanMap(decorationWaterPlans, chunk.getPos());
             if (CLEAN_PLANNED_DELEGATE_FLUIDS) {
                 long removeFluidsStartNanos = System.nanoTime();
                 removeDelegateCaveFluids(chunk, plan, false);
@@ -2100,7 +2157,9 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
                 throw throwable;
             } finally {
                 int remaining = ACTIVE_FULL_BIOME_DECORATIONS.decrementAndGet();
-                long elapsedMs = (System.nanoTime() - biomeFeatureStartNanos) / 1_000_000L;
+                long elapsedNanos = System.nanoTime() - biomeFeatureStartNanos;
+                long elapsedMs = elapsedNanos / 1_000_000L;
+                PERF.recordFullDecoration(elapsedNanos);
                 if (elapsedMs >= SLOW_BIOME_DECORATION_WARN_MS) {
                     UkGeoMod.LOGGER.warn(
                         "UKGeo full biome decoration SLOW chunk={} elapsed={}ms thread={} remainingActive={} threshold={}ms",
@@ -2132,9 +2191,13 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         if (ranFullBiomeDecoration) {
             long ancientCityCleanupStartNanos = System.nanoTime();
             cleanupBuriedAncientCityAir(chunk);
+            long ancientElapsed = System.nanoTime() - ancientCityCleanupStartNanos;
+            PERF.recordAncientCleanup(ancientElapsed);
             logTiming("cleanupBuriedAncientCityAir", chunk.getPos(), ancientCityCleanupStartNanos);
             long unsafeDecorationCleanupStartNanos = System.nanoTime();
             cleanupUnsafeDecoratedWaterAndRice(chunk, decorationWaterPlans.get(chunkPos.toLong()));
+            long riceElapsed = System.nanoTime() - unsafeDecorationCleanupStartNanos;
+            PERF.recordRiceCleanup(riceElapsed);
             logTiming("cleanupUnsafeDecoratedWaterAndRice", chunk.getPos(), unsafeDecorationCleanupStartNanos);
         }
         long snowRemoveStartNanos = System.nanoTime();
@@ -2154,7 +2217,11 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
             placeVegetation(chunk);
             logTiming("placeVegetation(fallback.decoration)", chunk.getPos(), vegetationStartNanos);
         }
+        long elapsedNanos = System.nanoTime() - startNanos;
+        PERF.recordApplyDecoration(elapsedNanos);
         logTiming("applyBiomeDecoration.total", chunk.getPos(), startNanos);
+        logSlowTiming("applyBiomeDecoration.total", chunk.getPos(), elapsedNanos, SLOW_APPLY_BIOME_DECORATION_WARN_MS);
+        PERF.maybeLog(chunk.getPos());
     }
 
 
@@ -2162,9 +2229,12 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         if (!ENABLE_ANCIENT_CITY_AIR_CLEANUP) {
             return;
         }
+        if (!mayContainAncientCityCleanupTarget(chunk)) {
+            return;
+        }
         BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
         ChunkPos pos = chunk.getPos();
-        int minY = Math.max(chunk.getMinBuildHeight(), -96);
+        int minY = Math.max(chunk.getMinBuildHeight(), ANCIENT_CITY_AIR_CLEANUP_MIN_Y);
         int maxY = Math.min(chunk.getMaxBuildHeight() - 1, ANCIENT_CITY_AIR_CLEANUP_MAX_Y);
         if (minY > maxY) {
             return;
@@ -2183,9 +2253,35 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
                 }
             }
         }
-        if (DEBUG_BIOME_DECORATION && cleared > 0) {
+        if (DEBUG_STRUCTURE_CLEANUP && cleared > 0) {
             UkGeoMod.LOGGER.info("UKGeo ancient city air cleanup chunk={} cleared={} blocks", chunk.getPos(), cleared);
         }
+    }
+
+    private static boolean mayContainAncientCityCleanupTarget(ChunkAccess chunk) {
+        boolean[] found = {false};
+        for (var section : chunk.getSections()) {
+            section.getBiomes().getAll(biome -> {
+                if (!found[0] && isAncientCityCandidateBiome(biome)) {
+                    found[0] = true;
+                }
+            });
+            if (found[0]) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean isAncientCityCandidateBiome(Holder<Biome> biome) {
+        return biome.unwrapKey().map(key -> {
+            ResourceLocation id = key.location();
+            if (!"ukgeo".equals(id.getNamespace())) {
+                return false;
+            }
+            String path = id.getPath();
+            return path.equals("mountains") || path.equals("rocky") || path.contains("deep_dark");
+        }).orElse(false);
     }
 
     private int clearAncientCityPocket(ChunkAccess chunk, BlockPos.MutableBlockPos cursor, int anchorX, int anchorY, int anchorZ, int worldX, int worldZ) {
@@ -2265,6 +2361,9 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     }
 
     private void cleanupUnsafeDecoratedWaterAndRice(ChunkAccess chunk, ChunkTerrainPlanner.Plan plan) {
+        if (!BuiltInRegistries.BLOCK.containsKey(FARMERS_DELIGHT_RICE_ID)) {
+            return;
+        }
         BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
         Heightmap surfaceMap = chunk.getOrCreateHeightmapUnprimed(Heightmap.Types.WORLD_SURFACE_WG);
         ChunkPos pos = chunk.getPos();
@@ -2336,9 +2435,6 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
             section.getBiomes().getAll(biome -> addVanillaTreeFeaturesForBiome(discovered, biome));
         }
         Set<ResourceKey<PlacedFeature>> immutable = Set.copyOf(discovered);
-        if (chunkTreeFeatureCache.size() > 8192) {
-            chunkTreeFeatureCache.clear();
-        }
         Set<ResourceKey<PlacedFeature>> existing = chunkTreeFeatureCache.putIfAbsent(key, immutable);
         return existing == null ? immutable : existing;
     }
@@ -2952,52 +3048,15 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         }
 
         String[] candidates = switch (vegetationClass) {
-            case VEGETATION_ARABLE -> new String[] {
-                "farmersdelight:wild_cabbages",
-                "farmersdelight:wild_onions",
-                "farmersdelight:wild_tomatoes",
-                "farmersdelight:wild_carrots",
-                "farmersdelight:wild_potatoes",
-                "farmersdelight:wild_beetroots"
-            };
-            case VEGETATION_IMPROVED_GRASSLAND, VEGETATION_NEUTRAL_GRASSLAND, VEGETATION_CALCAREOUS_GRASSLAND -> new String[] {
-                "farmersdelight:wild_cabbages",
-                "farmersdelight:wild_onions",
-                "farmersdelight:wild_carrots",
-                "farmersdelight:wild_potatoes",
-                "wildernature:bluebell",
-                "wildernature:lavender",
-                "wildernature:thistle"
-            };
-            case VEGETATION_ACID_GRASSLAND, VEGETATION_HEATH -> new String[] {
-                "wildernature:heather",
-                "wildernature:lavender",
-                "wildernature:thistle",
-                "wildernature:bluebell"
-            };
-            case VEGETATION_WETLAND -> new String[] {
-                // Do not place Farmer's Delight rice here: it is waterlogged/can create
-                // unwanted water patches if forced onto ordinary terrain by this local flora pass.
-                "wildernature:cattail",
-                "wildernature:reed",
-                "wildernature:sedge"
-            };
-            case VEGETATION_BROADLEAF_WOODLAND -> new String[] {
-                "farmersdelight:brown_mushroom_colony",
-                "farmersdelight:red_mushroom_colony",
-                "wildernature:bluebell",
-                "wildernature:small_fern",
-                "wildernature:fern"
-            };
-            case VEGETATION_CONIFER_WOODLAND -> new String[] {
-                "farmersdelight:brown_mushroom_colony",
-                "farmersdelight:red_mushroom_colony",
-                "wildernature:small_fern",
-                "wildernature:fern"
-            };
-            default -> new String[0];
+            case VEGETATION_ARABLE -> MODDED_ARABLE_PLANTS;
+            case VEGETATION_IMPROVED_GRASSLAND, VEGETATION_NEUTRAL_GRASSLAND, VEGETATION_CALCAREOUS_GRASSLAND -> MODDED_GRASSLAND_PLANTS;
+            case VEGETATION_ACID_GRASSLAND, VEGETATION_HEATH -> MODDED_HEATH_PLANTS;
+            case VEGETATION_WETLAND -> MODDED_WETLAND_PLANTS;
+            case VEGETATION_BROADLEAF_WOODLAND -> MODDED_BROADLEAF_PLANTS;
+            case VEGETATION_CONIFER_WOODLAND -> MODDED_CONIFER_PLANTS;
+            default -> null;
         };
-        if (candidates.length == 0) {
+        if (candidates == null || candidates.length == 0) {
             return null;
         }
         int start = (int) Math.floor(hashUnit(worldX, worldZ, 0x4d4f4446494e4458L) * candidates.length);
@@ -3354,6 +3413,148 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         }
     }
 
+    private static void logSlowTiming(String label, ChunkPos chunkPos, long elapsedNanos, long thresholdMs) {
+        if (thresholdMs > 0L && elapsedNanos >= thresholdMs * 1_000_000L) {
+            UkGeoMod.LOGGER.warn("UKGeo slow operation chunk {} {}={}ms threshold={}ms", chunkPos, label, elapsedNanos / 1_000_000.0, thresholdMs);
+        }
+    }
+
+    private static void trimChunkPlanMap(ConcurrentHashMap<Long, ChunkTerrainPlanner.Plan> plans, ChunkPos center) {
+        if (plans.size() <= MAX_PENDING_CHUNK_PLANS) {
+            return;
+        }
+        int keepRadius = 96;
+        for (Long key : plans.keySet()) {
+            int x = ChunkPos.getX(key);
+            int z = ChunkPos.getZ(key);
+            if (Math.abs(x - center.x) > keepRadius || Math.abs(z - center.z) > keepRadius) {
+                plans.remove(key);
+                if (plans.size() <= MAX_PENDING_CHUNK_PLANS) {
+                    return;
+                }
+            }
+        }
+    }
+
+    private static final class BoundedCache<K, V> {
+        private final int maxEntries;
+        private final LinkedHashMap<K, V> values;
+
+        private BoundedCache(int maxEntries) {
+            this.maxEntries = Math.max(16, maxEntries);
+            this.values = new LinkedHashMap<>(16, 0.75f, true) {
+                @Override
+                protected boolean removeEldestEntry(Map.Entry<K, V> eldest) {
+                    return size() > BoundedCache.this.maxEntries;
+                }
+            };
+        }
+
+        synchronized V get(K key) {
+            return values.get(key);
+        }
+
+        synchronized V putIfAbsent(K key, V value) {
+            V existing = values.get(key);
+            if (existing != null) {
+                return existing;
+            }
+            values.put(key, value);
+            return null;
+        }
+    }
+
+    private static final class PerfCounters {
+        private final LongAdder chunksFilled = new LongAdder();
+        private final LongAdder fillNanos = new LongAdder();
+        private final LongAdder maxFillNanos = new LongAdder();
+        private final LongAdder chunksDecorated = new LongAdder();
+        private final LongAdder decorationNanos = new LongAdder();
+        private final LongAdder maxDecorationNanos = new LongAdder();
+        private final LongAdder fullDecorationCalls = new LongAdder();
+        private final LongAdder fullDecorationNanos = new LongAdder();
+        private final LongAdder maxFullDecorationNanos = new LongAdder();
+        private final LongAdder ancientCleanupCalls = new LongAdder();
+        private final LongAdder ancientCleanupNanos = new LongAdder();
+        private final LongAdder riceCleanupCalls = new LongAdder();
+        private final LongAdder riceCleanupNanos = new LongAdder();
+
+        void recordFill(long nanos) {
+            chunksFilled.increment();
+            fillNanos.add(nanos);
+            addMax(maxFillNanos, nanos);
+        }
+
+        void recordApplyDecoration(long nanos) {
+            chunksDecorated.increment();
+            decorationNanos.add(nanos);
+            addMax(maxDecorationNanos, nanos);
+        }
+
+        void recordFullDecoration(long nanos) {
+            fullDecorationCalls.increment();
+            fullDecorationNanos.add(nanos);
+            addMax(maxFullDecorationNanos, nanos);
+        }
+
+        void recordAncientCleanup(long nanos) {
+            ancientCleanupCalls.increment();
+            ancientCleanupNanos.add(nanos);
+        }
+
+        void recordRiceCleanup(long nanos) {
+            riceCleanupCalls.increment();
+            riceCleanupNanos.add(nanos);
+        }
+
+        void maybeLog(ChunkPos chunkPos) {
+            if (!DEBUG_GEN_TIMINGS && !DEBUG_BIOME_DECORATION && !DEBUG_STRUCTURE_CLEANUP) {
+                return;
+            }
+            long decorated = chunksDecorated.sum();
+            if (decorated <= 0 || decorated % Math.max(1, PERF_LOG_INTERVAL_CHUNKS) != 0) {
+                return;
+            }
+            long filled = chunksFilled.sum();
+            long fullCalls = fullDecorationCalls.sum();
+            UkGeoMod.LOGGER.info(
+                "UKGeo perf chunk={} filled={} avgFill={}ms maxFill={}ms decorated={} avgDecor={}ms maxDecor={}ms fullDecorCalls={} avgFullDecor={}ms maxFullDecor={}ms ancientCleanupCalls={} ancientCleanupMs={} riceCleanupCalls={} riceCleanupMs={} fullDecorAutoDisabled={}",
+                chunkPos,
+                filled,
+                avgMillis(fillNanos.sum(), filled),
+                millis(maxFillNanos.sum()),
+                decorated,
+                avgMillis(decorationNanos.sum(), decorated),
+                millis(maxDecorationNanos.sum()),
+                fullCalls,
+                avgMillis(fullDecorationNanos.sum(), fullCalls),
+                millis(maxFullDecorationNanos.sum()),
+                ancientCleanupCalls.sum(),
+                millis(ancientCleanupNanos.sum()),
+                riceCleanupCalls.sum(),
+                millis(riceCleanupNanos.sum()),
+                FULL_BIOME_DECORATION_RUNTIME_DISABLED.get()
+            );
+        }
+
+        private static void addMax(LongAdder adder, long value) {
+            synchronized (adder) {
+                long current = adder.sum();
+                if (value > current) {
+                    adder.add(value - current);
+                }
+            }
+        }
+
+        private static double avgMillis(long nanos, long count) {
+            return count <= 0 ? 0.0 : millis(nanos / count);
+        }
+
+        private static double millis(long nanos) {
+            return nanos / 1_000_000.0;
+        }
+    }
+
     @Override
     public void spawnOriginalMobs(WorldGenRegion level) {
         ChunkPos chunkPos = level.getCenter();
@@ -3581,9 +3782,6 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         BlockState surfaceRock = hasHeightData ? sampleSurfaceRock(runtime, x, z, surface) : defaultBaseRock(surface);
         BlockState exposedSurfaceRock = ChunkTerrainPlanner.exposedSurfaceRock(x, z, surfaceRock);
         BaseColumnPlan plan = new BaseColumnPlan(surface, vegetation, river, surfaceRock, exposedSurfaceRock);
-        if (baseColumnCache.size() > 8192) {
-            baseColumnCache.clear();
-        }
         BaseColumnPlan existing = baseColumnCache.putIfAbsent(key, plan);
         return existing == null ? plan : existing;
     }
