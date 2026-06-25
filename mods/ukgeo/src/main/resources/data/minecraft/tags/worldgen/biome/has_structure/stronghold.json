@@ -1,0 +1,17 @@
+{
+  "replace": false,
+  "values": [
+    "ukgeo:acid_grassland",
+    "ukgeo:arable",
+    "ukgeo:broadleaf_woodland",
+    "ukgeo:calcareous_grassland",
+    "ukgeo:conifer_woodland",
+    "ukgeo:heath",
+    "ukgeo:improved_grassland",
+    "ukgeo:neutral_grassland",
+    "ukgeo:rocky",
+    "ukgeo:urban",
+    "ukgeo:wetland",
+    "ukgeo:mountains"
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "replace": false,
+  "values": [
+    "ukgeo:arable",
+    "ukgeo:calcareous_grassland",
+    "ukgeo:rocky"
+  ]
+}

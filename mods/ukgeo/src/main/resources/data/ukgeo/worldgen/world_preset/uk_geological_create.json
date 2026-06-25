@@ -20,7 +20,13 @@
           "heath": "ukgeo:heath",
           "freshwater": "ukgeo:freshwater",
           "urban": "ukgeo:urban",
-          "rocky": "ukgeo:rocky"
+          "rocky": "ukgeo:rocky",
+          "extras": {
+            "mountains": "ukgeo:mountains",
+            "lush_caves": "minecraft:lush_caves",
+            "deep_dark": "minecraft:deep_dark",
+            "dripstone_caves": "minecraft:dripstone_caves"
+          }
         },
         "cave_settings": "minecraft:overworld",
         "sea_level_y": 64,

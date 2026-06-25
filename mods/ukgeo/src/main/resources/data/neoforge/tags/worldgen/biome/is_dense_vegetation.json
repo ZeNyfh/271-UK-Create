@@ -1,0 +1,8 @@
+{
+  "replace": false,
+  "values": [
+    "ukgeo:broadleaf_woodland",
+    "ukgeo:conifer_woodland",
+    "ukgeo:wetland"
+  ]
+}
