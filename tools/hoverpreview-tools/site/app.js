@@ -1148,8 +1148,8 @@ function bngText(dataX, dataZ) {
 
 function minecraftHeightText(sample) {
   if (sample.height === undefined) return "loading…";
-  if (sample.height === null || sample.minecraftHeight === null || sample.minecraftHeight === undefined) return "nodata/ocean";
-  return `Y ${sample.minecraftHeight}`;
+  if (sample.height === null || sample.minecraftHeight === null || sample.minecraftHeight === undefined) return "62";
+  return `${sample.minecraftHeight}`;
 }
 
 function minecraftHeightFromRawHeight(rawHeightDecimetres) {
