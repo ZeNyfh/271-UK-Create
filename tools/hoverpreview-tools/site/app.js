@@ -1104,6 +1104,8 @@ function sampleFromEvent(event) {
   const dataZ = Math.floor(image.y * scale);
   const world = state.manifest.world || {};
   const tileSize = Number(state.manifest.tile_size || 512);
+  const height = samplePixel("height", image.x, image.y);
+  const minecraftHeight = minecraftHeightFromRawHeight(height);
   return {
     screenX: event.clientX,
     screenY: event.clientY,
@@ -1117,7 +1119,8 @@ function sampleFromEvent(event) {
     tileZ: Math.floor(dataZ / tileSize),
     localX: dataX % tileSize,
     localZ: dataZ % tileSize,
-    height: samplePixel("height", image.x, image.y),
+    height,
+    minecraftHeight,
   };
 }
 
@@ -1128,7 +1131,7 @@ function updateStatus(event) {
     setStatus("outside generated world");
     return;
   }
-  const heightText = sample.height === null || sample.height === undefined ? "nodata/ocean" : `${(sample.height * 0.1).toFixed(1)} m`;
+  const heightText = minecraftHeightText(sample);
   const bng = bngText(sample.dataX, sample.dataZ);
   const details = statusDetails(sample);
   setStatus(`Minecraft x ${sample.minecraftX}, z ${sample.minecraftZ} | height ${heightText} | data ${sample.dataX},${sample.dataZ} | tile ${String(sample.tileX).padStart(3, "0")}_${String(sample.tileZ).padStart(3, "0")} cell ${sample.localX},${sample.localZ}${bng}${details}`);
@@ -1141,6 +1144,80 @@ function bngText(dataX, dataZ) {
   const easting = Number(geo.bng_min_easting) + (dataX + 0.5) * (Number(geo.bng_max_easting) - Number(geo.bng_min_easting)) / Number(world.width);
   const northing = Number(geo.bng_max_northing) - (dataZ + 0.5) * (Number(geo.bng_max_northing) - Number(geo.bng_min_northing)) / Number(world.depth);
   return ` | BNG E ${easting.toFixed(0)}, N ${northing.toFixed(0)}`;
+}
+
+function minecraftHeightText(sample) {
+  if (sample.height === undefined) return "loading…";
+  if (sample.height === null || sample.minecraftHeight === null || sample.minecraftHeight === undefined) return "nodata/ocean";
+  return `Y ${sample.minecraftHeight}`;
+}
+
+function minecraftHeightFromRawHeight(rawHeightDecimetres) {
+  if (rawHeightDecimetres === undefined) return undefined;
+  if (rawHeightDecimetres === null) return null;
+
+  const metres = rawHeightDecimetres * 0.1;
+  const model = minecraftHeightModel();
+  const highlandDenominator = model.highlandFullMetres - model.highlandStartMetres;
+  const highlandWeight = smoothstepNumber(
+    highlandDenominator === 0
+      ? (metres >= model.highlandStartMetres ? 1 : 0)
+      : (metres - model.highlandStartMetres) / highlandDenominator
+  );
+  const lowlandWeight = metres <= 0
+    ? 1
+    : 1 - clampNumber(metres / model.lowlandCeilingMetres, 0, 1);
+  const lowlandScale = model.heightScale + model.lowlandExtraScale * lowlandWeight;
+  const finalScale = lerpNumber(lowlandScale, model.highlandScale, highlandWeight);
+
+  return model.seaLevelY + Math.round(metres * finalScale);
+}
+
+function minecraftHeightModel() {
+  const manifest = state.manifest || {};
+  const world = manifest.world || {};
+  const height = manifest.height || {};
+  const generator = manifest.generator || manifest.worldgen || manifest.ukgeo_generator || {};
+  const model = manifest.minecraft_height || manifest.height_model || world.height_model || height.minecraft || generator.height || {};
+
+  return {
+    seaLevelY: numberFromModel(model, world, height, generator, "sea_level_y", "seaLevelY", 64),
+    heightScale: numberFromModel(model, world, height, generator, "height_scale", "heightScale", 0.18),
+    lowlandExtraScale: numberFromModel(model, world, height, generator, "lowland_extra_scale", "lowlandExtraScale", 0.03),
+    lowlandCeilingMetres: numberFromModel(model, world, height, generator, "lowland_ceiling_metres", "lowlandCeilingMetres", 120.0),
+    highlandScale: numberFromModel(model, world, height, generator, "highland_scale", "highlandScale", 0.2),
+    highlandStartMetres: numberFromModel(model, world, height, generator, "highland_start_metres", "highlandStartMetres", 120.0),
+    highlandFullMetres: numberFromModel(model, world, height, generator, "highland_full_metres", "highlandFullMetres", 750.0),
+  };
+}
+
+function numberFromModel(model, world, height, generator, snakeKey, camelKey, fallback) {
+  const candidates = [
+    model?.[snakeKey], model?.[camelKey],
+    generator?.[snakeKey], generator?.[camelKey],
+    height?.[snakeKey], height?.[camelKey],
+    world?.[snakeKey], world?.[camelKey],
+    state.manifest?.[snakeKey], state.manifest?.[camelKey],
+  ];
+
+  for (const value of candidates) {
+    const number = Number(value);
+    if (Number.isFinite(number)) return number;
+  }
+  return fallback;
+}
+
+function clampNumber(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function smoothstepNumber(value) {
+  const t = clampNumber(value, 0, 1);
+  return t * t * (3 - 2 * t);
+}
+
+function lerpNumber(start, end, amount) {
+  return start + (end - start) * amount;
 }
 
 function statusDetails(sample) {
@@ -1546,8 +1623,8 @@ function updateMeasurement(event) {
   const dx = current.minecraftX - start.minecraftX;
   const dz = current.minecraftZ - start.minecraftZ;
   const distance = Math.hypot(dx, dz);
-  const heightDelta = current.height !== null && current.height !== undefined && start.height !== null && start.height !== undefined
-    ? `, dh ${((current.height - start.height) * 0.1).toFixed(1)} m`
+  const heightDelta = Number.isFinite(current.minecraftHeight) && Number.isFinite(start.minecraftHeight)
+    ? `, dh ${current.minecraftHeight - start.minecraftHeight} blocks`
     : "";
   const label = `${distance.toFixed(1)} blocks (${dx}, ${dz}${heightDelta})`;
   drawMeasurement(line, start.imageX, start.imageY, current.imageX, current.imageY, label);
