@@ -1,11 +1,15 @@
 package com.zenyfh.animalhunger.world;
 
 import com.zenyfh.animalhunger.hunger.AnimalFood;
+import com.zenyfh.animalhunger.hunger.TroughTracker;
 import com.zenyfh.animalhunger.registry.ModBlockEntities;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Optional;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.HolderLookup;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.NonNullList;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
@@ -22,6 +26,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.resources.ResourceLocation;
 import org.jetbrains.annotations.Nullable;
 
 public class TroughBlockEntity extends BlockEntity implements WorldlyContainer, MenuProvider {
@@ -29,6 +34,7 @@ public class TroughBlockEntity extends BlockEntity implements WorldlyContainer, 
     private static final int[] SLOTS = {0, 1, 2, 3, 4, 5, 6, 7, 8};
 
     private NonNullList<ItemStack> items = NonNullList.withSize(SLOT_COUNT, ItemStack.EMPTY);
+    private final Map<ResourceLocation, Boolean> hasFoodCache = new HashMap<>();
 
     public TroughBlockEntity(BlockPos pos, BlockState state) {
         super(ModBlockEntities.TROUGH.get(), pos, state);
@@ -139,17 +145,32 @@ public class TroughBlockEntity extends BlockEntity implements WorldlyContainer, 
     @Override
     public void onLoad() {
         super.onLoad();
+        TroughTracker.register(this.level, this.worldPosition);
         this.updateFilledState();
+    }
+
+    @Override
+    public void setRemoved() {
+        TroughTracker.unregister(this.level, this.worldPosition);
+        super.setRemoved();
     }
 
     @Override
     public void setChanged() {
         super.setChanged();
+        this.hasFoodCache.clear();
         this.updateFilledState();
     }
 
     public boolean hasFoodFor(LivingEntity entity) {
-        return findFoodFor(entity).isPresent();
+        ResourceLocation entityId = BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType());
+        Boolean cached = this.hasFoodCache.get(entityId);
+        if (cached != null) {
+            return cached;
+        }
+        boolean result = findFoodFor(entity).isPresent();
+        this.hasFoodCache.put(entityId, result);
+        return result;
     }
 
     public Optional<ItemStack> findFoodFor(LivingEntity entity) {
