@@ -1,8 +1,11 @@
 package git.zenyfh.pollution;
 
+import java.lang.reflect.Method;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.CompoundTag;
@@ -17,6 +20,9 @@ public final class PollutionSourceDetector {
     private static final double MEDIUM = 3.0;
     private static final double HIGH = 8.0;
     private static final double VERY_HIGH = 20.0;
+    private static final boolean ALLOW_NBT_ACTIVE_CHECKS = Boolean.getBoolean("pollution.allowBlockEntityNbtActiveChecks");
+    private static final boolean DEBUG_PERF = Boolean.getBoolean("pollution.debugPerf");
+    private static final Map<Class<?>, Optional<Method>> ACTIVE_ACCESSORS = new ConcurrentHashMap<>();
 
     private static final Map<String, Double> FIXED_RATES = Map.ofEntries(
             Map.entry("minecraft:furnace", MEDIUM),
@@ -75,6 +81,14 @@ public final class PollutionSourceDetector {
         return applyStateMultiplier(state, id, fixedRate);
     }
 
+    public static boolean isPotentialSource(BlockState state) {
+        ResourceLocation id = BuiltInRegistries.BLOCK.getKey(state.getBlock());
+        if (id == null) {
+            return false;
+        }
+        return FIXED_RATES.containsKey(id.toString()) || inferOptionalModRate(id) != null;
+    }
+
     private static Double inferOptionalModRate(ResourceLocation id) {
         String namespace = id.getNamespace();
         String path = id.getPath();
@@ -109,13 +123,13 @@ public final class PollutionSourceDetector {
         String namespace = id.getNamespace();
         String path = id.getPath();
         if ("create".equals(namespace) && CREATE_KINETIC_SOURCES.contains(path)) {
-            return activeFromBlockEntityData(level, blockEntity);
+            return activeFromAccessor(blockEntity) || activeFromBlockEntityData(level, blockEntity);
         }
         if ("createdieselgenerators".equals(namespace)
                 || "farmersdelight".equals(namespace)
                 || "create_aeronautics".equals(namespace)
                 || "create-aeronautics".equals(namespace)) {
-            return activeFromBlockEntityData(level, blockEntity);
+            return activeFromAccessor(blockEntity) || activeFromBlockEntityData(level, blockEntity);
         }
         return false;
     }
@@ -140,6 +154,12 @@ public final class PollutionSourceDetector {
     }
 
     private static boolean activeFromBlockEntityData(Level level, BlockEntity blockEntity) {
+        if (!ALLOW_NBT_ACTIVE_CHECKS) {
+            return false;
+        }
+        if (DEBUG_PERF) {
+            Pollution.LOGGER.warn("Pollution using NBT active fallback for {} at {}", blockEntity.getClass().getName(), blockEntity.getBlockPos());
+        }
         CompoundTag tag = blockEntity.saveWithoutMetadata(level.registryAccess());
         return hasPositiveNumeric(tag, "BurnTime")
                 || hasPositiveNumeric(tag, "burnTime")
@@ -153,6 +173,67 @@ public final class PollutionSourceDetector {
                 || hasPositiveBoolean(tag, "running")
                 || hasPositiveBoolean(tag, "Active")
                 || hasPositiveBoolean(tag, "active");
+    }
+
+    private static boolean activeFromAccessor(BlockEntity blockEntity) {
+        Optional<Method> accessor = ACTIVE_ACCESSORS.computeIfAbsent(blockEntity.getClass(), PollutionSourceDetector::findActiveAccessor);
+        if (accessor.isEmpty()) {
+            return false;
+        }
+        try {
+            Object value = accessor.get().invoke(blockEntity);
+            if (value instanceof Boolean booleanValue) {
+                return booleanValue;
+            }
+            if (value instanceof Number number) {
+                return Math.abs(number.doubleValue()) > 0.001D;
+            }
+        } catch (ReflectiveOperationException | RuntimeException ignored) {
+            return false;
+        }
+        return false;
+    }
+
+    private static Optional<Method> findActiveAccessor(Class<?> type) {
+        String[] names = {
+                "isRunning",
+                "isActive",
+                "isBurning",
+                "getSpeed",
+                "getGeneratedSpeed",
+                "getRemainingBurnTime",
+                "getBurnTime",
+                "getFuel"
+        };
+        for (String name : names) {
+            Method method = findNoArgMethod(type, name);
+            if (method == null) {
+                continue;
+            }
+            Class<?> returnType = method.getReturnType();
+            if (returnType == boolean.class || returnType == Boolean.class || Number.class.isAssignableFrom(returnType)
+                    || returnType == int.class || returnType == long.class || returnType == float.class || returnType == double.class) {
+                method.setAccessible(true);
+                return Optional.of(method);
+            }
+        }
+        return Optional.empty();
+    }
+
+    private static Method findNoArgMethod(Class<?> type, String name) {
+        Class<?> current = type;
+        while (current != null && current != Object.class) {
+            try {
+                return current.getDeclaredMethod(name);
+            } catch (NoSuchMethodException ignored) {
+                current = current.getSuperclass();
+            }
+        }
+        try {
+            return type.getMethod(name);
+        } catch (NoSuchMethodException ignored) {
+            return null;
+        }
     }
 
     private static double applyStateMultiplier(BlockState state, ResourceLocation id, double baseRate) {

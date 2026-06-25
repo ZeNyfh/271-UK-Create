@@ -1,19 +1,25 @@
 package git.zenyfh.pollution;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.LongAdder;
 
 import com.mojang.brigadier.arguments.DoubleArgumentType;
 
 import net.minecraft.commands.Commands;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.chunk.LevelChunk;
@@ -25,6 +31,12 @@ import net.neoforged.neoforge.network.PacketDistributor;
 
 public final class PollutionManager {
     private static final boolean DEBUG_SERVER_SYNC = Boolean.getBoolean("pollution.debugServerSync");
+    private static final boolean DEBUG_PERF = Boolean.getBoolean("pollution.debugPerf");
+    private static final long SLOW_SOURCE_SCAN_WARN_MS = Long.getLong("pollution.slowSourceScanWarnMs", 100L);
+    private static final long SOURCE_CACHE_TTL_TICKS = Long.getLong("pollution.sourceCacheTtlTicks", 1200L);
+    private static final int MAX_SOURCE_CACHE_CHUNKS = Integer.getInteger("pollution.maxSourceCacheChunks", 8192);
+    private static final Map<SourceCacheKey, CachedChunkSources> SOURCE_CACHE = new ConcurrentHashMap<>();
+    private static final Perf PERF = new Perf();
     private final Map<UUID, Long> lastSyncedPlayerChunks = new HashMap<>();
     private int skippedPacketPlayersLastSync;
 
@@ -160,7 +172,21 @@ public final class PollutionManager {
     }
 
     private static void emitFromLoadedSources(ServerLevel level) {
+        long startNanos = System.nanoTime();
         SourceScanResult result = scanLoadedSources(level);
+        long elapsedNanos = System.nanoTime() - startNanos;
+        PERF.recordSourceScan(result, elapsedNanos);
+        if (elapsedNanos >= SLOW_SOURCE_SCAN_WARN_MS * 1_000_000L) {
+            Pollution.LOGGER.warn(
+                    "Pollution source scan slow level={} chunks={} blockEntities={} activeSources={} elapsed={}ms threshold={}ms",
+                    level.dimension().location(),
+                    result.scannedChunks,
+                    result.scannedBlockEntities,
+                    result.activeSources,
+                    elapsedNanos / 1_000_000.0,
+                    SLOW_SOURCE_SCAN_WARN_MS
+            );
+        }
         if (result.emissionByChunk.isEmpty()) {
             return;
         }
@@ -169,6 +195,7 @@ public final class PollutionManager {
         for (Map.Entry<Long, Double> entry : result.emissionByChunk.entrySet()) {
             data.addPollution(entry.getKey(), entry.getValue() * intervalScale);
         }
+        PERF.maybeLog();
     }
 
     private static SourceScanResult scanLoadedSources(ServerLevel level) {
@@ -196,7 +223,14 @@ public final class PollutionManager {
     }
 
     private static void scanChunk(ServerLevel level, LevelChunk chunk, long chunkKey, SourceScanResult result) {
-        for (BlockEntity blockEntity : chunk.getBlockEntities().values()) {
+        result.scannedChunks++;
+        for (BlockPos pos : potentialSources(level, chunk, chunkKey, result)) {
+            BlockEntity blockEntity = chunk.getBlockEntity(pos);
+            result.scannedBlockEntities++;
+            if (blockEntity == null) {
+                invalidateSourceCache(level.dimension(), chunkKey);
+                continue;
+            }
             if (blockEntity.isRemoved()) {
                 continue;
             }
@@ -210,6 +244,7 @@ public final class PollutionManager {
     }
 
     private static void simulateSpreadAndDecay(PollutionSavedData data) {
+        long startNanos = System.nanoTime();
         Map<Long, Double> pollution = data.pollutionByChunk();
         if (pollution.isEmpty()) {
             return;
@@ -266,6 +301,34 @@ public final class PollutionManager {
         if (changed) {
             data.setDirty();
         }
+        PERF.recordDiffusion(System.nanoTime() - startNanos, pollution.size());
+    }
+
+    private static List<BlockPos> potentialSources(ServerLevel level, LevelChunk chunk, long chunkKey, SourceScanResult result) {
+        SourceCacheKey key = new SourceCacheKey(level.dimension(), chunkKey);
+        long gameTime = level.getGameTime();
+        CachedChunkSources cached = SOURCE_CACHE.get(key);
+        if (cached != null && gameTime - cached.gameTime <= SOURCE_CACHE_TTL_TICKS) {
+            return cached.positions;
+        }
+
+        ArrayList<BlockPos> positions = new ArrayList<>();
+        for (BlockEntity blockEntity : chunk.getBlockEntities().values()) {
+            result.scannedBlockEntities++;
+            if (!blockEntity.isRemoved() && PollutionSourceDetector.isPotentialSource(blockEntity.getBlockState())) {
+                positions.add(blockEntity.getBlockPos().immutable());
+            }
+        }
+        if (SOURCE_CACHE.size() > MAX_SOURCE_CACHE_CHUNKS) {
+            SOURCE_CACHE.clear();
+        }
+        List<BlockPos> immutable = positions.isEmpty() ? Collections.emptyList() : List.copyOf(positions);
+        SOURCE_CACHE.put(key, new CachedChunkSources(gameTime, immutable));
+        return immutable;
+    }
+
+    private static void invalidateSourceCache(ResourceKey<Level> dimension, long chunkKey) {
+        SOURCE_CACHE.remove(new SourceCacheKey(dimension, chunkKey));
     }
 
     private static void addDelta(Map<Long, Double> deltas, int chunkX, int chunkZ, double amount) {
@@ -313,7 +376,9 @@ public final class PollutionManager {
         PollutionSavedData data = PollutionSavedData.get(player.serverLevel());
         ChunkPos chunkPos = player.chunkPosition();
         int radius = effectiveSyncRadius();
-        PacketDistributor.sendToPlayer(player, buildGridPacket(player.serverLevel(), data, chunkPos.x, chunkPos.z, radius));
+        PollutionGridSyncPacket packet = buildGridPacket(player.serverLevel(), data, chunkPos.x, chunkPos.z, radius);
+        PacketDistributor.sendToPlayer(player, packet);
+        PERF.recordSync(packet);
         lastSyncedPlayerChunks.put(player.getUUID(), chunkPos.toLong());
         return true;
     }
@@ -355,7 +420,11 @@ public final class PollutionManager {
                 if (chunk == null) {
                     continue;
                 }
-                for (BlockEntity blockEntity : chunk.getBlockEntities().values()) {
+                for (BlockPos pos : potentialSources(level, chunk, chunk.getPos().toLong(), new SourceScanResult())) {
+                    BlockEntity blockEntity = chunk.getBlockEntity(pos);
+                    if (blockEntity == null) {
+                        continue;
+                    }
                     if (blockEntity.isRemoved()) {
                         continue;
                     }
@@ -363,11 +432,11 @@ public final class PollutionManager {
                     if (emission <= 0.0) {
                         continue;
                     }
-                    BlockPos pos = blockEntity.getBlockPos();
+                    BlockPos sourcePos = blockEntity.getBlockPos();
                     sources.add(new PollutionGridSyncPacket.VisualSource(
-                            pos.getX(),
-                            pos.getY(),
-                            pos.getZ(),
+                            sourcePos.getX(),
+                            sourcePos.getY(),
+                            sourcePos.getZ(),
                             (float) emission,
                             (float) data.getPollution(chunkX, chunkZ),
                             (byte) 0
@@ -422,7 +491,76 @@ public final class PollutionManager {
 
     private static final class SourceScanResult {
         private final Map<Long, Double> emissionByChunk = new HashMap<>();
+        private int scannedChunks;
+        private int scannedBlockEntities;
         private int activeSources;
         private double totalEmission;
+    }
+
+    private record SourceCacheKey(ResourceKey<Level> dimension, long chunkKey) {
+    }
+
+    private record CachedChunkSources(long gameTime, List<BlockPos> positions) {
+    }
+
+    private static final class Perf {
+        private final LongAdder sourceScans = new LongAdder();
+        private final LongAdder scannedChunks = new LongAdder();
+        private final LongAdder scannedBlockEntities = new LongAdder();
+        private final LongAdder activeSources = new LongAdder();
+        private final LongAdder sourceScanNanos = new LongAdder();
+        private final LongAdder diffusionRuns = new LongAdder();
+        private final LongAdder diffusionNanos = new LongAdder();
+        private final LongAdder syncPackets = new LongAdder();
+        private final LongAdder syncBytesApprox = new LongAdder();
+
+        void recordSourceScan(SourceScanResult result, long nanos) {
+            if (!DEBUG_PERF) {
+                return;
+            }
+            sourceScans.increment();
+            scannedChunks.add(result.scannedChunks);
+            scannedBlockEntities.add(result.scannedBlockEntities);
+            activeSources.add(result.activeSources);
+            sourceScanNanos.add(nanos);
+        }
+
+        void recordDiffusion(long nanos, int storedChunks) {
+            if (!DEBUG_PERF) {
+                return;
+            }
+            diffusionRuns.increment();
+            diffusionNanos.add(nanos);
+        }
+
+        void recordSync(PollutionGridSyncPacket packet) {
+            if (!DEBUG_PERF) {
+                return;
+            }
+            syncPackets.increment();
+            syncBytesApprox.add(17L + packet.values().length * 4L + packet.sources().length * 21L);
+        }
+
+        void maybeLog() {
+            if (!DEBUG_PERF) {
+                return;
+            }
+            long scans = sourceScans.sum();
+            if (scans <= 0 || scans % 20 != 0) {
+                return;
+            }
+            Pollution.LOGGER.info(
+                    "Pollution perf sourceScans={} scannedChunks={} scannedBlockEntities={} activeSources={} avgSourceScanMs={} diffusionRuns={} avgDiffusionMs={} syncPackets={} approxSyncBytes={}",
+                    scans,
+                    scannedChunks.sum(),
+                    scannedBlockEntities.sum(),
+                    activeSources.sum(),
+                    sourceScanNanos.sum() / scans / 1_000_000.0,
+                    diffusionRuns.sum(),
+                    diffusionRuns.sum() == 0 ? 0.0 : diffusionNanos.sum() / diffusionRuns.sum() / 1_000_000.0,
+                    syncPackets.sum(),
+                    syncBytesApprox.sum()
+            );
+        }
     }
 }
