@@ -22,8 +22,6 @@ public final class SpoilageManager {
         FoodProfile profile = FoodClassificationManager.profile(stack);
         if (data == null || data.durationMillis() <= 0L) {
             stack.set(ModDataComponents.FOOD_STACK_DATA, FoodStackData.create(now, profile));
-        } else {
-            stack.set(ModDataComponents.FOOD_STACK_DATA, data.refreshed(now));
         }
         return stack;
     }
