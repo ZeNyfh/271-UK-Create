@@ -2,6 +2,8 @@ package com.ukgeoanimals;
 
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.LongAdder;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceKey;
@@ -27,7 +29,11 @@ public final class UkGeoAnimals {
     public static final String MOD_ID = "ukgeo_animals";
     private static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
     private static final boolean DEBUG_ANIMAL_SPAWNS = Boolean.getBoolean("ukgeoanimals.debugSpawns");
+    private static final boolean DEBUG_PERF = Boolean.getBoolean("ukgeoAnimals.debugPerf");
     private static final ResourceLocation BLUNDERBUSS = ResourceLocation.fromNamespaceAndPath("wildernature", "blunderbuss");
+    private static final Map<ResourceLocation, Boolean> UKGEO_BIOME_CACHE = new ConcurrentHashMap<>();
+    private static final LongAdder SPAWN_CHECKS = new LongAdder();
+    private static final LongAdder BLOCKED_SPAWNS = new LongAdder();
 
     private static final Set<ResourceLocation> UNWANTED_WILDERNATURE = Set.of(
             id("wildernature", "red_wolf"),
@@ -105,12 +111,14 @@ public final class UkGeoAnimals {
         ResourceLocation entityId = BuiltInRegistries.ENTITY_TYPE.getKey(event.getEntityType());
         BlockPos pos = event.getPos();
         ResourceLocation biomeId = biomeId(event.getLevel(), pos);
+        recordSpawnCheck();
         if (!isUkGeoBiome(biomeId)) {
             return;
         }
 
         SpawnDecision decision = decide(entityId, biomeId.getPath(), pos, event.getSpawnType(), event.getLevel());
         if (!decision.allowed()) {
+            BLOCKED_SPAWNS.increment();
             debug("placement blocked entity=%s biome=%s reason=%s spawn=%s y=%d", entityId, biomeId, decision.reason(), event.getSpawnType(), pos.getY());
             event.setResult(MobSpawnEvent.SpawnPlacementCheck.Result.FAIL);
         }
@@ -121,12 +129,14 @@ public final class UkGeoAnimals {
         ResourceLocation entityId = BuiltInRegistries.ENTITY_TYPE.getKey(event.getEntity().getType());
         BlockPos pos = BlockPos.containing(event.getX(), event.getY(), event.getZ());
         ResourceLocation biomeId = biomeId(event.getLevel(), pos);
+        recordSpawnCheck();
         if (!isUkGeoBiome(biomeId)) {
             return;
         }
 
         SpawnDecision decision = decide(entityId, biomeId.getPath(), pos, event.getSpawnType(), event.getLevel());
         if (!decision.allowed()) {
+            BLOCKED_SPAWNS.increment();
             debug("position blocked entity=%s biome=%s reason=%s spawn=%s y=%d", entityId, biomeId, decision.reason(), event.getSpawnType(), pos.getY());
             event.setResult(MobSpawnEvent.PositionCheck.Result.FAIL);
         }
@@ -144,7 +154,7 @@ public final class UkGeoAnimals {
                 return SpawnDecision.block("habitat");
             }
             int rarity = EXTRA_RARITY.getOrDefault(entityId, 1);
-            if (rarity > 1 && Math.floorMod(positionHash(pos, entityId.toString()), rarity) != 0) {
+            if (rarity > 1 && Math.floorMod(positionHash(pos, entityId.hashCode()), rarity) != 0) {
                 return SpawnDecision.block("rarity");
             }
         }
@@ -196,7 +206,7 @@ public final class UkGeoAnimals {
     }
 
     private static boolean isUkGeoBiome(ResourceLocation biomeId) {
-        return biomeId != null && "ukgeo".equals(biomeId.getNamespace());
+        return biomeId != null && UKGEO_BIOME_CACHE.computeIfAbsent(biomeId, id -> "ukgeo".equals(id.getNamespace()));
     }
 
     private static boolean isWaterOrWetland(String biome) {
@@ -226,8 +236,8 @@ public final class UkGeoAnimals {
         return "arable".equals(biome) || "neutral_grassland".equals(biome) || "calcareous_grassland".equals(biome) || "urban".equals(biome);
     }
 
-    private static int positionHash(BlockPos pos, String salt) {
-        long value = pos.asLong() ^ (long) salt.hashCode() * 0x9E3779B97F4A7C15L;
+    private static int positionHash(BlockPos pos, int salt) {
+        long value = pos.asLong() ^ (long) salt * 0x9E3779B97F4A7C15L;
         value ^= value >>> 33;
         value *= 0xff51afd7ed558ccdL;
         value ^= value >>> 33;
@@ -243,6 +253,17 @@ public final class UkGeoAnimals {
     private static void debug(String message, Object... args) {
         if (DEBUG_ANIMAL_SPAWNS) {
             LOGGER.info(message, args);
+        }
+    }
+
+    private static void recordSpawnCheck() {
+        if (!DEBUG_PERF) {
+            return;
+        }
+        SPAWN_CHECKS.increment();
+        long checks = SPAWN_CHECKS.sum();
+        if (checks > 0 && checks % 10_000 == 0) {
+            LOGGER.info("UKGeo Animals perf spawnChecks={} blockedSpawns={} biomeCacheSize={}", checks, BLOCKED_SPAWNS.sum(), UKGEO_BIOME_CACHE.size());
         }
     }
 
