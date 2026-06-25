@@ -38,6 +38,7 @@ public final class AnimalHungerEvents {
         if (event.getEntity() instanceof LivingEntity living && isSupported(living)) {
             AnimalHungerData.getOrCreate(living, event.getLevel().getGameTime());
             addGoals(living);
+            AnimalHungerPerf.animalTracked();
             debug("tracking {} at {}", entityId(living), living.blockPosition());
         }
     }
@@ -51,11 +52,10 @@ public final class AnimalHungerEvents {
             return;
         }
         long gameTime = living.level().getGameTime();
-        AnimalHungerData.getOrCreate(living, gameTime);
-        addGoals(living);
         if (Math.floorMod(living.getId(), 20) != Math.floorMod((int) gameTime, 20)) {
             return;
         }
+        AnimalHungerData.getOrCreate(living, gameTime);
         int before = AnimalHungerData.hunger(living);
         AnimalHungerData.drainCatchUp(living, gameTime);
         int after = AnimalHungerData.hunger(living);

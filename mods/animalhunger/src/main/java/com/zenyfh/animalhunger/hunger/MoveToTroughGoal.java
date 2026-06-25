@@ -6,7 +6,6 @@ import java.util.EnumSet;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.PathfinderMob;
 import net.minecraft.world.entity.ai.goal.Goal;
-import net.minecraft.world.level.Level;
 
 public class MoveToTroughGoal extends Goal {
     private static final int HUNGER_THRESHOLD = 14;
@@ -15,6 +14,7 @@ public class MoveToTroughGoal extends Goal {
 
     private final PathfinderMob mob;
     private BlockPos target;
+    private BlockPos cachedTarget;
 
     public MoveToTroughGoal(PathfinderMob mob) {
         this.mob = mob;
@@ -30,8 +30,14 @@ public class MoveToTroughGoal extends Goal {
         if (!AnimalHungerData.troughSearchReady(this.mob, gameTime)) {
             return false;
         }
-        AnimalHungerData.setTroughSearchCooldown(this.mob, gameTime + 100L);
+        if (this.cachedTarget != null && hasValidFood(this.cachedTarget)) {
+            this.target = this.cachedTarget;
+            AnimalHungerData.setTroughSearchCooldown(this.mob, gameTime + 80L);
+            return true;
+        }
         this.target = findTrough();
+        this.cachedTarget = this.target;
+        AnimalHungerData.setTroughSearchCooldown(this.mob, gameTime + (this.target == null ? 200L : 100L));
         return this.target != null;
     }
 
@@ -73,30 +79,8 @@ public class MoveToTroughGoal extends Goal {
     }
 
     private BlockPos findTrough() {
-        Level level = this.mob.level();
-        BlockPos origin = this.mob.blockPosition();
         int radius = AnimalHungerConfig.TROUGH_SEARCH_RADIUS.get();
-        BlockPos best = null;
-        double bestDistance = Double.MAX_VALUE;
-        for (int dy = -3; dy <= 3; dy++) {
-            for (int dx = -radius; dx <= radius; dx++) {
-                for (int dz = -radius; dz <= radius; dz++) {
-                    BlockPos pos = origin.offset(dx, dy, dz);
-                    if (!level.hasChunkAt(pos)) {
-                        continue;
-                    }
-                    double distance = origin.distSqr(pos);
-                    if (distance >= bestDistance) {
-                        continue;
-                    }
-                    if (hasValidFood(pos)) {
-                        best = pos.immutable();
-                        bestDistance = distance;
-                    }
-                }
-            }
-        }
-        return best;
+        return TroughTracker.nearestTroughWithFood(this.mob, radius);
     }
 
     private boolean hasValidFood(BlockPos pos) {

@@ -14,9 +14,11 @@ public class GrazeGoal extends Goal {
     private static final int HUNGER_THRESHOLD = 16;
     private static final double EAT_DISTANCE_SQR = 4.0D;
     private static final double SPEED = 1.0D;
+    private static final int MAX_GRAZE_SAMPLES = Integer.getInteger("animalhunger.maxGrazeSearchSamples", 64);
 
     private final PathfinderMob mob;
     private BlockPos target;
+    private BlockPos cachedTarget;
 
     public GrazeGoal(PathfinderMob mob) {
         this.mob = mob;
@@ -32,8 +34,14 @@ public class GrazeGoal extends Goal {
         if (!AnimalHungerData.grassSearchReady(this.mob, gameTime) || !AnimalHungerData.grazingReady(this.mob, gameTime)) {
             return false;
         }
-        AnimalHungerData.setGrassSearchCooldown(this.mob, gameTime + 120L);
+        if (this.cachedTarget != null && canStandAtGrazingBlock(this.cachedTarget)) {
+            this.target = this.cachedTarget;
+            AnimalHungerData.setGrassSearchCooldown(this.mob, gameTime + 100L);
+            return true;
+        }
         this.target = findGrazingBlock();
+        this.cachedTarget = this.target;
+        AnimalHungerData.setGrassSearchCooldown(this.mob, gameTime + (this.target == null ? 240L : 120L));
         return this.target != null;
     }
 
@@ -79,30 +87,46 @@ public class GrazeGoal extends Goal {
         int radius = AnimalHungerConfig.GRASS_SEARCH_RADIUS.get();
         BlockPos best = null;
         double bestDistance = Double.MAX_VALUE;
-        for (int dy = -2; dy <= 2; dy++) {
-            for (int dx = -radius; dx <= radius; dx++) {
-                for (int dz = -radius; dz <= radius; dz++) {
-                    BlockPos pos = origin.offset(dx, dy, dz);
-                    if (!level.hasChunkAt(pos)) {
-                        continue;
-                    }
-                    BlockState state = level.getBlockState(pos);
-                    if (!isGrazingBlock(state)) {
-                        continue;
-                    }
-                    BlockPos standAt = standPosition(pos);
-                    if (!level.getBlockState(standAt).isAir() && !standAt.equals(pos)) {
-                        continue;
-                    }
-                    double distance = origin.distSqr(standAt);
-                    if (distance < bestDistance) {
-                        best = pos.immutable();
-                        bestDistance = distance;
-                    }
-                }
+        int checked = 0;
+        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+        var random = this.mob.getRandom();
+        for (int i = 0; i < MAX_GRAZE_SAMPLES; i++) {
+            int dx = random.nextInt(radius * 2 + 1) - radius;
+            int dz = random.nextInt(radius * 2 + 1) - radius;
+            if (dx * dx + dz * dz > radius * radius) {
+                continue;
+            }
+            int dy = random.nextInt(5) - 2;
+            cursor.set(origin.getX() + dx, origin.getY() + dy, origin.getZ() + dz);
+            if (!level.hasChunkAt(cursor)) {
+                continue;
+            }
+            checked++;
+            BlockState state = level.getBlockState(cursor);
+            if (!isGrazingBlock(state)) {
+                continue;
+            }
+            BlockPos pos = cursor.immutable();
+            BlockPos standAt = standPosition(pos);
+            if (!level.getBlockState(standAt).isAir() && !standAt.equals(pos)) {
+                continue;
+            }
+            double distance = origin.distSqr(standAt);
+            if (distance < bestDistance) {
+                best = pos;
+                bestDistance = distance;
             }
         }
+        AnimalHungerPerf.grassSearch(checked, best != null);
         return best;
+    }
+
+    private boolean canStandAtGrazingBlock(BlockPos pos) {
+        if (!isGrazingBlock(this.mob.level().getBlockState(pos))) {
+            return false;
+        }
+        BlockPos standAt = standPosition(pos);
+        return this.mob.level().getBlockState(standAt).isAir() || standAt.equals(pos);
     }
 
     private BlockPos standPosition(BlockPos grazingBlock) {
