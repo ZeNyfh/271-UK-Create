@@ -1134,7 +1134,7 @@ function updateStatus(event) {
   const heightText = minecraftHeightText(sample);
   const bng = bngText(sample.dataX, sample.dataZ);
   const details = statusDetails(sample);
-  setStatus(`Minecraft x ${sample.minecraftX}, z ${sample.minecraftZ} | height ${heightText} | data ${sample.dataX},${sample.dataZ} | tile ${String(sample.tileX).padStart(3, "0")}_${String(sample.tileZ).padStart(3, "0")} cell ${sample.localX},${sample.localZ}${bng}${details}`);
+  setStatus(`Minecraft x ${sample.minecraftX}, y ${heightText}, z ${sample.minecraftZ} | data ${sample.dataX},${sample.dataZ} | tile ${String(sample.tileX).padStart(3, "0")}_${String(sample.tileZ).padStart(3, "0")} cell ${sample.localX},${sample.localZ}${bng}${details}`);
 }
 
 function bngText(dataX, dataZ) {
