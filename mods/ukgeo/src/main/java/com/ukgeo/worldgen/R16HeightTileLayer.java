@@ -12,6 +12,7 @@ import java.util.zip.GZIPInputStream;
 
 public final class R16HeightTileLayer {
     public static final short NODATA = (short) -32768;
+
     private final TileManifest manifest;
     private final TileGrid grid;
     private final TileCache<TileCoord, short[]> cache = new TileCache<>(96);
@@ -65,8 +66,8 @@ public final class R16HeightTileLayer {
         if (!isValidTile(coord)) {
             return nodataTile();
         }
-        Path path = manifest.root.resolve(manifest.heightPath).resolve(coord.fileStem() + ".r16.gz");
-        byte[] data = readGzip(path, manifest.tileSize * manifest.tileSize * 2);
+        Path path = manifest.root.resolve(manifest.heightPath).resolve(coord.fileStem() + manifest.heightExtension);
+        byte[] data = readTileBytes(path, manifest.tileSize * manifest.tileSize * 2);
         short[] values = new short[manifest.tileSize * manifest.tileSize];
         ByteBuffer buffer = ByteBuffer.wrap(data).order(ByteOrder.LITTLE_ENDIAN);
         for (int i = 0; i < values.length; i++) {
@@ -85,15 +86,45 @@ public final class R16HeightTileLayer {
         return values;
     }
 
-    static byte[] readGzip(Path path, int expectedSize) throws IOException {
+    static byte[] readTileBytes(Path path, int expectedSize) throws IOException {
+        Path resolved = resolveTilePath(path);
         byte[] data;
-        try (InputStream in = new GZIPInputStream(Files.newInputStream(path))) {
-            data = in.readAllBytes();
+        if (resolved.getFileName().toString().endsWith(".gz")) {
+            try (InputStream in = new GZIPInputStream(Files.newInputStream(resolved))) {
+                data = in.readAllBytes();
+            }
+        } else {
+            data = Files.readAllBytes(resolved);
         }
         if (data.length != expectedSize) {
-            throw new IOException(path + " decompressed to " + data.length + " bytes, expected " + expectedSize);
+            throw new IOException(resolved + " raw tile size was " + data.length + " bytes, expected " + expectedSize);
         }
         return data;
+    }
+
+    static Path resolveTilePath(Path path) {
+        if (Files.exists(path)) {
+            return path;
+        }
+        String fileName = path.getFileName().toString();
+        Path parent = path.getParent();
+        if (fileName.endsWith(".gz")) {
+            Path raw = parent == null ? Path.of(fileName.substring(0, fileName.length() - 3)) : parent.resolve(fileName.substring(0, fileName.length() - 3));
+            if (Files.exists(raw)) {
+                return raw;
+            }
+        } else {
+            Path gzip = parent == null ? Path.of(fileName + ".gz") : parent.resolve(fileName + ".gz");
+            if (Files.exists(gzip)) {
+                return gzip;
+            }
+        }
+        return path;
+    }
+
+    /** Backwards-compatible name for old call sites. Reads raw or gzip based on the file name. */
+    static byte[] readGzip(Path path, int expectedSize) throws IOException {
+        return readTileBytes(path, expectedSize);
     }
 
     public String cacheStats() {

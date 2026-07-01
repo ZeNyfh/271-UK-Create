@@ -3,6 +3,10 @@ package com.ukgeo.worldgen;
 import java.io.IOException;
 import java.util.Optional;
 import java.util.OptionalInt;
+import java.util.concurrent.ForkJoinPool;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.IntConsumer;
+import java.util.stream.IntStream;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.level.block.Blocks;
@@ -17,10 +21,20 @@ final class ChunkTerrainPlanner {
     private static final int BORDER = 4;
     private static final int WATERBED_PROTECTION_DEPTH = 6;
     private static final boolean DEBUG_GEN_TIMINGS = Boolean.getBoolean("ukgeo.debugGenTimings");
+    private static final boolean DEBUG_FULL_TIMING_SPAM = Boolean.getBoolean("ukgeo.debugTimingSpam");
     private static final boolean DEBUG_CAVES = Boolean.getBoolean("ukgeo.debugCaves");
     private static final int DEBUG_CAVE_X = Integer.getInteger("ukgeo.debugCaveX", 0);
     private static final int DEBUG_CAVE_Z = Integer.getInteger("ukgeo.debugCaveZ", 0);
     private static final int DEBUG_CAVE_RADIUS = Integer.getInteger("ukgeo.debugCaveRadius", 0);
+    private static final boolean ENABLE_PARALLEL_CHUNK_PLANNING = !Boolean.getBoolean("ukgeo.disableParallelChunkPlanning");
+    private static final int PARALLEL_CHUNK_PLANNING_THREADS = Math.max(1, Integer.getInteger(
+        "ukgeo.parallelChunkPlanningThreads",
+        Math.max(1, Runtime.getRuntime().availableProcessors() / 2)
+    ));
+    private static final int PARALLEL_SURFACE_GRID_THRESHOLD = Integer.getInteger("ukgeo.parallelSurfaceGridThreshold", 256);
+    private static final int PARALLEL_COLUMN_THRESHOLD = Integer.getInteger("ukgeo.parallelColumnThreshold", 128);
+    private static final ForkJoinPool PLANNING_POOL = new ForkJoinPool(PARALLEL_CHUNK_PLANNING_THREADS);
+    private static final AtomicBoolean PARALLEL_MODE_LOGGED = new AtomicBoolean();
 
     private ChunkTerrainPlanner() {
     }
@@ -36,44 +50,30 @@ final class ChunkTerrainPlanner {
         HeightTileWindow heightWindow = HeightTileWindow.forChunk(data.height(), data.manifest(), chunkMinX, chunkMinZ, margin);
         logTiming("HeightTileWindow.forChunk", chunk, windowStartNanos);
 
+        logParallelModeOnce();
+
         long surfaceStartNanos = System.nanoTime();
         int gridSize = CHUNK_SIZE + BORDER * 2;
         int[] surfaceGrid = new int[gridSize * gridSize];
-        for (int gz = 0; gz < gridSize; gz++) {
+        forEachPlanningCell(gridSize * gridSize, PARALLEL_SURFACE_GRID_THRESHOLD, index -> {
+            int gz = index / gridSize;
+            int gx = index - gz * gridSize;
+            int worldX = chunkMinX + gx - BORDER;
             int worldZ = chunkMinZ + gz - BORDER;
-            for (int gx = 0; gx < gridSize; gx++) {
-                int worldX = chunkMinX + gx - BORDER;
-                surfaceGrid[gz * gridSize + gx] = generator.computeSurfaceY(data, heightWindow, worldX, worldZ);
-            }
-        }
+            surfaceGrid[index] = generator.computeSurfaceY(data, heightWindow, worldX, worldZ);
+        });
         logTiming("ChunkTerrainPlanner.surfaceGrid", chunk, surfaceStartNanos);
 
         long waterStartNanos = System.nanoTime();
         ColumnPlan[] columns = new ColumnPlan[CHUNK_SIZE * CHUNK_SIZE];
-        UkGeoChunkGenerator.WaterShapeCache waterShapeCache = new UkGeoChunkGenerator.WaterShapeCache();
-        for (int localZ = 0; localZ < CHUNK_SIZE; localZ++) {
-            for (int localX = 0; localX < CHUNK_SIZE; localX++) {
-                int worldX = chunkMinX + localX;
-                int worldZ = chunkMinZ + localZ;
-                int index = localZ * CHUNK_SIZE + localX;
-                int surfaceY = surfaceGrid[(localZ + BORDER) * gridSize + (localX + BORDER)];
-                boolean hasHeightData = generator.hasHeightData(data, heightWindow, worldX, worldZ);
-                boolean steep = isSteep(surfaceGrid, gridSize, localX + BORDER, localZ + BORDER);
-                boolean coastalBeach = isCoastalBeach(surfaceGrid, gridSize, localX + BORDER, localZ + BORDER, generator.seaLevel());
-                int vegetationClass = hasHeightData ? generator.sampleVegetationClass(data, worldX, worldZ) : 0;
-                UkGeoChunkGenerator.RiverShape river = hasHeightData
-                    ? generator.computeSurfaceWaterShape(data, heightWindow, worldX, worldZ, surfaceY, minBuildY, vegetationClass, waterShapeCache)
-                    : UkGeoChunkGenerator.RiverShape.none(surfaceY);
-                int terrainTop = river.terrainSurfaceY();
-                int top = Math.clamp(surfaceY, minBuildY + 1, maxBuildY);
-                int columnTop = Math.clamp(
-                    Math.max(Math.max(top, generator.seaLevel()), Math.max(terrainTop + 1, river.waterSurfaceY())),
-                    minBuildY,
-                    maxBuildY
-                );
-                BlockState surfaceRock = hasHeightData ? generator.sampleSurfaceRock(data, worldX, worldZ, terrainTop) : generator.defaultBaseRock(terrainTop);
-                BlockState exposedSurfaceRock = exposedSurfaceRock(worldX, worldZ, surfaceRock);
-                columns[index] = new ColumnPlan(top, terrainTop, columnTop, steep, coastalBeach, river, vegetationClass, surfaceRock, exposedSurfaceRock, hasHeightData);
+        if (shouldParallelize(CHUNK_SIZE * CHUNK_SIZE, PARALLEL_COLUMN_THRESHOLD)) {
+            forEachPlanningCell(CHUNK_SIZE * CHUNK_SIZE, PARALLEL_COLUMN_THRESHOLD, index ->
+                planColumn(generator, data, heightWindow, columns, surfaceGrid, gridSize, chunkMinX, chunkMinZ, minBuildY, maxBuildY, index, new UkGeoChunkGenerator.WaterShapeCache())
+            );
+        } else {
+            UkGeoChunkGenerator.WaterShapeCache waterShapeCache = new UkGeoChunkGenerator.WaterShapeCache();
+            for (int index = 0; index < CHUNK_SIZE * CHUNK_SIZE; index++) {
+                planColumn(generator, data, heightWindow, columns, surfaceGrid, gridSize, chunkMinX, chunkMinZ, minBuildY, maxBuildY, index, waterShapeCache);
             }
         }
         logTiming("ChunkTerrainPlanner.waterPlanning", chunk, waterStartNanos);
@@ -82,6 +82,71 @@ final class ChunkTerrainPlanner {
         logTiming("ChunkTerrainPlanner.orePlanning", chunk, oreStartNanos);
         logTiming("ChunkTerrainPlanner.compute", chunk, startNanos);
         return plan;
+    }
+
+
+    private static void planColumn(
+        UkGeoChunkGenerator generator,
+        UkGeoChunkGenerator.RuntimeData data,
+        HeightTileWindow heightWindow,
+        ColumnPlan[] columns,
+        int[] surfaceGrid,
+        int gridSize,
+        int chunkMinX,
+        int chunkMinZ,
+        int minBuildY,
+        int maxBuildY,
+        int index,
+        UkGeoChunkGenerator.WaterShapeCache waterShapeCache
+    ) {
+        int localZ = index / CHUNK_SIZE;
+        int localX = index - localZ * CHUNK_SIZE;
+        int worldX = chunkMinX + localX;
+        int worldZ = chunkMinZ + localZ;
+        int surfaceY = surfaceGrid[(localZ + BORDER) * gridSize + (localX + BORDER)];
+        boolean hasHeightData = generator.hasHeightData(data, heightWindow, worldX, worldZ);
+        boolean steep = isSteep(surfaceGrid, gridSize, localX + BORDER, localZ + BORDER);
+        boolean coastalBeach = isCoastalBeach(surfaceGrid, gridSize, localX + BORDER, localZ + BORDER, generator.seaLevel());
+        int vegetationClass = hasHeightData ? generator.sampleVegetationClass(data, worldX, worldZ) : 0;
+        UkGeoChunkGenerator.RiverShape river = hasHeightData
+            ? generator.computeSurfaceWaterShape(data, heightWindow, worldX, worldZ, surfaceY, minBuildY, vegetationClass, waterShapeCache)
+            : UkGeoChunkGenerator.RiverShape.none(surfaceY);
+        int terrainTop = river.terrainSurfaceY();
+        int top = Math.clamp(surfaceY, minBuildY + 1, maxBuildY);
+        int columnTop = Math.clamp(
+            Math.max(Math.max(top, generator.seaLevel()), Math.max(terrainTop + 1, river.waterSurfaceY())),
+            minBuildY,
+            maxBuildY
+        );
+        BlockState surfaceRock = hasHeightData ? generator.sampleSurfaceRock(data, worldX, worldZ, terrainTop) : generator.defaultBaseRock(terrainTop);
+        BlockState exposedSurfaceRock = exposedSurfaceRock(worldX, worldZ, surfaceRock);
+        columns[index] = new ColumnPlan(top, terrainTop, columnTop, steep, coastalBeach, river, vegetationClass, surfaceRock, exposedSurfaceRock, hasHeightData);
+    }
+
+    private static boolean shouldParallelize(int cells, int threshold) {
+        return ENABLE_PARALLEL_CHUNK_PLANNING && PARALLEL_CHUNK_PLANNING_THREADS > 1 && cells >= threshold;
+    }
+
+    private static void forEachPlanningCell(int cells, int threshold, IntConsumer action) {
+        if (!shouldParallelize(cells, threshold)) {
+            for (int i = 0; i < cells; i++) {
+                action.accept(i);
+            }
+            return;
+        }
+        PLANNING_POOL.submit(() -> IntStream.range(0, cells).parallel().forEach(action)).join();
+    }
+
+    private static void logParallelModeOnce() {
+        if (PARALLEL_MODE_LOGGED.compareAndSet(false, true)) {
+            UkGeoMod.LOGGER.info(
+                "UKGeo planner parallelism: enabled={} threads={} surfaceThreshold={} columnThreshold={}",
+                ENABLE_PARALLEL_CHUNK_PLANNING,
+                PARALLEL_CHUNK_PLANNING_THREADS,
+                PARALLEL_SURFACE_GRID_THRESHOLD,
+                PARALLEL_COLUMN_THRESHOLD
+            );
+        }
     }
 
     static void apply(Plan plan, ChunkAccess chunk, CaveMask caveMask) {
@@ -117,9 +182,13 @@ final class ChunkTerrainPlanner {
                 }
             }
         }
-        if (DEBUG_GEN_TIMINGS) {
+        if (DEBUG_GEN_TIMINGS && DEBUG_FULL_TIMING_SPAM) {
             UkGeoMod.LOGGER.info("UKGeo timing chunk {} ChunkTerrainPlanner.fillColumn total={}ms", chunk.getPos(), nanosToMillis(fillNanos));
         }
+        // Ores/mineral deposits must be part of the base terrain, not a late surface/decoration pass.
+        // Placing them here means later carvers and structures can cut through or overwrite them,
+        // preventing mineral blocks from appearing in the air inside generated structures.
+        applyOres(plan, chunk);
         logTiming("ChunkTerrainPlanner.apply", chunk, startNanos);
     }
 
@@ -570,7 +639,7 @@ final class ChunkTerrainPlanner {
     }
 
     private static void logTiming(String label, ChunkAccess chunk, long startNanos) {
-        if (DEBUG_GEN_TIMINGS) {
+        if (DEBUG_GEN_TIMINGS && DEBUG_FULL_TIMING_SPAM) {
             UkGeoMod.LOGGER.info("UKGeo timing chunk {} {}={}ms", chunk.getPos(), label, nanosToMillis(System.nanoTime() - startNanos));
         }
     }

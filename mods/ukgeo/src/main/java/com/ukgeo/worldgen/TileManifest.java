@@ -11,6 +11,9 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 public final class TileManifest {
+    public static final String DEFAULT_HEIGHT_EXTENSION = ".r16";
+    public static final String DEFAULT_U8_EXTENSION = ".u8";
+
     public final Path root;
     public final int tileSize;
     public final int width;
@@ -27,16 +30,22 @@ public final class TileManifest {
     public final double bngMaxNorthing;
     public final int seaLevelY;
     public final String heightPath;
+    public final String heightExtension;
     public final Map<String, String> orePaths;
+    public final Map<String, String> oreExtensions;
     public final String surfaceGeologyPath;
+    public final String surfaceGeologyExtension;
     public final Map<Integer, SurfaceGeologyClass> surfaceGeologyClasses;
     public final String vegetationPath;
+    public final String vegetationExtension;
     public final int vegetationCellBlocks;
     public final Map<Integer, VegetationClass> vegetationClasses;
     public final String biomeRegionsPath;
+    public final String biomeRegionsExtension;
     public final int biomeRegionsCellBlocks;
     public final Map<Integer, VegetationClass> biomeRegionClasses;
     public final String riversPath;
+    public final String riversExtension;
     public final String riverOrderPath;
     public final String riverHalfWidthPath;
     public final int maxRiverHalfWidth;
@@ -61,10 +70,12 @@ public final class TileManifest {
         JsonObject height = json.getAsJsonObject("height");
         this.seaLevelY = height.get("sea_level_y").getAsInt();
         this.heightPath = height.get("path").getAsString();
+        this.heightExtension = extension(height, DEFAULT_HEIGHT_EXTENSION);
         this.surfaceGeologyClasses = new LinkedHashMap<>();
         JsonObject surface = json.getAsJsonObject("surface_geology");
         if (surface != null) {
             this.surfaceGeologyPath = surface.get("path").getAsString();
+            this.surfaceGeologyExtension = extension(surface, DEFAULT_U8_EXTENSION);
             JsonObject classes = surface.getAsJsonObject("classes");
             if (classes != null) {
                 for (Map.Entry<String, JsonElement> entry : classes.entrySet()) {
@@ -78,44 +89,54 @@ public final class TileManifest {
             }
         } else {
             this.surfaceGeologyPath = null;
+            this.surfaceGeologyExtension = DEFAULT_U8_EXTENSION;
         }
         this.vegetationClasses = new LinkedHashMap<>();
         JsonObject vegetation = json.getAsJsonObject("vegetation");
         if (vegetation != null) {
             this.vegetationPath = vegetation.get("path").getAsString();
+            this.vegetationExtension = extension(vegetation, DEFAULT_U8_EXTENSION);
             this.vegetationCellBlocks = vegetation.has("cell_blocks") ? Math.max(1, vegetation.get("cell_blocks").getAsInt()) : 1;
             this.vegetationClasses.putAll(parseVegetationClasses(vegetation));
         } else {
             this.vegetationPath = null;
+            this.vegetationExtension = DEFAULT_U8_EXTENSION;
             this.vegetationCellBlocks = 1;
         }
         this.biomeRegionClasses = new LinkedHashMap<>();
         JsonObject biomeRegions = json.getAsJsonObject("biome_regions");
         if (biomeRegions != null) {
             this.biomeRegionsPath = biomeRegions.get("path").getAsString();
+            this.biomeRegionsExtension = extension(biomeRegions, DEFAULT_U8_EXTENSION);
             this.biomeRegionsCellBlocks = biomeRegions.has("cell_blocks") ? Math.max(1, biomeRegions.get("cell_blocks").getAsInt()) : this.vegetationCellBlocks;
             this.biomeRegionClasses.putAll(parseVegetationClasses(biomeRegions));
         } else {
             this.biomeRegionsPath = null;
+            this.biomeRegionsExtension = DEFAULT_U8_EXTENSION;
             this.biomeRegionsCellBlocks = 1;
         }
         JsonObject rivers = json.getAsJsonObject("rivers");
         if (rivers == null) {
             this.riversPath = null;
+            this.riversExtension = DEFAULT_U8_EXTENSION;
             this.riverOrderPath = null;
             this.riverHalfWidthPath = null;
             this.maxRiverHalfWidth = 0;
         } else {
             this.riversPath = rivers.get("path").getAsString();
+            this.riversExtension = extension(rivers, DEFAULT_U8_EXTENSION);
             this.riverOrderPath = rivers.has("order_path") ? rivers.get("order_path").getAsString() : null;
             this.riverHalfWidthPath = rivers.has("half_width_path") ? rivers.get("half_width_path").getAsString() : null;
             this.maxRiverHalfWidth = rivers.has("max_half_width") ? Math.max(0, rivers.get("max_half_width").getAsInt()) : 0;
         }
         this.orePaths = new LinkedHashMap<>();
+        this.oreExtensions = new LinkedHashMap<>();
         JsonObject ores = json.getAsJsonObject("ore_layers");
         if (ores != null) {
             for (Map.Entry<String, JsonElement> entry : ores.entrySet()) {
-                this.orePaths.put(entry.getKey(), entry.getValue().getAsJsonObject().get("path").getAsString());
+                JsonObject value = entry.getValue().getAsJsonObject();
+                this.orePaths.put(entry.getKey(), value.get("path").getAsString());
+                this.oreExtensions.put(entry.getKey(), extension(value, DEFAULT_U8_EXTENSION));
             }
         }
     }
@@ -139,6 +160,16 @@ public final class TileManifest {
         return paddedDepth / tileSize;
     }
 
+    public String u8ExtensionFor(String layerName) {
+        return switch (layerName) {
+            case "surface_geology" -> surfaceGeologyExtension;
+            case "vegetation" -> vegetationExtension;
+            case "biome_regions" -> biomeRegionsExtension;
+            case "rivers", "river_order", "river_half_width" -> riversExtension;
+            default -> oreExtensions.getOrDefault(layerName, DEFAULT_U8_EXTENSION);
+        };
+    }
+
     public String originSummary() {
         if (Double.isNaN(bngMinEasting) || Double.isNaN(bngMinNorthing) || Double.isNaN(bngMaxEasting) || Double.isNaN(bngMaxNorthing)) {
             return "BNG unavailable";
@@ -148,6 +179,14 @@ public final class TileManifest {
         double easting = bngMinEasting + (dataX + 0.5D) * (bngMaxEasting - bngMinEasting) / width;
         double northing = bngMaxNorthing - (dataZ + 0.5D) * (bngMaxNorthing - bngMinNorthing) / depth;
         return "BNG E %.0f N %.0f".formatted(easting, northing);
+    }
+
+    private static String extension(JsonObject object, String fallback) {
+        if (object == null || !object.has("extension") || object.get("extension").isJsonNull()) {
+            return fallback;
+        }
+        String value = object.get("extension").getAsString();
+        return value == null || value.isBlank() ? fallback : value;
     }
 
     private static double optionalDouble(JsonObject object, String key) {

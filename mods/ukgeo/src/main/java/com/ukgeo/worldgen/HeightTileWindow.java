@@ -1,8 +1,6 @@
 package com.ukgeo.worldgen;
 
 import java.io.IOException;
-import java.util.HashMap;
-import java.util.Map;
 import java.util.OptionalInt;
 
 /**
@@ -41,32 +39,32 @@ final class HeightTileWindow {
         int minTileZ = Math.max(0, floorDiv(minBlockZ - manifest.minecraftMinZ, tileSize));
         int maxTileZ = Math.min(manifest.tilesZ() - 1, floorDiv(maxBlockZ - manifest.minecraftMinZ, tileSize));
 
-        Map<TileCoord, short[]> tiles = new HashMap<>();
         if (minTileX <= maxTileX && minTileZ <= maxTileZ) {
             for (int tileZ = minTileZ; tileZ <= maxTileZ; tileZ++) {
-                for (int tileX = minTileX; tileX <= maxTileX; tileX++) {
-                    tiles.put(new TileCoord(tileX, tileZ), layer.readTile(new TileCoord(tileX, tileZ)));
-                }
-            }
-        }
-
-        for (int worldZ = minBlockZ; worldZ <= maxBlockZ; worldZ++) {
-            int dataZ = worldZ - manifest.minecraftMinZ;
-            if (dataZ < 0 || dataZ >= manifest.paddedDepth) {
-                continue;
-            }
-            int tileZ = floorDiv(dataZ, tileSize);
-            int localZ = floorMod(dataZ, tileSize);
-            for (int worldX = minBlockX; worldX <= maxBlockX; worldX++) {
-                int dataX = worldX - manifest.minecraftMinX;
-                if (dataX < 0 || dataX >= manifest.paddedWidth) {
+                int tileWorldMinZ = manifest.minecraftMinZ + tileZ * tileSize;
+                int tileWorldMaxZ = tileWorldMinZ + tileSize - 1;
+                int copyMinZ = Math.max(minBlockZ, tileWorldMinZ);
+                int copyMaxZ = Math.min(maxBlockZ, Math.min(tileWorldMaxZ, manifest.minecraftMinZ + manifest.paddedDepth - 1));
+                if (copyMinZ > copyMaxZ) {
                     continue;
                 }
-                int tileX = floorDiv(dataX, tileSize);
-                int localX = floorMod(dataX, tileSize);
-                short[] tile = tiles.get(new TileCoord(tileX, tileZ));
-                if (tile != null) {
-                    samples[(worldZ - minBlockZ) * sizeX + (worldX - minBlockX)] = tile[localZ * tileSize + localX];
+                for (int tileX = minTileX; tileX <= maxTileX; tileX++) {
+                    int tileWorldMinX = manifest.minecraftMinX + tileX * tileSize;
+                    int tileWorldMaxX = tileWorldMinX + tileSize - 1;
+                    int copyMinX = Math.max(minBlockX, tileWorldMinX);
+                    int copyMaxX = Math.min(maxBlockX, Math.min(tileWorldMaxX, manifest.minecraftMinX + manifest.paddedWidth - 1));
+                    if (copyMinX > copyMaxX) {
+                        continue;
+                    }
+                    short[] tile = layer.readTile(new TileCoord(tileX, tileZ));
+                    int length = copyMaxX - copyMinX + 1;
+                    int srcX = copyMinX - tileWorldMinX;
+                    int dstX = copyMinX - minBlockX;
+                    for (int worldZ = copyMinZ; worldZ <= copyMaxZ; worldZ++) {
+                        int srcZ = worldZ - tileWorldMinZ;
+                        int dstZ = worldZ - minBlockZ;
+                        System.arraycopy(tile, srcZ * tileSize + srcX, samples, dstZ * sizeX + dstX, length);
+                    }
                 }
             }
         }

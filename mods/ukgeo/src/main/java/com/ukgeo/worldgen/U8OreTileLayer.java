@@ -8,6 +8,7 @@ public final class U8OreTileLayer {
     private final TileManifest manifest;
     private final String oreName;
     private final String path;
+    private final String extension;
     private final TileGrid grid;
     private final int cellBlocks;
     private final int paddedWidth;
@@ -22,6 +23,7 @@ public final class U8OreTileLayer {
         this.manifest = manifest;
         this.oreName = oreName;
         this.path = path;
+        this.extension = manifest.u8ExtensionFor(oreName);
         this.grid = new TileGrid(manifest);
         this.cellBlocks = Math.max(1, cellBlocks);
         this.paddedWidth = paddedWidth;
@@ -53,8 +55,8 @@ public final class U8OreTileLayer {
     }
 
     private byte[] load(TileCoord coord) throws IOException {
-        Path tilePath = manifest.root.resolve(path).resolve(coord.fileStem() + ".u8.gz");
-        return R16HeightTileLayer.readGzip(tilePath, manifest.tileSize * manifest.tileSize);
+        Path tilePath = manifest.root.resolve(path).resolve(coord.fileStem() + extension);
+        return R16HeightTileLayer.readTileBytes(tilePath, manifest.tileSize * manifest.tileSize);
     }
 
     public String cacheStats() {

@@ -20,7 +20,7 @@ public final class OreSettings {
             new OreDefinition("redstone", BACKGROUND_ONLY, "minecraft:redstone_ore", "minecraft:deepslate_redstone_ore", 8, 0, -96, 64, 8),
             new OreDefinition("lapis", BACKGROUND_ONLY, "minecraft:lapis_ore", "minecraft:deepslate_lapis_ore", 2, 0, -64, 64, 7),
             // 0.1 raw background attempts * 0.1 background multiplier = 0.01 effective attempts per chunk.
-            new OreDefinition("diamond", BACKGROUND_ONLY, "minecraft:diamond_ore", "minecraft:deepslate_diamond_ore", 0.1, 0, -64, 16, OreHeightProfile.DEEP_BIASED, -64, 0, 6),
+            new OreDefinition("diamond", BACKGROUND_ONLY, "minecraft:diamond_ore", "minecraft:deepslate_diamond_ore", 0.2, 0, -64, 16, OreHeightProfile.DEEP_BIASED, -64, 0, 6),
             new OreDefinition("emerald", BACKGROUND_ONLY, "minecraft:emerald_ore", "minecraft:deepslate_emerald_ore", 2, 0, -16, 320, 3),
             new OreDefinition("andesite", "andesite", "minecraft:andesite", "minecraft:andesite", 0, 18, -64, 320, 28),
             new OreDefinition("diorite", "diorite", "minecraft:diorite", "minecraft:diorite", 0, 14, -64, 320, 24),
