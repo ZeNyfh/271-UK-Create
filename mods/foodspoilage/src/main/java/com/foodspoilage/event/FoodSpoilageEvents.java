@@ -18,6 +18,7 @@ import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.food.FoodData;
 import net.minecraft.world.food.FoodProperties;
+import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.ClickAction;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
@@ -85,7 +86,7 @@ public final class FoodSpoilageEvents {
     }
 
     private static void onContainerOpen(PlayerContainerEvent.Open event) {
-        if (event.getEntity().level().isClientSide()) {
+        if (event.getEntity().level().isClientSide() || isCreativeOwnInventoryMenu(event.getEntity(), event.getContainer())) {
             return;
         }
         for (Slot slot : event.getContainer().slots) {
@@ -121,7 +122,9 @@ public final class FoodSpoilageEvents {
         }
         if (event.getEntity() instanceof Player player && Math.floorMod(player.getId(), 100) == Math.floorMod(player.tickCount, 100)) {
             InventorySpoilageHooks.scanPlayerInventory(player);
-            InventorySpoilageHooks.scanMenu(player.containerMenu);
+            if (!isCreativeOwnInventoryMenu(player, player.containerMenu)) {
+                InventorySpoilageHooks.scanMenu(player.containerMenu);
+            }
         }
     }
 
@@ -153,6 +156,11 @@ public final class FoodSpoilageEvents {
         event.getSlot().set(target);
         event.getCarriedSlotAccess().set(carried);
         event.setCanceled(true);
+    }
+
+
+    private static boolean isCreativeOwnInventoryMenu(Player player, AbstractContainerMenu menu) {
+        return player != null && menu == player.inventoryMenu && player.getAbilities().instabuild;
     }
 
     private static void onUseStart(LivingEntityUseItemEvent.Start event) {

@@ -4,12 +4,10 @@ import com.foodspoilage.config.FoodSpoilageConfig;
 import com.foodspoilage.registry.ModDataComponents;
 import com.foodspoilage.spoilage.FoodClassificationManager;
 import com.foodspoilage.spoilage.SpoilageManager;
-import com.foodspoilage.spoilage.SpoilageMergeTracker;
 import net.minecraft.world.item.ItemStack;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
-import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 @Mixin(ItemStack.class)
@@ -27,19 +25,7 @@ public abstract class ItemStackMixin {
         cleanFirst.remove(ModDataComponents.FOOD_STACK_DATA);
         cleanSecond.remove(ModDataComponents.FOOD_STACK_DATA);
         boolean matches = cleanFirst.getComponents().equals(cleanSecond.getComponents());
-        if (matches) {
-            SpoilageMergeTracker.record(first, second);
-        }
         callback.setReturnValue(matches);
-    }
-
-    @Inject(method = "grow", at = @At("HEAD"))
-    private void foodspoilage$averageFreshnessOnGrow(int increment, CallbackInfo callback) {
-        ItemStack stack = (ItemStack) (Object) this;
-        SpoilageMergeTracker.tryApplyGrow(stack, increment);
-        if (increment > 0) {
-            SpoilageManager.ensureInitialized(stack);
-        }
     }
 
     @Inject(method = "hashItemAndComponents", at = @At("HEAD"), cancellable = true)
