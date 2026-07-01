@@ -14,7 +14,7 @@ from rich.console import Console
 from tqdm import tqdm
 
 from .manifest import default_u8_layer, read_manifest, write_manifest
-from .tiles import read_u8_tile, write_u8_tile
+from .tiles import read_u8_tile, resolve_existing_tile, write_u8_tile, u8_extension
 
 console = Console()
 
@@ -140,7 +140,8 @@ def make_gold_occurrence_tiles(
     layer_root = out / "ores" / "gold"
     for tz in tqdm(range(tiles_z), desc="gold tile rows"):
         for tx in range(tiles_x):
-            tile_path = layer_root / f"{tx:03d}_{tz:03d}.u8.gz"
+            requested_path = layer_root / f"{tx:03d}_{tz:03d}{u8_extension()}"
+            tile_path = resolve_existing_tile(requested_path) if merge_existing else requested_path
             tile = tile_arrays.get((tx, tz), np.zeros((tile_size, tile_size), dtype=np.uint8))
             if merge_existing and tile_path.exists():
                 tile = np.maximum(read_u8_tile(tile_path), tile)

@@ -11,6 +11,8 @@ MAX_SIZE="${MAX_SIZE:-12000}"
 LEGEND_SCALE="${LEGEND_SCALE:-20}"
 ORE_JOBS="${ORE_JOBS:-1}"
 VEGETATION_JOBS="${VEGETATION_JOBS:-1}"
+UKGEO_TILE_COMPRESSION="${UKGEO_TILE_COMPRESSION:-none}"
+export UKGEO_TILE_COMPRESSION
 
 OS_TERRAIN_ZIP="${OS_TERRAIN_ZIP:-$DATA_DIR/terr50_gagg_gb.zip}"
 BGS_GEOLOGY_ZIP="${BGS_GEOLOGY_ZIP:-$DATA_DIR/BGS_Geology_625k_bedrock_gpkg.zip}"
@@ -69,6 +71,7 @@ rm -rf "$TMP_ROOT"
 mkdir -p "$TMP_ROOT"
 
 echo "Rebuilding GB runtime tiles into: $TMP_ROOT"
+echo "Tile compression: $UKGEO_TILE_COMPRESSION (none writes .r16/.u8; gzip writes .r16.gz/.u8.gz)"
 
 "$UKGEO" make-height-tiles \
   --os-zip "$OS_TERRAIN_ZIP" \

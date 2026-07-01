@@ -15,7 +15,7 @@ from tqdm import tqdm
 
 from .bgs import resolve_gpkg
 from .manifest import read_manifest, write_manifest
-from .tiles import write_u8_tile
+from .tiles import write_u8_tile, u8_extension
 
 console = Console()
 
@@ -83,7 +83,7 @@ def make_surface_geology_tiles(*, bgs: Path, rules: Path, manifest_path: Path, o
         _write_tiles(arr, root, tile_size)
         manifest["surface_geology"] = {
             "path": "geology/surface",
-            "extension": ".u8.gz",
+            "extension": u8_extension(),
             "dtype": "uint8",
             "classes": {
                 str(int(cfg.get("id", 0))): {
@@ -111,7 +111,7 @@ def _write_tiles(arr: np.ndarray, root: Path, tile_size: int) -> None:
                 padded = np.zeros((tile_size, tile_size), dtype=np.uint8)
                 padded[: tile.shape[0], : tile.shape[1]] = tile
                 tile = padded
-            write_u8_tile(root / f"{tile_x:03d}_{tile_z:03d}.u8.gz", tile)
+            write_u8_tile(root / f"{tile_x:03d}_{tile_z:03d}{u8_extension()}", tile)
 
 
 def _write_debug(path: Path, arr: np.ndarray, transform) -> None:

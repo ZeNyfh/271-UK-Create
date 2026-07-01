@@ -5,6 +5,8 @@ from typing import Any
 import json
 import math
 
+from .tiles import r16_extension, u8_extension
+
 from .coords import DEFAULT_MINECRAFT_MIN_X, DEFAULT_MINECRAFT_MIN_Z
 
 ORE_NAMES = (
@@ -19,7 +21,7 @@ ORE_NAMES = (
 def default_u8_layer(path: str) -> dict[str, Any]:
     return {
         "path": path,
-        "extension": ".u8.gz",
+        "extension": u8_extension(),
         "dtype": "uint8",
         "min": 0,
         "max": 255,
@@ -65,7 +67,7 @@ def default_manifest(
         },
         "height": {
             "path": "height",
-            "extension": ".r16.gz",
+            "extension": r16_extension(),
             "dtype": "int16_le",
             "unit": "decimetres",
             "scale_to_metres": 0.1,

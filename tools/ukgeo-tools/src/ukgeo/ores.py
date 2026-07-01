@@ -16,7 +16,7 @@ from tqdm import tqdm
 
 from .bgs import resolve_gpkg
 from .manifest import ORE_NAMES, default_u8_layer, read_manifest, write_manifest
-from .tiles import write_u8_tile
+from .tiles import write_u8_tile, u8_extension
 
 console = Console()
 
@@ -160,7 +160,7 @@ def _write_tiles(arr: np.ndarray, root: Path, tile_size: int, *, show_progress: 
                 padded = np.zeros((tile_size, tile_size), dtype=np.uint8)
                 padded[: tile.shape[0], : tile.shape[1]] = tile
                 tile = padded
-            write_u8_tile(root / f"{tile_x:03d}_{tile_z:03d}.u8.gz", tile)
+            write_u8_tile(root / f"{tile_x:03d}_{tile_z:03d}{u8_extension()}", tile)
 
 
 def _write_debug(path: Path, arr: np.ndarray, transform) -> None:

@@ -18,6 +18,23 @@ python3 -m venv .venv
 .venv/bin/ukgeo inspect-bgs ../../data/BGS_Geology_50k_GeoPackage_SAMPLE.zip
 ```
 
+
+### Runtime tile compression
+
+New datasets default to uncompressed runtime tiles: `height/*.r16` and `*.u8` layers. This uses more disk space than the old `*.r16.gz`/`*.u8.gz` files, but it avoids thousands of small gzip decompressions while Minecraft is generating chunks. The mod and tools remain backward-compatible with existing `.gz` datasets.
+
+To force the legacy gzip output, set:
+
+```bash
+UKGEO_TILE_COMPRESSION=gzip ./rebuild_uk_world_data_gb.sh
+```
+
+For faster in-game generation, leave it unset or set:
+
+```bash
+UKGEO_TILE_COMPRESSION=none ./rebuild_uk_world_data_gb.sh
+```
+
 ## Generate a small test area
 
 Choose a British National Grid extent, then run with a smaller Minecraft grid:
@@ -122,7 +139,7 @@ To remake the full checked-out GB dataset into `./uk_world_data_gb`, run:
 ```
 
 The rebuild script writes to a temporary sibling directory first, validates the result, then moves the previous dataset to a timestamped backup before replacing it.
-Ore and vegetation generation use 4 worker processes by default; lower them on memory-constrained machines with `ORE_JOBS=2 VEGETATION_JOBS=2 ./rebuild_uk_world_data_gb.sh`.
+Ore and vegetation generation use 4 worker processes by default; lower them on memory-constrained machines with `UKGEO_TILE_COMPRESSION=none ORE_JOBS=2 VEGETATION_JOBS=2 ./rebuild_uk_world_data_gb.sh`.
 
 ## Generate the default 25k x 50k world
 

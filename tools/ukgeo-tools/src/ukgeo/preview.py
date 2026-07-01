@@ -7,7 +7,7 @@ import numpy as np
 from PIL import Image, ImageDraw
 
 from .manifest import read_manifest
-from .tiles import HEIGHT_NODATA, read_r16_tile, read_u8_tile
+from .tiles import HEIGHT_NODATA, read_r16_tile, read_u8_tile, resolve_existing_tile, r16_extension, u8_extension
 
 def u8_layer_grid(manifest: dict, layer: str) -> tuple[int, int, int, int, int]:
     """Return tiles_x, tiles_z, data_width, data_depth, cell_blocks for a u8 tile layer."""
@@ -135,7 +135,7 @@ def _read_height_preview(root: Path, manifest: dict, tiles_x: int, tiles_z: int,
     image = np.full((math.ceil(tiles_z * tile_size / scale), math.ceil(tiles_x * tile_size / scale)), HEIGHT_NODATA, dtype=np.int16)
     for tz in range(tiles_z):
         for tx in range(tiles_x):
-            arr = read_r16_tile(base / f"{tx:03d}_{tz:03d}.r16.gz", tile_size)
+            arr = read_r16_tile(base / f"{tx:03d}_{tz:03d}{manifest['height'].get('extension', r16_extension())}", tile_size)
             y0, y1, x0, x1, local_y, local_x = _tile_preview_window(tx, tz, tile_size, scale)
             image[y0:y1, x0:x1] = arr[np.ix_(local_y, local_x)]
     return image
@@ -163,7 +163,7 @@ def _read_u8_preview(
     image = np.zeros((math.ceil(depth / scale), math.ceil(width / scale)), dtype=np.uint8)
     for tz in range(tiles_z):
         for tx in range(tiles_x):
-            tile_path = base / f"{tx:03d}_{tz:03d}.u8.gz"
+            tile_path = resolve_existing_tile(base / f"{tx:03d}_{tz:03d}{u8_extension()}")
             if not tile_path.exists():
                 if missing_ok:
                     continue

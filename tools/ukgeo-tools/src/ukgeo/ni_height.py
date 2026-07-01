@@ -17,7 +17,7 @@ from rich.console import Console
 from tqdm import tqdm
 
 from .manifest import read_manifest
-from .tiles import HEIGHT_NODATA, read_r16_tile, write_r16_tile
+from .tiles import HEIGHT_NODATA, read_r16_tile, write_r16_tile, r16_extension
 
 console = Console()
 
@@ -101,7 +101,7 @@ def add_osni_height_tiles(
             valid = dst != HEIGHT_NODATA
             if not valid.any():
                 continue
-            path = height_root / f"{tile_x:03d}_{tile_z:03d}.r16.gz"
+            path = height_root / f"{tile_x:03d}_{tile_z:03d}{manifest['height'].get('extension', r16_extension())}"
             existing = read_r16_tile(path, tile_size) if path.exists() else np.full((tile_size, tile_size), HEIGHT_NODATA, dtype="<i2")
             existing = existing.copy()
             existing[valid] = dst[valid]

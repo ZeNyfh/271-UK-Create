@@ -13,7 +13,7 @@ from tqdm import tqdm
 
 from .bgs import resolve_gpkg
 from .manifest import read_manifest, write_manifest
-from .tiles import HEIGHT_NODATA, read_r16_tile, write_r16_tile
+from .tiles import HEIGHT_NODATA, read_r16_tile, write_r16_tile, r16_extension
 
 console = Console()
 
@@ -80,7 +80,7 @@ def mask_height_to_bgs_land(
     tiles_z = math.ceil(depth / tile_size)
     for tile_z in tqdm(range(tiles_z), desc="masking height tile rows"):
         for tile_x in range(tiles_x):
-            path = height_root / f"{tile_x:03d}_{tile_z:03d}.r16.gz"
+            path = height_root / f"{tile_x:03d}_{tile_z:03d}{manifest['height'].get('extension', r16_extension())}"
             tile = read_r16_tile(path, tile_size)
             y0 = tile_z * tile_size
             x0 = tile_x * tile_size

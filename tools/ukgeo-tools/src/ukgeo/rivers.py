@@ -15,7 +15,7 @@ from tqdm import tqdm
 
 from .bgs import resolve_gpkg
 from .manifest import read_manifest, write_manifest
-from .tiles import HEIGHT_NODATA, read_r16_tile, write_u8_tile
+from .tiles import HEIGHT_NODATA, read_r16_tile, write_u8_tile, u8_extension, r16_extension
 
 console = Console()
 
@@ -110,7 +110,7 @@ def make_river_tiles(
         _write_tiles(half_width_arr, out / "water" / "river_half_width", tile_size)
         manifest["rivers"] = {
             "path": "water/rivers",
-            "extension": ".u8.gz",
+            "extension": u8_extension(),
             "dtype": "uint8",
             "min": 0,
             "max": 255,
@@ -147,7 +147,7 @@ def _write_tiles(arr: np.ndarray, root: Path, tile_size: int) -> None:
                 padded = np.zeros((tile_size, tile_size), dtype=np.uint8)
                 padded[: tile.shape[0], : tile.shape[1]] = tile
                 tile = padded
-            write_u8_tile(root / f"{tile_x:03d}_{tile_z:03d}.u8.gz", tile)
+            write_u8_tile(root / f"{tile_x:03d}_{tile_z:03d}{u8_extension()}", tile)
 
 
 def _write_debug(path: Path, arr: np.ndarray, transform) -> None:
@@ -199,7 +199,7 @@ class _HeightSampler:
         tile_z = data_z // self.tile_size
         tile = self.cache.get((tile_x, tile_z))
         if tile is None:
-            path = self.root / self.manifest["height"]["path"] / f"{tile_x:03d}_{tile_z:03d}.r16.gz"
+            path = self.root / self.manifest["height"]["path"] / f"{tile_x:03d}_{tile_z:03d}{self.manifest['height'].get('extension', r16_extension())}"
             if not path.exists():
                 return None
             tile = read_r16_tile(path, self.tile_size)

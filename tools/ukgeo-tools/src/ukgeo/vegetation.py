@@ -15,7 +15,7 @@ from rich.console import Console
 from tqdm import tqdm
 
 from .manifest import read_manifest, write_manifest
-from .tiles import read_u8_tile, write_u8_tile
+from .tiles import read_u8_tile, write_u8_tile, u8_extension
 
 console = Console()
 
@@ -154,7 +154,7 @@ def make_vegetation_tiles(
 
     manifest["vegetation"] = {
         "path": "vegetation",
-        "extension": ".u8.gz",
+        "extension": u8_extension(),
         "dtype": "uint8",
         "cell_blocks": cell_blocks,
         "cell_metres": cell_metres,
@@ -218,7 +218,7 @@ def make_vegetation_tiles(
         _write_vegetation_grid(region_root, biome_regions, region_tiles_x, region_tiles_z, tile_size, desc="write biome region tiles")
         manifest["biome_regions"] = {
             "path": "biome_regions",
-            "extension": ".u8.gz",
+            "extension": u8_extension(),
             "dtype": "uint8",
             "cell_blocks": region_cell_blocks,
             "source_cell_blocks": cell_blocks,
@@ -501,7 +501,7 @@ def _read_vegetation_grid(tile_root: Path, tiles_x: int, tiles_z: int, tile_size
     grid = np.zeros((depth_cells, width_cells), dtype=np.uint8)
     for tile_z in tqdm(range(tiles_z), desc="read vegetation tiles"):
         for tile_x in range(tiles_x):
-            tile = read_u8_tile(tile_root / f"{tile_x:03d}_{tile_z:03d}.u8.gz", tile_size)
+            tile = read_u8_tile(tile_root / f"{tile_x:03d}_{tile_z:03d}{u8_extension()}", tile_size)
             y0 = tile_z * tile_size
             x0 = tile_x * tile_size
             y1 = min(depth_cells, y0 + tile_size)
@@ -522,7 +522,7 @@ def _write_vegetation_grid(tile_root: Path, grid: np.ndarray, tiles_x: int, tile
             x1 = min(width, x0 + tile_size)
             if y0 < height and x0 < width:
                 tile[: y1 - y0, : x1 - x0] = grid[y0:y1, x0:x1]
-            write_u8_tile(tile_root / f"{tile_x:03d}_{tile_z:03d}.u8.gz", tile, tile_size)
+            write_u8_tile(tile_root / f"{tile_x:03d}_{tile_z:03d}{u8_extension()}", tile, tile_size)
 
 
 def _write_vegetation_tile_row(task: tuple) -> int:
@@ -555,7 +555,7 @@ def _write_vegetation_tile_row(task: tuple) -> int:
                 )
                 raw_blocks = LCM_TO_VEGETATION[raw_blocks]
                 tile[:valid_h, :valid_w] = resample_blocks_to_cells(raw_blocks, cell_blocks)
-            write_u8_tile(root_path / f"{tile_x:03d}_{tile_z:03d}.u8.gz", tile)
+            write_u8_tile(root_path / f"{tile_x:03d}_{tile_z:03d}{u8_extension()}", tile)
     return tile_z
 
 
@@ -600,7 +600,7 @@ def _write_debug_geotiff(
     arr = np.zeros((depth_cells, width_cells), dtype=np.uint8)
     for tile_z in range(tiles_z):
         for tile_x in range(tiles_x):
-            tile = read_u8_tile(tile_root / f"{tile_x:03d}_{tile_z:03d}.u8.gz", tile_size)
+            tile = read_u8_tile(tile_root / f"{tile_x:03d}_{tile_z:03d}{u8_extension()}", tile_size)
             y0 = tile_z * tile_size
             x0 = tile_x * tile_size
             y1 = min(depth_cells, y0 + tile_size)

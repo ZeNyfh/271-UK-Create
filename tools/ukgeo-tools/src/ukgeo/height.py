@@ -11,7 +11,7 @@ from tqdm import tqdm
 
 from .asc import read_header_from_binary
 from .manifest import default_manifest, write_manifest
-from .tiles import HEIGHT_NODATA, write_r16_tile
+from .tiles import HEIGHT_NODATA, r16_extension, write_r16_tile
 
 console = Console()
 
@@ -84,7 +84,7 @@ def make_height_tiles(
                 tile_z * tile_size : (tile_z + 1) * tile_size,
                 tile_x * tile_size : (tile_x + 1) * tile_size,
             ]
-            write_r16_tile(out / "height" / f"{tile_x:03d}_{tile_z:03d}.r16.gz", tile)
+            write_r16_tile(out / "height" / f"{tile_x:03d}_{tile_z:03d}{r16_extension()}", tile)
 
     manifest = default_manifest(
         width=world_width,

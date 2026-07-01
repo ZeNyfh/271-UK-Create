@@ -11,7 +11,7 @@ from rich.console import Console
 from tqdm import tqdm
 
 from .manifest import default_u8_layer, read_manifest, write_manifest
-from .tiles import HEIGHT_NODATA, read_r16_tile, read_u8_tile, write_u8_tile
+from .tiles import HEIGHT_NODATA, read_r16_tile, read_u8_tile, write_u8_tile, u8_extension, r16_extension
 
 console = Console()
 
@@ -66,6 +66,7 @@ def apply_ore_image_overlay(
 
     manifest.setdefault("ore_layers", {}).setdefault(ore, default_u8_layer(f"ores/{ore}"))
     layer = manifest["ore_layers"][ore]
+    layer_extension = layer.get("extension", u8_extension())
     layer_root = out / layer["path"]
     layer_root.mkdir(parents=True, exist_ok=True)
     score = max(0, min(255, int(score)))
@@ -112,7 +113,7 @@ def apply_ore_image_overlay(
             if not np.any(mask):
                 continue
 
-            path = layer_root / f"{tile_x:03d}_{tile_z:03d}.u8.gz"
+            path = layer_root / f"{tile_x:03d}_{tile_z:03d}{layer_extension}"
             if path.exists():
                 tile = read_u8_tile(path, tile_size).copy()
             else:
@@ -224,7 +225,7 @@ def _read_svg_overlay_mask(
         if _is_blue_paint(stroke):
             outline_points.extend(point for polygon in polygons for point in polygon)
     outline_bbox = (
-        _scale_bbox(_points_bbox(outline_points, min_x=min_x, min_y=min_y), raster_scale)
+        _points_bbox(outline_points, min_x=min_x, min_y=min_y)
         if outline_points
         else None
     )
@@ -469,9 +470,12 @@ def _height_valid_bbox(root: Path, manifest: dict) -> BBox | None:
     height_root = root / height["path"]
     xs: list[int] = []
     zs: list[int] = []
-    for path in height_root.glob("*.r16.gz"):
+    for path in list(height_root.glob("*.r16")) + list(height_root.glob("*.r16.gz")):
         try:
-            tile_x, tile_z = (int(part) for part in path.name.removesuffix(".r16.gz").split("_"))
+            name = path.name
+            if name.endswith(".gz"):
+                name = name[:-3]
+            tile_x, tile_z = (int(part) for part in name.removesuffix(".r16").split("_"))
             arr = read_r16_tile(path, tile_size)
         except Exception:
             continue
