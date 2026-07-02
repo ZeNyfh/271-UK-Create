@@ -18,6 +18,7 @@ from .coords import (
     minecraft_to_layer_cell,
     minecraft_to_tile_cell,
 )
+from .cop30_height import add_cop30_height_tiles as add_cop30_height_tiles_impl
 from .height import make_height_tiles as make_height_tiles_impl
 from .gold import harvest_gold_occurrences as harvest_gold_occurrences_impl
 from .gold import make_gold_occurrence_tiles as make_gold_occurrence_tiles_impl
@@ -227,6 +228,33 @@ def add_osni_height_tiles(
         source_crs=source_crs,
         source_cell_size=source_cell_size,
         resampling=resampling,
+    )
+
+
+@app.command("add-cop30-height-tiles")
+def add_cop30_height_tiles(
+    cop30: Path = typer.Option(..., "--cop30"),
+    manifest: Path = typer.Option(..., "--manifest"),
+    out: Path = typer.Option(..., "--out"),
+    resampling: str = typer.Option("bilinear", "--resampling", help="nearest or bilinear"),
+    smoothing: str = typer.Option("light", "--smoothing", help="none, light, or medium"),
+    height_deterrace: bool = typer.Option(True, "--height-deterrace/--no-height-deterrace"),
+    target: str = typer.Option("ireland-iom", "--target", help="ireland-iom, ireland-only, iom-only, or all-cop30"),
+    protect_mainland_gb: bool = typer.Option(True, "--protect-mainland-gb/--no-protect-mainland-gb"),
+    debug_geotiff: Path | None = typer.Option(None, "--debug-geotiff"),
+    allow_empty: bool = typer.Option(False, "--allow-empty"),
+) -> None:
+    add_cop30_height_tiles_impl(
+        cop30_archive=cop30,
+        manifest_path=manifest,
+        out=out,
+        resampling=resampling,
+        smoothing=smoothing,
+        deterrace=height_deterrace,
+        target=target,
+        protect_mainland_gb=protect_mainland_gb,
+        debug_geotiff=debug_geotiff,
+        allow_empty=allow_empty,
     )
 
 

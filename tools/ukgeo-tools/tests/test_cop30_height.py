@@ -1,0 +1,202 @@
+import tarfile
+
+import numpy as np
+import rasterio
+from pyproj import Transformer
+from rasterio.transform import from_bounds
+from typer.testing import CliRunner
+
+from ukgeo.cli import app
+from ukgeo.cop30_height import add_cop30_height_tiles, mainland_gb_protection_mask_lonlat, target_mask_lonlat
+from ukgeo.manifest import default_manifest, read_manifest, write_manifest
+from ukgeo.tiles import read_r16_tile, write_r16_tile
+
+
+def test_ireland_iom_target_mask_known_points():
+    included = {
+        "Belfast": (-5.9301, 54.5973),
+        "Dublin": (-6.2603, 53.3498),
+        "Galway": (-9.0568, 53.2707),
+        "Cork": (-8.4756, 51.8985),
+        "Derry": (-7.3092, 54.9966),
+        "Douglas": (-4.4821, 54.1523),
+    }
+    excluded = {
+        "Cardiff": (-3.1791, 51.4816),
+        "Swansea": (-3.9436, 51.6214),
+        "Liverpool": (-2.9916, 53.4084),
+        "Glasgow": (-4.2518, 55.8642),
+        "Edinburgh": (-3.1883, 55.9533),
+        "Oban": (-5.4718, 56.4154),
+        "Anglesey": (-4.3634, 53.2653),
+    }
+    for name, (lon, lat) in included.items():
+        assert bool(target_mask_lonlat(np.array([[lon]]), np.array([[lat]]), "ireland-iom")[0, 0]), name
+    for name, (lon, lat) in excluded.items():
+        assert not bool(target_mask_lonlat(np.array([[lon]]), np.array([[lat]]), "ireland-iom")[0, 0]), name
+
+
+def test_mainland_gb_protection_known_points():
+    protected = {
+        "Cardiff": (-3.1791, 51.4816),
+        "Swansea": (-3.9436, 51.6214),
+        "Liverpool": (-2.9916, 53.4084),
+        "Glasgow": (-4.2518, 55.8642),
+        "Edinburgh": (-3.1883, 55.9533),
+        "Oban": (-5.4718, 56.4154),
+        "Anglesey": (-4.3634, 53.2653),
+    }
+    unprotected = {
+        "Belfast": (-5.9301, 54.5973),
+        "Dublin": (-6.2603, 53.3498),
+        "Douglas": (-4.4821, 54.1523),
+    }
+    for name, (lon, lat) in protected.items():
+        assert bool(mainland_gb_protection_mask_lonlat(np.array([[lon]]), np.array([[lat]]) )[0, 0]), name
+    for name, (lon, lat) in unprotected.items():
+        assert not bool(mainland_gb_protection_mask_lonlat(np.array([[lon]]), np.array([[lat]]) )[0, 0]), name
+
+
+def test_cop30_overlay_writes_target_cells_preserves_nodata_and_metadata(tmp_path):
+    root, manifest_path, bounds = _dataset(tmp_path, lon=-5.9301, lat=54.5973)
+    archive = _cop30_archive(tmp_path, bounds, value=12.3, nodata_center=True)
+
+    add_cop30_height_tiles(
+        cop30_archive=archive,
+        manifest_path=manifest_path,
+        out=root,
+        resampling="nearest",
+        smoothing="none",
+        deterrace=False,
+        target="ireland-iom",
+        protect_mainland_gb=True,
+    )
+
+    tile = read_r16_tile(root / "height" / "000_000.r16")
+    assert tile.dtype == np.dtype("<i2")
+    assert np.count_nonzero(tile == 123) > 200_000
+    assert tile[256, 256] == 100
+    manifest = read_manifest(manifest_path)
+    assert manifest["height_processing"]["source"] == "OS Terrain 50"
+    assert manifest["height_overlays"][-1]["source"] == "Copernicus DEM COP30 GeoTIFF"
+    assert manifest["height_overlays"][-1]["target"] == "ireland-iom"
+
+
+def test_cop30_target_mask_prevents_non_target_write(tmp_path):
+    root, manifest_path, bounds = _dataset(tmp_path, lon=-3.1791, lat=51.4816)
+    archive = _cop30_archive(tmp_path, bounds, value=50.0)
+
+    add_cop30_height_tiles(
+        cop30_archive=archive,
+        manifest_path=manifest_path,
+        out=root,
+        resampling="nearest",
+        smoothing="none",
+        deterrace=False,
+        target="ireland-iom",
+        protect_mainland_gb=False,
+        allow_empty=True,
+    )
+
+    assert np.all(read_r16_tile(root / "height" / "000_000.r16") == 100)
+
+
+def test_cop30_mainland_protection_prevents_gb_overwrite(tmp_path):
+    root, manifest_path, bounds = _dataset(tmp_path, lon=-3.1791, lat=51.4816)
+    archive = _cop30_archive(tmp_path, bounds, value=50.0)
+
+    add_cop30_height_tiles(
+        cop30_archive=archive,
+        manifest_path=manifest_path,
+        out=root,
+        resampling="nearest",
+        smoothing="none",
+        deterrace=False,
+        target="all-cop30",
+        protect_mainland_gb=True,
+        allow_empty=True,
+    )
+
+    assert np.all(read_r16_tile(root / "height" / "000_000.r16") == 100)
+
+
+def test_add_cop30_cli_smoke(tmp_path):
+    root, manifest_path, bounds = _dataset(tmp_path, lon=-4.4821, lat=54.1523)
+    archive = _cop30_archive(tmp_path, bounds, value=20.0)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "add-cop30-height-tiles",
+            "--cop30",
+            str(archive),
+            "--manifest",
+            str(manifest_path),
+            "--out",
+            str(root),
+            "--resampling",
+            "nearest",
+            "--smoothing",
+            "none",
+            "--no-height-deterrace",
+            "--target",
+            "iom-only",
+            "--protect-mainland-gb",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert np.count_nonzero(read_r16_tile(root / "height" / "000_000.r16") == 200) > 200_000
+
+
+def _dataset(tmp_path, *, lon: float, lat: float):
+    root = tmp_path / "world"
+    height = root / "height"
+    height.mkdir(parents=True)
+    to_bng = Transformer.from_crs("EPSG:4326", "EPSG:27700", always_xy=True)
+    easting, northing = to_bng.transform(lon, lat)
+    half = 5120.0
+    manifest = default_manifest(
+        width=512,
+        depth=512,
+        tile_size=512,
+        minecraft_min_x=0,
+        minecraft_min_z=0,
+        bng_min_easting=easting - half,
+        bng_min_northing=northing - half,
+        bng_max_easting=easting + half,
+        bng_max_northing=northing + half,
+    )
+    manifest["height_processing"] = {"source": "OS Terrain 50", "resampling": "bilinear", "smoothing": "light", "deterrace": True}
+    manifest_path = root / "manifest.json"
+    write_manifest(manifest_path, manifest)
+    write_r16_tile(height / "000_000.r16", np.full((512, 512), 100, dtype="<i2"))
+    to_lonlat = Transformer.from_crs("EPSG:27700", "EPSG:4326", always_xy=True)
+    west, south = to_lonlat.transform(easting - half * 1.2, northing - half * 1.2)
+    east, north = to_lonlat.transform(easting + half * 1.2, northing + half * 1.2)
+    return root, manifest_path, (min(west, east), min(south, north), max(west, east), max(south, north))
+
+
+def _cop30_archive(tmp_path, bounds, *, value: float, nodata_center: bool = False):
+    tif = tmp_path / "source.tif"
+    data = np.full((32, 32), value, dtype=np.float32)
+    nodata = -9999.0
+    if nodata_center:
+        data[15:17, 15:17] = nodata
+    with rasterio.open(
+        tif,
+        "w",
+        driver="GTiff",
+        height=data.shape[0],
+        width=data.shape[1],
+        count=1,
+        dtype="float32",
+        crs="EPSG:4326",
+        transform=from_bounds(*bounds, data.shape[1], data.shape[0]),
+        nodata=nodata,
+    ) as dst:
+        dst.write(data, 1)
+    archive = tmp_path / "rasters_COP30.tar.gz"
+    with tarfile.open(archive, "w:gz") as tar:
+        tar.add(tif, arcname="nested/source.tif")
+    return archive

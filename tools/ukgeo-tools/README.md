@@ -95,7 +95,23 @@ Generate a categorical surface geology skin from the same 625k data:
   --out ./uk_world_data
 ```
 
-Merge Northern Ireland OSNI 50m DTM into an existing GB height dataset:
+Merge COP30 GeoTIFF elevation from `rasters_COP30.tar.gz` into an existing height dataset for Ireland, Northern Ireland, the Isle of Man, and nearby Irish/IoM islands:
+
+```bash
+.venv/bin/ukgeo add-cop30-height-tiles \
+  --cop30 ../../data/rasters_COP30.tar.gz \
+  --manifest ./uk_world_data/manifest.json \
+  --out ./uk_world_data \
+  --resampling bilinear \
+  --smoothing light \
+  --height-deterrace \
+  --target ireland-iom \
+  --protect-mainland-gb
+```
+
+The COP30 overlay reads GeoTIFFs directly from the `.tar.gz`, reprojects them to the manifest CRS, writes UKGeo `height/*.r16` tiles in decimetres, and records a `height_overlays` entry in `manifest.json`. `--target` can be `ireland-iom`, `ireland-only`, `iom-only`, or `all-cop30`; `--protect-mainland-gb` remains enabled by default so overlapping COP30 pixels cannot replace England, Wales, Scotland, or Anglesey. Use `--debug-geotiff ./debug_cop30_overlay.tif` to write the sampled cells that were overlaid.
+
+The old Northern Ireland OSNI 50m DTM overlay remains available for manual legacy use:
 
 ```bash
 .venv/bin/ukgeo add-osni-height-tiles \
@@ -137,6 +153,8 @@ To remake the full checked-out GB dataset into `./uk_world_data_gb`, run:
 ```bash
 ./rebuild_uk_world_data_gb.sh
 ```
+
+By default the rebuild script uses `../../data/rasters_COP30.tar.gz` for Ireland, Northern Ireland, and the Isle of Man, and expands the west edge of the British National Grid extent so western Ireland is not silently clipped. Set `INCLUDE_IRELAND=0` to keep the older GB-only extent. Set `USE_LEGACY_OSNI_HEIGHT=1` to use `../../data/osni_opendata_50m_dtm.zip` instead of COP30 for the legacy Northern Ireland-only overlay.
 
 The rebuild script writes to a temporary sibling directory first, validates the result, then moves the previous dataset to a timestamped backup before replacing it.
 Ore and vegetation generation use 4 worker processes by default; lower them on memory-constrained machines with `UKGEO_TILE_COMPRESSION=none ORE_JOBS=2 VEGETATION_JOBS=2 ./rebuild_uk_world_data_gb.sh`.

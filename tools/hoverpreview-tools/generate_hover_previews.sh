@@ -22,6 +22,15 @@ BGS_GEOLOGY_ZIP="${BGS_GEOLOGY_ZIP:-$DATA_DIR/BGS_Geology_625k_bedrock_gpkg.zip}
 COAL_RESOURCES_ZIP="${COAL_RESOURCES_ZIP:-$DATA_DIR/OGC_CoalResourcesForNewTechnologies.zip}"
 GOLD_OCCURRENCES="${GOLD_OCCURRENCES:-$DATA_DIR/bgs_gold_occurrences.geojson}"
 OSNI_DTM_ZIP="${OSNI_DTM_ZIP:-$DATA_DIR/osni_opendata_50m_dtm.zip}"
+COP30_ARCHIVE="${COP30_ARCHIVE:-$DATA_DIR/rasters_COP30.tar.gz}"
+INCLUDE_IRELAND="${INCLUDE_IRELAND:-1}"
+USE_LEGACY_OSNI_HEIGHT="${USE_LEGACY_OSNI_HEIGHT:-0}"
+COP30_TARGET="${COP30_TARGET:-ireland-iom}"
+COP30_SMOOTHING="${COP30_SMOOTHING:-light}"
+COP30_RESAMPLING="${COP30_RESAMPLING:-bilinear}"
+COP30_DETERRACE="${COP30_DETERRACE:-1}"
+COP30_PROTECT_MAINLAND_GB="${COP30_PROTECT_MAINLAND_GB:-1}"
+COP30_DEBUG_GEOTIFF="${COP30_DEBUG_GEOTIFF:-}"
 RIVERS_ZIP="${RIVERS_ZIP:-$DATA_DIR/oprvrs_gpkg_gb.zip}"
 LANDCOVER_ZIP="${LANDCOVER_ZIP:-$DATA_DIR/FME_3564346A_1778997494261_5633.zip}"
 IRON_OVERLAY_IMAGE="${IRON_OVERLAY_IMAGE:-$DATA_DIR/uk_iron_ore_reference_overlay.svg}"
@@ -417,29 +426,66 @@ iron_input_hash() {
 
 run_height() {
   require_file "$OS_TERRAIN_ZIP"
-  require_file "$OSNI_DTM_ZIP"
   require_file "$BGS_GEOLOGY_ZIP"
+  if is_truthy "$INCLUDE_IRELAND"; then
+    if is_truthy "$USE_LEGACY_OSNI_HEIGHT"; then
+      require_file "$OSNI_DTM_ZIP"
+    else
+      require_file "$COP30_ARCHIVE"
+    fi
+  fi
   mkdir -p "$ROOT"
+
+  local bng_min_easting bng_min_northing bng_max_easting bng_max_northing world_width world_depth minecraft_min_x minecraft_min_z
+  if is_truthy "$INCLUDE_IRELAND"; then
+    bng_min_easting="${BNG_MIN_EASTING:--220000}"
+    bng_min_northing="${BNG_MIN_NORTHING:-0}"
+    bng_max_easting="${BNG_MAX_EASTING:-650000}"
+    bng_max_northing="${BNG_MAX_NORTHING:-1300000}"
+    world_width="${WORLD_WIDTH:-33462}"
+    world_depth="${WORLD_DEPTH:-50000}"
+  else
+    bng_min_easting="${BNG_MIN_EASTING:-0}"
+    bng_min_northing="${BNG_MIN_NORTHING:-0}"
+    bng_max_easting="${BNG_MAX_EASTING:-650000}"
+    bng_max_northing="${BNG_MAX_NORTHING:-1300000}"
+    world_width="${WORLD_WIDTH:-25000}"
+    world_depth="${WORLD_DEPTH:-50000}"
+  fi
+  read -r minecraft_min_x minecraft_min_z < <("${UKGEO_ENV[@]}" "$PYTHON" - <<PY
+from ukgeo.coords import minecraft_min_for_bng_origin, NOTTINGHAM_ORIGIN_BNG_EASTING, NOTTINGHAM_ORIGIN_BNG_NORTHING
+x, z = minecraft_min_for_bng_origin(
+    bng_easting=NOTTINGHAM_ORIGIN_BNG_EASTING,
+    bng_northing=NOTTINGHAM_ORIGIN_BNG_NORTHING,
+    bng_min_easting=float("$bng_min_easting"),
+    bng_min_northing=float("$bng_min_northing"),
+    bng_max_easting=float("$bng_max_easting"),
+    bng_max_northing=float("$bng_max_northing"),
+    world_width=int("$world_width"),
+    world_depth=int("$world_depth"),
+)
+print(x, z)
+PY
+)
+
   "${UKGEO_ENV[@]}" "$PYTHON" -m ukgeo.cli make-height-tiles \
     --os-zip "$OS_TERRAIN_ZIP" \
     --out "$ROOT" \
-    --bng-min-easting 0 \
-    --bng-min-northing 0 \
-    --bng-max-easting 650000 \
-    --bng-max-northing 1300000 \
-    --world-width 25000 \
-    --world-depth 50000 \
-    --minecraft-min-x -17588 \
-    --minecraft-min-z -36925 \
+    --bng-min-easting "$bng_min_easting" \
+    --bng-min-northing "$bng_min_northing" \
+    --bng-max-easting "$bng_max_easting" \
+    --bng-max-northing "$bng_max_northing" \
+    --world-width "$world_width" \
+    --world-depth "$world_depth" \
+    --minecraft-min-x "$minecraft_min_x" \
+    --minecraft-min-z "$minecraft_min_z" \
     --sea-level-y 64 \
     --height-resampling bilinear \
     --height-smoothing light \
     --height-deterrace
-  "${UKGEO_ENV[@]}" "$PYTHON" -m ukgeo.cli add-osni-height-tiles \
-    --osni-dtm "$OSNI_DTM_ZIP" \
-    --manifest "$ROOT/manifest.json" \
-    --out "$ROOT" \
-    --resampling bilinear
+
+  # Run the GB BGS cleanup before Ireland/IoM overlays so a GB-only land mask
+  # cannot convert valid COP30 cells back to nodata.
   "${UKGEO_ENV[@]}" "$PYTHON" -m ukgeo.cli mask-height-to-bgs-land \
     --bgs "$BGS_GEOLOGY_ZIP" \
     --manifest "$ROOT/manifest.json" \
@@ -448,6 +494,40 @@ run_height() {
     --layer 625k_V5_SUPERFICIAL_Geology \
     --buffer-metres 0 \
     --max-height-metres 30
+
+  if is_truthy "$INCLUDE_IRELAND"; then
+    if is_truthy "$USE_LEGACY_OSNI_HEIGHT"; then
+      "${UKGEO_ENV[@]}" "$PYTHON" -m ukgeo.cli add-osni-height-tiles \
+        --osni-dtm "$OSNI_DTM_ZIP" \
+        --manifest "$ROOT/manifest.json" \
+        --out "$ROOT" \
+        --resampling bilinear
+    else
+      local cop30_args=(
+        add-cop30-height-tiles
+        --cop30 "$COP30_ARCHIVE"
+        --manifest "$ROOT/manifest.json"
+        --out "$ROOT"
+        --target "$COP30_TARGET"
+        --resampling "$COP30_RESAMPLING"
+        --smoothing "$COP30_SMOOTHING"
+      )
+      if is_truthy "$COP30_DETERRACE"; then
+        cop30_args+=(--height-deterrace)
+      else
+        cop30_args+=(--no-height-deterrace)
+      fi
+      if is_truthy "$COP30_PROTECT_MAINLAND_GB"; then
+        cop30_args+=(--protect-mainland-gb)
+      else
+        cop30_args+=(--no-protect-mainland-gb)
+      fi
+      if [[ -n "$COP30_DEBUG_GEOTIFF" ]]; then
+        cop30_args+=(--debug-geotiff "$COP30_DEBUG_GEOTIFF")
+      fi
+      "${UKGEO_ENV[@]}" "$PYTHON" -m ukgeo.cli "${cop30_args[@]}"
+    fi
+  fi
 }
 
 run_vegetation() {

@@ -26,13 +26,14 @@ final class ChunkTerrainPlanner {
     private static final int DEBUG_CAVE_X = Integer.getInteger("ukgeo.debugCaveX", 0);
     private static final int DEBUG_CAVE_Z = Integer.getInteger("ukgeo.debugCaveZ", 0);
     private static final int DEBUG_CAVE_RADIUS = Integer.getInteger("ukgeo.debugCaveRadius", 0);
-    private static final boolean ENABLE_PARALLEL_CHUNK_PLANNING = !Boolean.getBoolean("ukgeo.disableParallelChunkPlanning");
+    private static final boolean ENABLE_PARALLEL_CHUNK_PLANNING = Boolean.getBoolean("ukgeo.enableParallelChunkPlanning");
     private static final int PARALLEL_CHUNK_PLANNING_THREADS = Math.max(1, Integer.getInteger(
         "ukgeo.parallelChunkPlanningThreads",
         Math.max(1, Runtime.getRuntime().availableProcessors() / 2)
     ));
     private static final int PARALLEL_SURFACE_GRID_THRESHOLD = Integer.getInteger("ukgeo.parallelSurfaceGridThreshold", 256);
     private static final int PARALLEL_COLUMN_THRESHOLD = Integer.getInteger("ukgeo.parallelColumnThreshold", 128);
+    private static final int MINERAL_DEPOSIT_SURFACE_DEPTH = Math.max(12, Integer.getInteger("ukgeo.mineralDepositSurfaceDepth", 72));
     private static final ForkJoinPool PLANNING_POOL = new ForkJoinPool(PARALLEL_CHUNK_PLANNING_THREADS);
     private static final AtomicBoolean PARALLEL_MODE_LOGGED = new AtomicBoolean();
 
@@ -581,7 +582,8 @@ final class ChunkTerrainPlanner {
         if (y >= surfaceY - 3) {
             return Blocks.DIRT.defaultBlockState();
         }
-        if (y >= surfaceY - 12) {
+        int rockDepth = isRestrictedSurfaceOre(surfaceRock) ? MINERAL_DEPOSIT_SURFACE_DEPTH : 12;
+        if (y >= surfaceY - rockDepth) {
             return surfaceRock;
         }
         return y < 0 ? Blocks.DEEPSLATE.defaultBlockState() : Blocks.STONE.defaultBlockState();

@@ -311,6 +311,8 @@ def export_hover_previews(
     layers.extend(ore_layers)
 
     report("manifest")
+    world = manifest["world"]
+    geo = manifest.get("georeferencing", {})
     index = {
         "format": HOVER_PREVIEW_FORMAT,
         "scale": scale,
@@ -324,9 +326,19 @@ def export_hover_previews(
         "tile_size": source_tile_size,
         "image_width": base_size[0],
         "image_height": base_size[1],
-        "world": manifest["world"],
-        "georeferencing": manifest.get("georeferencing", {}),
+        "world_width": world.get("width"),
+        "world_depth": world.get("depth"),
+        "minecraft_min_x": world.get("minecraft_min_x"),
+        "minecraft_min_z": world.get("minecraft_min_z"),
+        "bng_min_easting": geo.get("bng_min_easting"),
+        "bng_min_northing": geo.get("bng_min_northing"),
+        "bng_max_easting": geo.get("bng_max_easting"),
+        "bng_max_northing": geo.get("bng_max_northing"),
+        "world": world,
+        "georeferencing": geo,
         "minecraft_origin": _minecraft_origin(manifest),
+        "height_processing": manifest.get("height_processing", {}),
+        "height_overlays": manifest.get("height_overlays", []),
         "surface_geology": manifest.get("surface_geology", {}),
         "vegetation": manifest.get("vegetation", {}),
         "biome_regions": manifest.get("biome_regions", {}),

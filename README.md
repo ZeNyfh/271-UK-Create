@@ -34,7 +34,7 @@ python3 -m venv .venv
   --rules examples/ore_rules.yml --manifest ./uk_world_data/manifest.json --out ./uk_world_data
 ```
 
-For the full GB rebuild path, the default Minecraft origin is centred on the Nottingham area, so a new UKGeo world spawns around Nottingham instead of Scotland.
+For the full GB rebuild path, the default Minecraft origin is centred on the Nottingham area, so a new UKGeo world spawns around Nottingham instead of Scotland. The default rebuild overlays COP30 elevation for Ireland, Northern Ireland, and the Isle of Man while protecting mainland Great Britain height generated from OS Terrain 50. Use `USE_LEGACY_OSNI_HEIGHT=1` only when you explicitly want the old Northern Ireland OSNI DTM overlay, or `INCLUDE_IRELAND=0` to keep the older GB-only west edge.
 
 For the full BGS 625k GeoPackage, use:
 
@@ -48,8 +48,10 @@ For the full BGS 625k GeoPackage, use:
 .venv/bin/ukgeo make-surface-geology-tiles --bgs ../../data/BGS_Geology_625k_bedrock_gpkg.zip \
   --rules examples/surface_geology_625k.yml --manifest ./uk_world_data/manifest.json --out ./uk_world_data
 
-.venv/bin/ukgeo add-osni-height-tiles --osni-dtm ../../data/osni_opendata_50m_dtm.zip \
-  --manifest ./uk_world_data/manifest.json --out ./uk_world_data --resampling bilinear
+.venv/bin/ukgeo add-cop30-height-tiles --cop30 ../../data/rasters_COP30.tar.gz \
+  --manifest ./uk_world_data/manifest.json --out ./uk_world_data \
+  --resampling bilinear --smoothing light --height-deterrace \
+  --target ireland-iom --protect-mainland-gb
 
 .venv/bin/ukgeo make-river-tiles --rivers ../../data/oprvrs_gpkg_gb.zip \
   --manifest ./uk_world_data/manifest.json --out ./uk_world_data --width-metres 220

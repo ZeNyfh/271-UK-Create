@@ -43,7 +43,7 @@ def export_cmd(
 ) -> None:
     """Export stackable PNG layers consumed by the hover map."""
     if max_size == 0:
-        console.print("[yellow]Native resolution can require several GB of RAM for the default 25k x 50k world.[/yellow]")
+        console.print("[yellow]Native resolution can require several GB of RAM for large generated worlds.[/yellow]")
     try:
         manifest = read_manifest(root / "manifest.json")
         total_steps = len(hover_preview_steps(root, manifest))

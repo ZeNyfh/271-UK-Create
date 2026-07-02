@@ -135,7 +135,12 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     private static final double OCEAN_FLOOR_SLOPE_CURVE = Double.parseDouble(System.getProperty("ukgeo.oceanFloorSlopeCurve", "1.35"));
     private static final double BACKGROUND_ORE_ATTEMPT_MULTIPLIER = 0.1;
     private static final double ORE_AREA_ATTEMPT_MULTIPLIER = 3.0;
-    private static final int MAX_MINERAL_VEIN_ATTEMPTS_PER_CHUNK = Integer.getInteger("ukgeo.maxMineralVeinAttemptsPerChunk", 4);
+    private static final int MAX_MINERAL_VEIN_ATTEMPTS_PER_CHUNK = Integer.getInteger("ukgeo.maxMineralVeinAttemptsPerChunk", 8);
+    private static final double MINERAL_VEIN_SIZE_MULTIPLIER = Double.parseDouble(System.getProperty("ukgeo.mineralVeinSizeMultiplier", "12.0"));
+    private static final double MINERAL_VEIN_LENGTH_MULTIPLIER = Double.parseDouble(System.getProperty("ukgeo.mineralVeinLengthMultiplier", "4.0"));
+    private static final double MINERAL_VEIN_RADIUS_MULTIPLIER = Double.parseDouble(System.getProperty("ukgeo.mineralVeinRadiusMultiplier", "1.85"));
+    private static final int MINERAL_VEIN_MIN_BLOCKS = Integer.getInteger("ukgeo.mineralVeinMinBlocks", 128);
+    private static final int MINERAL_VEIN_MAX_BLOCKS = Integer.getInteger("ukgeo.mineralVeinMaxBlocks", 768);
     private static final int SNOW_ICE_MIN_Y = 501;
     private static final int VANILLA_MIN_Y = -64;
     private static final int VANILLA_MAX_Y = 320;
@@ -143,11 +148,23 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     private static final int NOISE_CAVE_BOTTOM_MARGIN = Integer.getInteger("ukgeo.noiseCaveBottomMargin", 1);
     private static final int NOISE_CAVE_MIN_Y = Integer.getInteger("ukgeo.noiseCaveMinY", Integer.MIN_VALUE);
     private static final int NOISE_CAVE_MAX_Y = Integer.getInteger("ukgeo.noiseCaveMaxY", NOISE_CAVE_DEFAULT_MAX_Y);
-    private static final int NOISE_CAVE_LAVA_LEVEL = Integer.getInteger("ukgeo.noiseCaveLavaLevel", -112);
+    private static final int NOISE_CAVE_LAVA_LEVEL = Integer.getInteger("ukgeo.noiseCaveLavaLevel", -120);
     private static final int NOISE_CAVE_AQUIFER_MAX_Y = Integer.getInteger("ukgeo.noiseCaveAquiferMaxY", 24);
     private static final int NOISE_CAVE_MAX_BLOCK_EDITS_PER_CHUNK = Integer.getInteger("ukgeo.noiseCaveMaxBlockEditsPerChunk", 8_000);
-    private static final int NOISE_CAVE_SCAN_Y_STEP = Math.max(1, Integer.getInteger("ukgeo.noiseCaveScanYStep", 4));
-    private static final double NOISE_CAVE_CHEESE_THRESHOLD = Double.parseDouble(System.getProperty("ukgeo.noiseCaveCheeseThreshold", "0.42"));
+    private static final int NOISE_CAVE_CELL_SIZE_XZ = Math.max(2, Integer.getInteger("ukgeo.noiseCaveCellSizeXZ", 4));
+    private static final int NOISE_CAVE_CELL_SIZE_Y = Math.max(2, Integer.getInteger("ukgeo.noiseCaveCellSizeY", 4));
+    private static final int NOISE_CAVE_MIN_ROOF_THICKNESS = Math.max(0, Integer.getInteger("ukgeo.noiseCaveMinRoofThickness", 8));
+    private static final int NOISE_CAVE_EDGE_SMOOTHING_PASSES = Math.max(0, Integer.getInteger("ukgeo.noiseCaveEdgeSmoothingPasses", 1));
+    private static final int NOISE_CAVE_MAX_SMOOTHING_EDITS_PER_CHUNK = Math.max(0, Integer.getInteger("ukgeo.noiseCaveMaxSmoothingEditsPerChunk", 768));
+    private static final boolean SEAL_NOISE_CAVE_AQUIFERS = !Boolean.getBoolean("ukgeo.disableNoiseCaveAquiferSeals");
+    private static final int NOISE_CAVE_AQUIFER_SEAL_PASSES = Math.max(0, Integer.getInteger("ukgeo.noiseCaveAquiferSealPasses", 1));
+    private static final int NOISE_CAVE_MAX_AQUIFER_SEAL_EDITS_PER_CHUNK = Math.max(0, Integer.getInteger("ukgeo.noiseCaveMaxAquiferSealEditsPerChunk", 2048));
+    private static final int NOISE_CAVE_DENSITY_BINS = 256;
+    private static final double NOISE_CAVE_DENSITY_BIN_MAX = Double.parseDouble(System.getProperty("ukgeo.noiseCaveDensityBinMax", "1.0"));
+    private static final boolean ENABLE_NOISE_CAVE_LAVA = !Boolean.getBoolean("ukgeo.disableNoiseCaveLava");
+    private static final int MAX_CAVE_FLUID_TICKS_PER_CHUNK = Integer.getInteger("ukgeo.maxCaveFluidTicksPerChunk", 2_048);
+    private static final boolean ENABLE_CAVE_FLUID_TICKS = !Boolean.getBoolean("ukgeo.disableCaveFluidTicks");
+    private static final double NOISE_CAVE_CHEESE_THRESHOLD = Double.parseDouble(System.getProperty("ukgeo.noiseCaveCheeseThreshold", "0.45"));
     private static final double NOISE_CAVE_SPAGHETTI_THICKNESS = Double.parseDouble(System.getProperty("ukgeo.noiseCaveSpaghettiThickness", "0.085"));
     private static final double NOISE_CAVE_NOODLE_THICKNESS = Double.parseDouble(System.getProperty("ukgeo.noiseCaveNoodleThickness", "0.043"));
     private static final int DEFAULT_EFFECTIVE_ORE_TERRAIN_MAX_Y = Integer.getInteger("ukgeo.effectiveOreTerrainMaxY", 280);
@@ -1562,18 +1579,18 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         double x = centerLocalX + 0.5;
         double y = centerY + 0.5;
         double z = centerLocalZ + 0.5;
-        int length = Math.max(18, ore.veinSize() + random.nextInt(Math.max(1, ore.veinSize())));
-        int targetBlocks = Math.max(ore.veinSize(), (int) Math.round(ore.veinSize() * 1.75));
+        int length = Math.max(48, (int) Math.round(ore.veinSize() * MINERAL_VEIN_LENGTH_MULTIPLIER + random.nextInt(Math.max(1, ore.veinSize() * 2))));
+        int targetBlocks = Math.clamp((int) Math.round(ore.veinSize() * MINERAL_VEIN_SIZE_MULTIPLIER), MINERAL_VEIN_MIN_BLOCKS, MINERAL_VEIN_MAX_BLOCKS);
         java.util.HashSet<Long> seen = new java.util.HashSet<>();
         for (int step = 0; step < length && placed < targetBlocks; step++) {
             double progress = (double) step / Math.max(1, length - 1);
-            double width = 0.75 + Math.sin(Math.PI * progress) * (0.75 + random.nextDouble() * 0.45);
+            double width = (0.95 + Math.sin(Math.PI * progress) * (1.15 + random.nextDouble() * 0.75)) * MINERAL_VEIN_RADIUS_MULTIPLIER;
             placed += addMineralVeinBlob(placements, ore, states, chunk, columns, random, seen, x, y, z, width, bandMin, bandMax, minY, maxY, targetBlocks - placed);
             angle += (random.nextDouble() - 0.5) * 0.32;
             pitch = pitch * 0.72 + (random.nextDouble() - 0.5) * 0.14;
             pitch = clamp(pitch, -0.42, 0.42);
-            x += Math.cos(angle) * Math.cos(pitch) * (0.85 + random.nextDouble() * 0.75);
-            z += Math.sin(angle) * Math.cos(pitch) * (0.85 + random.nextDouble() * 0.75);
+            x += Math.cos(angle) * Math.cos(pitch) * (0.65 + random.nextDouble() * 0.55);
+            z += Math.sin(angle) * Math.cos(pitch) * (0.65 + random.nextDouble() * 0.55);
             y += Math.sin(pitch) * 0.85 + (random.nextDouble() - 0.5) * 0.45;
             if (x < -2.0 || x > 17.0 || z < -2.0 || z > 17.0) {
                 break;
@@ -1619,8 +1636,8 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
                         continue;
                     }
                     double dy = (py + 0.5 - centerY) * inv;
-                    double density = dx * dx + dz * dz + dy * dy * 1.65;
-                    if (density > 1.0 || random.nextDouble() < density * 0.35) {
+                    double density = dx * dx + dz * dz + dy * dy * 1.15;
+                    if (density > 1.0 || random.nextDouble() < density * 0.18) {
                         continue;
                     }
                     if (oreHeightWeight(ore, py, bandMin, bandMax, chunk) <= 0.0) {
@@ -2316,6 +2333,9 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         if (plan != null) {
             ChunkTerrainPlanner.enforceWaterColumns(plan, chunk);
         }
+        long caveFluidTickStartNanos = System.nanoTime();
+        scheduleChunkFluidBoundaryTicks(level, chunk);
+        logTiming("scheduleChunkFluidBoundaryTicks", chunk.getPos(), caveFluidTickStartNanos);
         long primeStartNanos = System.nanoTime();
         primeGenerationHeightmaps(chunk);
         logTiming("primeGenerationHeightmaps.finalBuildSurface", chunk.getPos(), primeStartNanos);
@@ -3571,6 +3591,67 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         return false;
     }
 
+    private void scheduleChunkFluidBoundaryTicks(WorldGenRegion level, ChunkAccess chunk) {
+        if (!ENABLE_CAVE_FLUID_TICKS || MAX_CAVE_FLUID_TICKS_PER_CHUNK <= 0) {
+            return;
+        }
+        ChunkPos chunkPos = chunk.getPos();
+        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+        int minY = chunk.getMinBuildHeight();
+        int maxY = Math.min(chunk.getMaxBuildHeight() - 1, Math.max(seaLevelY + 4, NOISE_CAVE_MAX_Y));
+        int waterDelay = Fluids.WATER.getTickDelay(level);
+        int lavaDelay = Fluids.LAVA.getTickDelay(level);
+        int scheduled = 0;
+        for (int localZ = 0; localZ < 16 && scheduled < MAX_CAVE_FLUID_TICKS_PER_CHUNK; localZ++) {
+            int worldZ = chunkPos.getMinBlockZ() + localZ;
+            for (int localX = 0; localX < 16 && scheduled < MAX_CAVE_FLUID_TICKS_PER_CHUNK; localX++) {
+                int worldX = chunkPos.getMinBlockX() + localX;
+                for (int y = minY; y <= maxY && scheduled < MAX_CAVE_FLUID_TICKS_PER_CHUNK; y++) {
+                    cursor.set(localX, y, localZ);
+                    BlockState state = chunk.getBlockState(cursor);
+                    boolean water = state.getFluidState().is(Fluids.WATER);
+                    boolean lava = state.getFluidState().is(Fluids.LAVA);
+                    if (!water && !lava) {
+                        continue;
+                    }
+                    if (!isFluidBoundary(chunk, cursor, localX, y, localZ, water)) {
+                        continue;
+                    }
+                    level.scheduleTick(new BlockPos(worldX, y, worldZ), water ? Fluids.WATER : Fluids.LAVA, water ? waterDelay : lavaDelay);
+                    scheduled++;
+                }
+            }
+        }
+        if (DEBUG_CAVES && scheduled > 0) {
+            UkGeoMod.LOGGER.info("UKGeo cave fluid ticks chunk={} scheduled={} limit={}", chunkPos, scheduled, MAX_CAVE_FLUID_TICKS_PER_CHUNK);
+        }
+    }
+
+    private static boolean isFluidBoundary(ChunkAccess chunk, BlockPos.MutableBlockPos cursor, int localX, int y, int localZ, boolean sourceIsWater) {
+        int[][] offsets = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
+        for (int[] offset : offsets) {
+            int nx = localX + offset[0];
+            int ny = y + offset[1];
+            int nz = localZ + offset[2];
+            if (nx < 0 || nx >= 16 || nz < 0 || nz >= 16 || ny < chunk.getMinBuildHeight() || ny >= chunk.getMaxBuildHeight()) {
+                return true;
+            }
+            BlockState neighbor = chunk.getBlockState(cursor.set(nx, ny, nz));
+            boolean neighborWater = neighbor.getFluidState().is(Fluids.WATER);
+            boolean neighborLava = neighbor.getFluidState().is(Fluids.LAVA);
+            if (neighbor.isAir()) {
+                return true;
+            }
+            if (sourceIsWater && neighborLava) {
+                return true;
+            }
+            if (!sourceIsWater && neighborWater) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private void scheduleWaterTicks(WorldGenRegion level, ChunkAccess chunk, ChunkTerrainPlanner.Plan plan) {
         ChunkPos chunkPos = chunk.getPos();
         BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
@@ -3926,7 +4007,7 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     private static void applyNoiseCaves(long seed, ChunkAccess chunk) {
         int minY = Math.max(chunk.getMinBuildHeight() + NOISE_CAVE_BOTTOM_MARGIN, NOISE_CAVE_MIN_Y);
         int maxY = Math.min(chunk.getMaxBuildHeight() - 1, NOISE_CAVE_MAX_Y);
-        if (minY > maxY) {
+        if (minY > maxY || NOISE_CAVE_MAX_BLOCK_EDITS_PER_CHUNK <= 0) {
             return;
         }
         long startNanos = DEBUG_GEN_TIMINGS ? System.nanoTime() : 0L;
@@ -3934,78 +4015,375 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         int chunkMinX = chunkPos.getMinBlockX();
         int chunkMinZ = chunkPos.getMinBlockZ();
         int[] solidTops = noiseCaveSolidTops(chunk, maxY);
+        int height = maxY - minY + 1;
+        int cellCount = 16 * height * 16;
+        byte[] caveTypes = new byte[cellCount];
+        byte[] densityBins = new byte[cellCount];
+        int[] histogram = new int[NOISE_CAVE_DENSITY_BINS];
+        double[] densityGrid = buildNoiseCaveDensityGrid(seed ^ 0x4e4f495345554b47L, chunkMinX, chunkMinZ, minY, maxY, solidTops);
         BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
         int edits = 0;
+        int smoothingEdits = 0;
         int airCount = 0;
         int waterCount = 0;
         int lavaCount = 0;
         long caveSeed = seed ^ 0x4e4f495345554b47L;
 
-        caveBlocks:
+        int candidateCount = 0;
         for (int localZ = 0; localZ < 16; localZ++) {
-            int worldZ = chunkMinZ + localZ;
             for (int localX = 0; localX < 16; localX++) {
-                int worldX = chunkMinX + localX;
                 int solidTop = solidTops[localZ * 16 + localX];
                 if (solidTop < minY) {
                     continue;
                 }
-                int columnMaxY = Math.min(maxY, solidTop);
-                int yStep = Math.max(1, NOISE_CAVE_SCAN_Y_STEP);
-                for (int y = minY; y <= columnMaxY; y += yStep) {
-                    int sampleY = Math.min(columnMaxY, y + yStep / 2);
-                    CaveNoiseSample cave = sampleNoiseCave(caveSeed, worldX, sampleY, worldZ, solidTop, minY, columnMaxY);
-                    if (cave == CaveNoiseSample.SOLID) {
+                int columnMaxY = Math.min(maxY, solidTop - 1);
+                for (int y = minY; y <= columnMaxY; y++) {
+                    int depthBelowSurface = solidTop - y;
+                    double density = interpolatedNoiseCaveDensity(densityGrid, localX, y, localZ, minY, height);
+                    if (depthBelowSurface < NOISE_CAVE_MIN_ROOF_THICKNESS && density < 0.38) {
                         continue;
                     }
-                    int carveMaxY = Math.min(columnMaxY, y + yStep - 1);
-                    for (int carveY = y; carveY <= carveMaxY; carveY++) {
-                        cursor.set(localX, carveY, localZ);
-                        BlockState existing = chunk.getBlockState(cursor);
-                        if (!isNoiseCarverReplaceable(existing)) {
-                            continue;
-                        }
-                        BlockState replacement = switch (cave) {
-                            case AIR -> Blocks.AIR.defaultBlockState();
-                            case WATER -> Blocks.WATER.defaultBlockState();
-                            case LAVA -> Blocks.LAVA.defaultBlockState();
-                            case SOLID -> existing;
-                        };
-                        chunk.setBlockState(cursor, replacement, false);
-                        edits++;
-                        if (cave == CaveNoiseSample.WATER) {
-                            waterCount++;
-                        } else if (cave == CaveNoiseSample.LAVA) {
-                            lavaCount++;
-                        } else {
-                            airCount++;
-                        }
-                        if (edits >= NOISE_CAVE_MAX_BLOCK_EDITS_PER_CHUNK) {
-                            break caveBlocks;
-                        }
+                    if (density <= 0.0) {
+                        continue;
                     }
+                    int bin = noiseCaveDensityBin(density);
+                    int index = caveIndex(localX, y, localZ, minY, height);
+                    densityBins[index] = (byte) bin;
+                    histogram[bin]++;
+                    candidateCount++;
                 }
+            }
+        }
+
+        NoiseCaveThreshold threshold = noiseCaveThreshold(histogram, candidateCount, NOISE_CAVE_MAX_BLOCK_EDITS_PER_CHUNK);
+        int maxRecordedEdits = Math.min(cellCount, Math.max(0, NOISE_CAVE_MAX_BLOCK_EDITS_PER_CHUNK) + Math.max(0, NOISE_CAVE_MAX_SMOOTHING_EDITS_PER_CHUNK));
+        int[] carvedIndices = new int[maxRecordedEdits];
+        int carvedCount = 0;
+        for (int localZ = 0; localZ < 16; localZ++) {
+            for (int localX = 0; localX < 16; localX++) {
+                int solidTop = solidTops[localZ * 16 + localX];
+                if (solidTop < minY) {
+                    continue;
+                }
+                int columnMaxY = Math.min(maxY, solidTop - 1);
+                for (int y = minY; y <= columnMaxY; y++) {
+                    int index = caveIndex(localX, y, localZ, minY, height);
+                    int bin = densityBins[index] & 0xff;
+                    if (!threshold.selects(bin)) {
+                        continue;
+                    }
+                    if (bin == threshold.bin() && !selectNoiseCaveThresholdCell(caveSeed, index, threshold.allowedAtThreshold(), threshold.countAtThreshold())) {
+                        continue;
+                    }
+                    cursor.set(localX, y, localZ);
+                    BlockState existing = chunk.getBlockState(cursor);
+                    if (!isNoiseCarverReplaceable(existing)) {
+                        continue;
+                    }
+                    int worldX = chunkMinX + localX;
+                    int worldZ = chunkMinZ + localZ;
+                    caveTypes[index] = plannedNoiseCaveFluid(caveSeed, worldX, y, worldZ, minY, maxY);
+                    if (carvedCount < carvedIndices.length) {
+                        carvedIndices[carvedCount++] = index;
+                    }
+                    edits++;
+                }
+            }
+        }
+
+        int afterSmoothingCount = smoothNoiseCaveMask(caveSeed, chunk, caveTypes, carvedIndices, carvedCount, minY, maxY, height, solidTops, chunkMinX, chunkMinZ);
+        smoothingEdits = afterSmoothingCount - carvedCount;
+        carvedCount = afterSmoothingCount;
+        edits += smoothingEdits;
+        int aquiferSealEdits = sealNoiseCaveAquiferContacts(caveTypes, carvedIndices, carvedCount, minY, height);
+
+        for (int i = 0; i < carvedCount; i++) {
+            int index = carvedIndices[i];
+            int relY = index / 256;
+            int rem = index - relY * 256;
+            int localZ = rem / 16;
+            int localX = rem - localZ * 16;
+            int y = minY + relY;
+            byte type = caveTypes[index];
+            if (type == CAVE_TYPE_SOLID) {
+                continue;
+            }
+            cursor.set(localX, y, localZ);
+            if (type == CAVE_TYPE_WATER) {
+                boolean sealed = hasDryCaveNeighbor(caveTypes, localX, y, localZ, minY, height)
+                    || hasExistingDryAirNeighbor(chunk, cursor, localX, y, localZ);
+                cursor.set(localX, y, localZ);
+                if (sealed) {
+                    continue;
+                }
+                chunk.setBlockState(cursor, Blocks.WATER.defaultBlockState(), false);
+                waterCount++;
+            } else if (type == CAVE_TYPE_LAVA) {
+                boolean touchesWater = hasWaterNeighbor(caveTypes, localX, y, localZ, minY, height)
+                    || hasExistingWaterNeighbor(chunk, cursor, localX, y, localZ);
+                cursor.set(localX, y, localZ);
+                if (touchesWater) {
+                    chunk.setBlockState(cursor, Blocks.AIR.defaultBlockState(), false);
+                    airCount++;
+                    continue;
+                }
+                chunk.setBlockState(cursor, Blocks.LAVA.defaultBlockState(), false);
+                lavaCount++;
+            } else {
+                chunk.setBlockState(cursor, Blocks.AIR.defaultBlockState(), false);
+                airCount++;
             }
         }
         if (DEBUG_CAVES) {
             UkGeoMod.LOGGER.info(
-                "UKGeo cave debug applied 3D noise caves chunk={} range={}..{} edits={} air={} water={} lava={} bottom={} aquiferMax={} cheeseThreshold={} spaghettiThickness={} noodleThickness={}",
+                "UKGeo cave debug applied sealed fast smoothed 3D noise caves chunk={} range={}..{} edits={} smoothingEdits={} aquiferSealEdits={} candidates={} thresholdBin={} thresholdKeep={}/{} budget={} air={} water={} lava={} bottom={} cellXZ={} cellY={} aquiferMax={} cheeseThreshold={} spaghettiThickness={} noodleThickness={}",
                 chunkPos,
                 minY,
                 maxY,
                 edits,
+                smoothingEdits,
+                aquiferSealEdits,
+                candidateCount,
+                threshold.bin(),
+                threshold.allowedAtThreshold(),
+                threshold.countAtThreshold(),
+                NOISE_CAVE_MAX_BLOCK_EDITS_PER_CHUNK,
                 airCount,
                 waterCount,
                 lavaCount,
                 chunk.getMinBuildHeight(),
+                NOISE_CAVE_CELL_SIZE_XZ,
+                NOISE_CAVE_CELL_SIZE_Y,
                 NOISE_CAVE_AQUIFER_MAX_Y,
-                NOISE_CAVE_SCAN_Y_STEP,
                 NOISE_CAVE_CHEESE_THRESHOLD,
                 NOISE_CAVE_SPAGHETTI_THICKNESS,
                 NOISE_CAVE_NOODLE_THICKNESS
             );
         }
         logTiming("applyNoiseCaves", chunkPos, startNanos);
+    }
+
+    private static final byte CAVE_TYPE_SOLID = 0;
+    private static final byte CAVE_TYPE_AIR = 1;
+    private static final byte CAVE_TYPE_WATER = 2;
+    private static final byte CAVE_TYPE_LAVA = 3;
+
+    private static int caveIndex(int localX, int y, int localZ, int minY, int height) {
+        return ((y - minY) * 16 + localZ) * 16 + localX;
+    }
+
+    private record NoiseCaveThreshold(int bin, int allowedAtThreshold, int countAtThreshold) {
+        boolean selects(int candidateBin) {
+            return candidateBin > bin || candidateBin == bin;
+        }
+    }
+
+    private static int noiseCaveDensityBin(double density) {
+        double scaled = Math.clamp(density / Math.max(0.0001, NOISE_CAVE_DENSITY_BIN_MAX), 0.0, 1.0);
+        return Math.max(1, Math.min(NOISE_CAVE_DENSITY_BINS - 1, (int) Math.ceil(scaled * (NOISE_CAVE_DENSITY_BINS - 1))));
+    }
+
+    private static NoiseCaveThreshold noiseCaveThreshold(int[] histogram, int candidateCount, int budget) {
+        if (candidateCount <= 0) {
+            return new NoiseCaveThreshold(NOISE_CAVE_DENSITY_BINS - 1, 0, 0);
+        }
+        if (candidateCount <= budget) {
+            return new NoiseCaveThreshold(1, histogram[1], histogram[1]);
+        }
+        int above = 0;
+        for (int bin = NOISE_CAVE_DENSITY_BINS - 1; bin >= 1; bin--) {
+            int count = histogram[bin];
+            if (count <= 0) {
+                continue;
+            }
+            if (above + count >= budget) {
+                return new NoiseCaveThreshold(bin, Math.max(0, budget - above), count);
+            }
+            above += count;
+        }
+        return new NoiseCaveThreshold(1, Math.min(budget, histogram[1]), histogram[1]);
+    }
+
+    private static boolean selectNoiseCaveThresholdCell(long seed, int index, int allowed, int total) {
+        if (allowed <= 0 || total <= 0) {
+            return false;
+        }
+        if (allowed >= total) {
+            return true;
+        }
+        long hash = avalanche(seed ^ ((long) index * 0x9e3779b97f4a7c15L) ^ 0x5448524553434156L);
+        return Long.remainderUnsigned(hash, total) < allowed;
+    }
+
+    private static int sealNoiseCaveAquiferContacts(byte[] caveTypes, int[] carvedIndices, int carvedCount, int minY, int height) {
+        if (!SEAL_NOISE_CAVE_AQUIFERS
+                || NOISE_CAVE_AQUIFER_SEAL_PASSES <= 0
+                || NOISE_CAVE_MAX_AQUIFER_SEAL_EDITS_PER_CHUNK <= 0
+                || carvedCount <= 0) {
+            return 0;
+        }
+        int sealedTotal = 0;
+        boolean[] queued = new boolean[caveTypes.length];
+        int[] toSeal = new int[Math.min(NOISE_CAVE_MAX_AQUIFER_SEAL_EDITS_PER_CHUNK, caveTypes.length)];
+        for (int pass = 0; pass < NOISE_CAVE_AQUIFER_SEAL_PASSES && sealedTotal < NOISE_CAVE_MAX_AQUIFER_SEAL_EDITS_PER_CHUNK; pass++) {
+            int count = 0;
+            int limit = Math.min(toSeal.length, NOISE_CAVE_MAX_AQUIFER_SEAL_EDITS_PER_CHUNK - sealedTotal);
+            for (int i = 0; i < carvedCount && count < limit; i++) {
+                int index = carvedIndices[i];
+                if (caveTypes[index] != CAVE_TYPE_AIR || queued[index]) {
+                    continue;
+                }
+                int relY = index / 256;
+                int rem = index - relY * 256;
+                int localZ = rem / 16;
+                int localX = rem - localZ * 16;
+                int y = minY + relY;
+                if (!hasWaterNeighbor(caveTypes, localX, y, localZ, minY, height)) {
+                    continue;
+                }
+                queued[index] = true;
+                toSeal[count++] = index;
+            }
+            if (count == 0) {
+                break;
+            }
+            for (int i = 0; i < count; i++) {
+                caveTypes[toSeal[i]] = CAVE_TYPE_SOLID;
+            }
+            sealedTotal += count;
+        }
+        return sealedTotal;
+    }
+
+    private static int smoothNoiseCaveMask(
+        long caveSeed,
+        ChunkAccess chunk,
+        byte[] caveTypes,
+        int[] carvedIndices,
+        int carvedCount,
+        int minY,
+        int maxY,
+        int height,
+        int[] solidTops,
+        int chunkMinX,
+        int chunkMinZ
+    ) {
+        if (NOISE_CAVE_EDGE_SMOOTHING_PASSES <= 0 || NOISE_CAVE_MAX_SMOOTHING_EDITS_PER_CHUNK <= 0 || carvedCount <= 0) {
+            return carvedCount;
+        }
+        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+        boolean[] queued = new boolean[caveTypes.length];
+        int[] carve = new int[Math.min(NOISE_CAVE_MAX_SMOOTHING_EDITS_PER_CHUNK, caveTypes.length)];
+        int total = 0;
+        int currentCount = carvedCount;
+        int[][] offsets = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
+        for (int pass = 0; pass < NOISE_CAVE_EDGE_SMOOTHING_PASSES && total < NOISE_CAVE_MAX_SMOOTHING_EDITS_PER_CHUNK; pass++) {
+            int carveCount = 0;
+            int remaining = Math.min(NOISE_CAVE_MAX_SMOOTHING_EDITS_PER_CHUNK - total, carvedIndices.length - currentCount);
+            if (remaining <= 0) {
+                break;
+            }
+            int scanCount = currentCount;
+            for (int i = 0; i < scanCount && carveCount < remaining; i++) {
+                int openIndex = carvedIndices[i];
+                int relY = openIndex / 256;
+                int rem = openIndex - relY * 256;
+                int localZ = rem / 16;
+                int localX = rem - localZ * 16;
+                int y = minY + relY;
+                for (int[] offset : offsets) {
+                    if (carveCount >= remaining) {
+                        break;
+                    }
+                    int nx = localX + offset[0];
+                    int ny = y + offset[1];
+                    int nz = localZ + offset[2];
+                    if (nx <= 0 || nx >= 15 || nz <= 0 || nz >= 15 || ny <= minY || ny >= maxY) {
+                        continue;
+                    }
+                    int solidTop = solidTops[nz * 16 + nx];
+                    if (solidTop < minY || ny > Math.min(maxY - 1, solidTop - NOISE_CAVE_MIN_ROOF_THICKNESS)) {
+                        continue;
+                    }
+                    int index = caveIndex(nx, ny, nz, minY, height);
+                    if (queued[index] || caveTypes[index] != CAVE_TYPE_SOLID) {
+                        continue;
+                    }
+                    if (!shouldSmoothNoiseCaveCell(caveTypes, nx, ny, nz, minY, height)) {
+                        continue;
+                    }
+                    if (!isNoiseCarverReplaceable(chunk.getBlockState(cursor.set(nx, ny, nz)))) {
+                        continue;
+                    }
+                    queued[index] = true;
+                    carve[carveCount++] = index;
+                }
+            }
+            if (carveCount == 0) {
+                break;
+            }
+            for (int i = 0; i < carveCount && currentCount < carvedIndices.length; i++) {
+                int index = carve[i];
+                int relY = index / 256;
+                int rem = index - relY * 256;
+                int localZ = rem / 16;
+                int localX = rem - localZ * 16;
+                int y = minY + relY;
+                caveTypes[index] = dominantNoiseCaveFluidOrPlanned(caveSeed, caveTypes, localX, y, localZ, minY, height, chunkMinX + localX, chunkMinZ + localZ, maxY);
+                carvedIndices[currentCount++] = index;
+            }
+            total += carveCount;
+        }
+        return currentCount;
+    }
+
+    private static boolean shouldSmoothNoiseCaveCell(byte[] caveTypes, int localX, int y, int localZ, int minY, int height) {
+        int caves = 0;
+        boolean xPair = isNoiseCaveOpen(caveTypes, localX - 1, y, localZ, minY, height) && isNoiseCaveOpen(caveTypes, localX + 1, y, localZ, minY, height);
+        boolean yPair = isNoiseCaveOpen(caveTypes, localX, y - 1, localZ, minY, height) && isNoiseCaveOpen(caveTypes, localX, y + 1, localZ, minY, height);
+        boolean zPair = isNoiseCaveOpen(caveTypes, localX, y, localZ - 1, minY, height) && isNoiseCaveOpen(caveTypes, localX, y, localZ + 1, minY, height);
+        if (isNoiseCaveOpen(caveTypes, localX - 1, y, localZ, minY, height)) caves++;
+        if (isNoiseCaveOpen(caveTypes, localX + 1, y, localZ, minY, height)) caves++;
+        if (isNoiseCaveOpen(caveTypes, localX, y - 1, localZ, minY, height)) caves++;
+        if (isNoiseCaveOpen(caveTypes, localX, y + 1, localZ, minY, height)) caves++;
+        if (isNoiseCaveOpen(caveTypes, localX, y, localZ - 1, minY, height)) caves++;
+        if (isNoiseCaveOpen(caveTypes, localX, y, localZ + 1, minY, height)) caves++;
+        int oppositePairs = (xPair ? 1 : 0) + (yPair ? 1 : 0) + (zPair ? 1 : 0);
+        return caves >= 5 || oppositePairs >= 2;
+    }
+
+    private static boolean isNoiseCaveOpen(byte[] caveTypes, int localX, int y, int localZ, int minY, int height) {
+        if (localX < 0 || localX >= 16 || localZ < 0 || localZ >= 16 || y < minY || y >= minY + height) {
+            return false;
+        }
+        return caveTypes[caveIndex(localX, y, localZ, minY, height)] != CAVE_TYPE_SOLID;
+    }
+
+    private static byte dominantNoiseCaveFluidOrPlanned(long caveSeed, byte[] caveTypes, int localX, int y, int localZ, int minY, int height, int worldX, int worldZ, int maxY) {
+        int water = 0;
+        int lava = 0;
+        int[][] offsets = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
+        for (int[] offset : offsets) {
+            int nx = localX + offset[0];
+            int ny = y + offset[1];
+            int nz = localZ + offset[2];
+            if (nx < 0 || nx >= 16 || nz < 0 || nz >= 16 || ny < minY || ny >= minY + height) {
+                continue;
+            }
+            byte type = caveTypes[caveIndex(nx, ny, nz, minY, height)];
+            if (type == CAVE_TYPE_WATER) {
+                water++;
+            } else if (type == CAVE_TYPE_LAVA) {
+                lava++;
+            }
+        }
+        if (water >= 2) {
+            return CAVE_TYPE_WATER;
+        }
+        if (lava >= 3 && water == 0) {
+            return CAVE_TYPE_LAVA;
+        }
+        return plannedNoiseCaveFluid(caveSeed, worldX, y, worldZ, minY, maxY);
     }
 
     private static int[] noiseCaveSolidTops(ChunkAccess chunk, int maxY) {
@@ -4028,54 +4406,176 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         return tops;
     }
 
-    private static CaveNoiseSample sampleNoiseCave(long seed, int worldX, int y, int worldZ, int solidTop, int minY, int maxY) {
+    private static double[] buildNoiseCaveDensityGrid(long seed, int chunkMinX, int chunkMinZ, int minY, int maxY, int[] solidTops) {
+        int height = maxY - minY + 1;
+        int gridX = 15 / NOISE_CAVE_CELL_SIZE_XZ + 2;
+        int gridZ = 15 / NOISE_CAVE_CELL_SIZE_XZ + 2;
+        int gridY = (height - 1) / NOISE_CAVE_CELL_SIZE_Y + 2;
+        double[] values = new double[gridX * gridY * gridZ];
+        for (int gz = 0; gz < gridZ; gz++) {
+            int localZ = Math.min(15, gz * NOISE_CAVE_CELL_SIZE_XZ);
+            int worldZ = chunkMinZ + gz * NOISE_CAVE_CELL_SIZE_XZ;
+            for (int gy = 0; gy < gridY; gy++) {
+                int y = Math.min(maxY, minY + gy * NOISE_CAVE_CELL_SIZE_Y);
+                for (int gx = 0; gx < gridX; gx++) {
+                    int localX = Math.min(15, gx * NOISE_CAVE_CELL_SIZE_XZ);
+                    int worldX = chunkMinX + gx * NOISE_CAVE_CELL_SIZE_XZ;
+                    int solidTop = solidTops[localZ * 16 + localX];
+                    values[noiseCaveGridIndex(gx, gy, gz, gridX, gridY)] = sampleNoiseCaveDensity(seed, worldX, y, worldZ, solidTop, minY, maxY);
+                }
+            }
+        }
+        return values;
+    }
+
+    private static int noiseCaveGridIndex(int gx, int gy, int gz, int gridX, int gridY) {
+        return (gz * gridY + gy) * gridX + gx;
+    }
+
+    private static double interpolatedNoiseCaveDensity(double[] grid, int localX, int y, int localZ, int minY, int height) {
+        int gridX = 15 / NOISE_CAVE_CELL_SIZE_XZ + 2;
+        int gridY = (height - 1) / NOISE_CAVE_CELL_SIZE_Y + 2;
+        int gx0 = Math.min(gridX - 2, localX / NOISE_CAVE_CELL_SIZE_XZ);
+        int gz0 = Math.min((15 / NOISE_CAVE_CELL_SIZE_XZ), localZ / NOISE_CAVE_CELL_SIZE_XZ);
+        int gy0 = Math.min(gridY - 2, (y - minY) / NOISE_CAVE_CELL_SIZE_Y);
+        int gx1 = gx0 + 1;
+        int gy1 = gy0 + 1;
+        int gz1 = gz0 + 1;
+        double tx = (localX - gx0 * NOISE_CAVE_CELL_SIZE_XZ) / (double) NOISE_CAVE_CELL_SIZE_XZ;
+        double ty = (y - minY - gy0 * NOISE_CAVE_CELL_SIZE_Y) / (double) NOISE_CAVE_CELL_SIZE_Y;
+        double tz = (localZ - gz0 * NOISE_CAVE_CELL_SIZE_XZ) / (double) NOISE_CAVE_CELL_SIZE_XZ;
+        tx = smoothstep01(tx);
+        ty = smoothstep01(ty);
+        tz = smoothstep01(tz);
+        double c000 = grid[noiseCaveGridIndex(gx0, gy0, gz0, gridX, gridY)];
+        double c100 = grid[noiseCaveGridIndex(gx1, gy0, gz0, gridX, gridY)];
+        double c010 = grid[noiseCaveGridIndex(gx0, gy1, gz0, gridX, gridY)];
+        double c110 = grid[noiseCaveGridIndex(gx1, gy1, gz0, gridX, gridY)];
+        double c001 = grid[noiseCaveGridIndex(gx0, gy0, gz1, gridX, gridY)];
+        double c101 = grid[noiseCaveGridIndex(gx1, gy0, gz1, gridX, gridY)];
+        double c011 = grid[noiseCaveGridIndex(gx0, gy1, gz1, gridX, gridY)];
+        double c111 = grid[noiseCaveGridIndex(gx1, gy1, gz1, gridX, gridY)];
+        double x00 = lerp(c000, c100, tx);
+        double x10 = lerp(c010, c110, tx);
+        double x01 = lerp(c001, c101, tx);
+        double x11 = lerp(c011, c111, tx);
+        double y0v = lerp(x00, x10, ty);
+        double y1v = lerp(x01, x11, ty);
+        return lerp(y0v, y1v, tz);
+    }
+
+    private static double sampleNoiseCaveDensity(long seed, int worldX, int y, int worldZ, int solidTop, int minY, int maxY) {
         int depthBelowSurface = solidTop - y;
         if (depthBelowSurface < 0) {
-            return CaveNoiseSample.SOLID;
+            return -1.0;
         }
-        double bottomFade = smoothstep01((double) (y - minY) / 8.0);
-        double topFade = depthBelowSurface >= 18 ? 1.0 : smoothstep01((double) Math.max(0, depthBelowSurface - 2) / 16.0);
-        double heightFade = bottomFade * Math.max(0.18, topFade);
+        double bottomFade = smoothstep01((double) (y - minY) / 10.0);
+        double topFade = depthBelowSurface >= 22 ? 1.0 : smoothstep01((double) Math.max(0, depthBelowSurface - 2) / 20.0);
+        double heightFade = bottomFade * Math.max(0.16, topFade);
 
-        double cheese = fbm3(seed ^ 0x434845455345554bL, worldX * 0.018, y * 0.024, worldZ * 0.018, 3);
-        double cheeseWarp = valueNoise3(seed ^ 0x5741525043484545L, worldX * 0.006, y * 0.010, worldZ * 0.006) * 0.20;
-        boolean cheeseOpen = cheese + cheeseWarp > NOISE_CAVE_CHEESE_THRESHOLD + (1.0 - heightFade) * 0.26;
+        double cheese = fbm3(seed ^ 0x434845455345554bL, worldX * 0.014, y * 0.018, worldZ * 0.014, 3);
+        double cheeseWarp = valueNoise3(seed ^ 0x5741525043484545L, worldX * 0.0045, y * 0.0075, worldZ * 0.0045) * 0.24;
+        double cheeseDensity = cheese + cheeseWarp - NOISE_CAVE_CHEESE_THRESHOLD - (1.0 - heightFade) * 0.30;
 
-        double spaghettiA = Math.abs(valueNoise3(seed ^ 0x5350414748455454L, worldX * 0.032, y * 0.024, worldZ * 0.032));
-        double spaghettiB = Math.abs(valueNoise3(seed ^ 0x54554e4e454c554bL, worldX * 0.032, y * 0.024, worldZ * 0.032));
-        double spaghettiWidth = NOISE_CAVE_SPAGHETTI_THICKNESS * (0.78 + 0.44 * smoothstep01((double) depthBelowSurface / 48.0));
-        boolean spaghettiOpen = Math.max(spaghettiA, spaghettiB) < spaghettiWidth + (1.0 - heightFade) * -0.025;
+        double spaghettiA = Math.abs(valueNoise3(seed ^ 0x5350414748455454L, worldX * 0.025, y * 0.020, worldZ * 0.025));
+        double spaghettiB = Math.abs(valueNoise3(seed ^ 0x54554e4e454c554bL, worldX * 0.025, y * 0.020, worldZ * 0.025));
+        double spaghettiWidth = NOISE_CAVE_SPAGHETTI_THICKNESS * (0.82 + 0.48 * smoothstep01((double) depthBelowSurface / 56.0));
+        double spaghettiDensity = (spaghettiWidth - Math.max(spaghettiA, spaghettiB)) * 3.4 - (1.0 - heightFade) * 0.14;
 
-        double noodleA = Math.abs(valueNoise3(seed ^ 0x4e4f4f444c455531L, worldX * 0.058, y * 0.050, worldZ * 0.058));
-        double noodleB = Math.abs(valueNoise3(seed ^ 0x4e4f4f444c455532L, worldX * 0.058, y * 0.050, worldZ * 0.058));
-        double squeeze = valueNoise3(seed ^ 0x53515545455a4555L, worldX * 0.021, y * 0.030, worldZ * 0.021);
-        boolean noodleOpen = Math.max(noodleA, noodleB) < NOISE_CAVE_NOODLE_THICKNESS * (0.72 + 0.32 * Math.max(0.0, squeeze));
+        double noodleA = Math.abs(valueNoise3(seed ^ 0x4e4f4f444c455531L, worldX * 0.047, y * 0.041, worldZ * 0.047));
+        double noodleB = Math.abs(valueNoise3(seed ^ 0x4e4f4f444c455532L, worldX * 0.047, y * 0.041, worldZ * 0.047));
+        double squeeze = valueNoise3(seed ^ 0x53515545455a4555L, worldX * 0.018, y * 0.026, worldZ * 0.018);
+        double noodleDensity = (NOISE_CAVE_NOODLE_THICKNESS * (0.72 + 0.34 * Math.max(0.0, squeeze)) - Math.max(noodleA, noodleB)) * 3.8 - (1.0 - heightFade) * 0.16;
 
-        double openingNoise = valueNoise3(seed ^ 0x535552464f50454eL, worldX * 0.026, y * 0.032, worldZ * 0.026);
-        boolean surfaceOpening = depthBelowSurface <= 14 && (cheese + cheeseWarp > 0.72 || openingNoise > 0.74 || spaghettiOpen);
-        if (topFade < 0.35 && !surfaceOpening) {
-            return CaveNoiseSample.SOLID;
-        }
-        if (!(cheeseOpen || spaghettiOpen || noodleOpen)) {
-            return CaveNoiseSample.SOLID;
-        }
+        double openingNoise = valueNoise3(seed ^ 0x535552464f50454eL, worldX * 0.020, y * 0.026, worldZ * 0.020);
+        double surfaceOpeningDensity = depthBelowSurface <= 16 && openingNoise > 0.72 ? openingNoise - 0.72 : -1.0;
+        return Math.max(Math.max(cheeseDensity, spaghettiDensity), Math.max(noodleDensity, surfaceOpeningDensity));
+    }
 
+    private static byte plannedNoiseCaveFluid(long seed, int worldX, int y, int worldZ, int minY, int maxY) {
         int aquiferSurface = aquiferSurfaceY(seed, worldX, y, worldZ, minY, maxY);
-        if (y <= NOISE_CAVE_LAVA_LEVEL) {
-            double lavaPocket = valueNoise3(seed ^ 0x4c415641504f434bL, worldX * 0.030, y * 0.030, worldZ * 0.030);
-            return lavaPocket > -0.38 ? CaveNoiseSample.LAVA : CaveNoiseSample.AIR;
+        if (aquiferSurface != Integer.MIN_VALUE && y <= aquiferSurface) {
+            return CAVE_TYPE_WATER;
         }
-        if (y <= aquiferSurface) {
-            return CaveNoiseSample.WATER;
+        if (ENABLE_NOISE_CAVE_LAVA && y <= NOISE_CAVE_LAVA_LEVEL) {
+            double lavaPocket = valueNoise3(seed ^ 0x4c415641504f434bL, worldX * 0.026, y * 0.026, worldZ * 0.026);
+            if (lavaPocket > 0.42) {
+                return CAVE_TYPE_LAVA;
+            }
         }
-        return CaveNoiseSample.AIR;
+        return CAVE_TYPE_AIR;
+    }
+
+    private static boolean hasDryCaveNeighbor(byte[] caveTypes, int localX, int y, int localZ, int minY, int height) {
+        int[][] offsets = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
+        for (int[] offset : offsets) {
+            int nx = localX + offset[0];
+            int ny = y + offset[1];
+            int nz = localZ + offset[2];
+            if (nx < 0 || nx >= 16 || nz < 0 || nz >= 16 || ny < minY || ny >= minY + height) {
+                continue;
+            }
+            if (caveTypes[caveIndex(nx, ny, nz, minY, height)] == CAVE_TYPE_AIR) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasExistingDryAirNeighbor(ChunkAccess chunk, BlockPos.MutableBlockPos cursor, int localX, int y, int localZ) {
+        int[][] offsets = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
+        for (int[] offset : offsets) {
+            int nx = localX + offset[0];
+            int ny = y + offset[1];
+            int nz = localZ + offset[2];
+            if (nx < 0 || nx >= 16 || nz < 0 || nz >= 16 || ny < chunk.getMinBuildHeight() || ny >= chunk.getMaxBuildHeight()) {
+                continue;
+            }
+            BlockState state = chunk.getBlockState(cursor.set(nx, ny, nz));
+            if (state.isAir()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasWaterNeighbor(byte[] caveTypes, int localX, int y, int localZ, int minY, int height) {
+        int[][] offsets = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
+        for (int[] offset : offsets) {
+            int nx = localX + offset[0];
+            int ny = y + offset[1];
+            int nz = localZ + offset[2];
+            if (nx < 0 || nx >= 16 || nz < 0 || nz >= 16 || ny < minY || ny >= minY + height) {
+                continue;
+            }
+            if (caveTypes[caveIndex(nx, ny, nz, minY, height)] == CAVE_TYPE_WATER) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasExistingWaterNeighbor(ChunkAccess chunk, BlockPos.MutableBlockPos cursor, int localX, int y, int localZ) {
+        int[][] offsets = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
+        for (int[] offset : offsets) {
+            int nx = localX + offset[0];
+            int ny = y + offset[1];
+            int nz = localZ + offset[2];
+            if (nx < 0 || nx >= 16 || nz < 0 || nz >= 16 || ny < chunk.getMinBuildHeight() || ny >= chunk.getMaxBuildHeight()) {
+                continue;
+            }
+            if (chunk.getBlockState(cursor.set(nx, ny, nz)).getFluidState().is(Fluids.WATER)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static int aquiferSurfaceY(long seed, int worldX, int y, int worldZ, int minY, int maxY) {
         double regional = fbm2(seed ^ 0x4151554946455253L, worldX * 0.0045, worldZ * 0.0045, 3);
         double local = valueNoise3(seed ^ 0x5741544552544142L, worldX * 0.014, y * 0.010, worldZ * 0.014);
         int base = (int) Math.round(-34.0 + regional * 34.0 + local * 10.0);
-        int floorLimit = Math.max(minY + 8, NOISE_CAVE_LAVA_LEVEL + 6);
+        int floorLimit = Math.max(minY + 8, NOISE_CAVE_LAVA_LEVEL + 8);
         int ceilingLimit = Math.min(maxY, NOISE_CAVE_AQUIFER_MAX_Y);
         if (floorLimit > ceilingLimit) {
             return Integer.MIN_VALUE;
@@ -4147,7 +4647,6 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         return t * t * (3.0 - 2.0 * t);
     }
 
-
     private static double randomSigned(long seed, long x, long y, long z) {
         long hash = seed;
         hash ^= x * 0x9e3779b97f4a7c15L;
@@ -4163,13 +4662,6 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         value ^= value >>> 27;
         value *= 0x94d049bb133111ebL;
         return value ^ (value >>> 31);
-    }
-
-    private enum CaveNoiseSample {
-        SOLID,
-        AIR,
-        WATER,
-        LAVA
     }
 
     private static void applyDeepCaves(long seed, ChunkAccess chunk) {

@@ -36,8 +36,50 @@ tiles because ore, vegetation, river, and height values must be exact.
 Useful export options:
 
 ```bash
+./generate_hover_previews.sh --regenerate height,preview
+./generate_hover_previews.sh --regenerate all
 ./generate_hover_previews.sh --tile-size 256 --workers 8 --visual-format png
 ./generate_hover_previews.sh --force --clean-stale --profile
+```
+
+`--regenerate height,preview` rebuilds the height tiles and then exports the
+hover map. The default height rebuild uses `data/rasters_COP30.tar.gz` for
+Ireland, Northern Ireland, the Isle of Man, and nearby target islands, while
+mainland Great Britain remains protected and based on OS Terrain 50. The old
+OSNI Northern Ireland DTM is available only when explicitly requested.
+
+Useful height rebuild environment variables:
+
+```bash
+INCLUDE_IRELAND=1
+COP30_ARCHIVE=/path/to/rasters_COP30.tar.gz
+COP30_TARGET=ireland-iom
+COP30_SMOOTHING=light
+COP30_RESAMPLING=bilinear
+COP30_DETERRACE=1
+COP30_PROTECT_MAINLAND_GB=1
+COP30_DEBUG_GEOTIFF=/tmp/cop30_overlay.tif
+USE_LEGACY_OSNI_HEIGHT=0
+OSNI_DTM_ZIP=/path/to/osni_opendata_50m_dtm.zip
+```
+
+Examples:
+
+```bash
+# Default full preview with COP30 overlay
+./generate_hover_previews.sh --regenerate height,preview
+
+# Full rebuild
+./generate_hover_previews.sh --regenerate all
+
+# Legacy OSNI fallback
+USE_LEGACY_OSNI_HEIGHT=1 ./generate_hover_previews.sh --regenerate height,preview
+
+# Disable Ireland/IOM overlay entirely
+INCLUDE_IRELAND=0 ./generate_hover_previews.sh --regenerate height,preview
+
+# Produce debug COP30 overlay GeoTIFF
+COP30_DEBUG_GEOTIFF=/tmp/cop30_overlay.tif ./generate_hover_previews.sh --regenerate height
 ```
 
 Equivalent environment defaults are supported by the wrapper:
@@ -163,5 +205,26 @@ python -m pytest
 node --check site/app.js
 ```
 
-Full preview generation can be expensive on the complete UK dataset; use
+To validate a COP30 preview generation path locally:
+
+```bash
+UKGEO_TOOLS_DIR=../ukgeo-tools \
+COP30_ARCHIVE=../../data/rasters_COP30.tar.gz \
+./generate_hover_previews.sh --regenerate height,preview --profile
+```
+
+For a full rebuild:
+
+```bash
+UKGEO_TOOLS_DIR=../ukgeo-tools \
+COP30_ARCHIVE=../../data/rasters_COP30.tar.gz \
+./generate_hover_previews.sh --regenerate all --profile
+```
+
+Inspect `manifest.json`, `hoverpreviews/hover_manifest.json`,
+`hoverpreviews/layers/height*`, and `hoverpreviews/samples/height_rgb.png`.
+Ireland, Northern Ireland, and the Isle of Man should have valid height samples;
+England, Wales, and Scotland should remain valid OS Terrain 50-derived data.
+
+Full preview generation can be expensive on the complete UKGeo dataset; use
 `./generate_hover_previews.sh --profile` when regenerating production assets.

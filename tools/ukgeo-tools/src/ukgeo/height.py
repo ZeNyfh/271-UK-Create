@@ -42,7 +42,7 @@ def make_height_tiles(
     cells = padded_width * padded_depth
     gib = cells * 2 / (1024**3)
     console.print(f"[yellow]Height generation currently uses a guarded in-memory mosaic ({gib:.2f} GiB int16 output).[/yellow]")
-    if cells > 1_400_000_000:
+    if cells > 2_000_000_000:
         raise RuntimeError("Requested output is too large for this first implementation; use a smaller extent or implement windowed VRT generation.")
 
     result = np.full((padded_depth, padded_width), HEIGHT_NODATA, dtype="<i2")

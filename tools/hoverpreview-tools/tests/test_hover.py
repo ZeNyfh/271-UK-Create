@@ -1,9 +1,13 @@
+import json
+from pathlib import Path
+
 import numpy as np
 from PIL import Image
 
 from hoverpreview_tools.hover_previews import (
     PREVIEW_RIVER_MAX_RADIUS,
     PREVIEW_RIVER_MIN_RADIUS,
+    export_hover_previews,
     hover_preview_steps,
     hover_preview_scale,
     _minecraft_origin,
@@ -11,6 +15,8 @@ from hoverpreview_tools.hover_previews import (
     _save_sample_tiles,
     _save_visual_layer,
 )
+from ukgeo.manifest import default_manifest, write_manifest
+from ukgeo.tiles import write_r16_tile
 
 def test_hover_preview_index_origin_metadata_uses_nottingham_zero_zero():
     manifest = {
@@ -118,3 +124,59 @@ def test_hover_preview_steps_include_biome_regions(tmp_path):
 
     assert "vegetation" in steps
     assert "biome_regions" in steps
+
+
+def test_generate_script_defaults_to_cop30_without_requiring_osni():
+    script = (Path(__file__).resolve().parents[1] / "generate_hover_previews.sh").read_text(encoding="utf-8")
+    run_height = script[script.index("run_height() {") : script.index("\nrun_vegetation()")]
+
+    assert 'COP30_ARCHIVE="${COP30_ARCHIVE:-$DATA_DIR/rasters_COP30.tar.gz}"' in script
+    assert "add-cop30-height-tiles" in run_height
+    assert "USE_LEGACY_OSNI_HEIGHT" in run_height
+    assert 'require_file "$COP30_ARCHIVE"' in run_height
+    assert 'require_file "$OSNI_DTM_ZIP"' in run_height
+    assert run_height.index('require_file "$OSNI_DTM_ZIP"') > run_height.index('if is_truthy "$USE_LEGACY_OSNI_HEIGHT"; then')
+
+
+def test_export_hover_manifest_preserves_height_overlays_and_manifest_bounds(tmp_path):
+    root = tmp_path / "world"
+    height_root = root / "height"
+    height_root.mkdir(parents=True)
+    manifest = default_manifest(
+        width=700,
+        depth=513,
+        tile_size=512,
+        minecraft_min_x=-26050,
+        minecraft_min_z=-36925,
+        bng_min_easting=-220000,
+        bng_min_northing=0,
+        bng_max_easting=650000,
+        bng_max_northing=1300000,
+    )
+    manifest["height_overlays"] = [
+        {
+            "source": "Copernicus DEM COP30 GeoTIFF",
+            "archive": "rasters_COP30.tar.gz",
+            "target": "ireland-iom",
+            "smoothing": "light",
+            "deterrace": True,
+            "protect_mainland_gb": True,
+        }
+    ]
+    write_manifest(root / "manifest.json", manifest)
+    for tile_z in range(2):
+        for tile_x in range(2):
+            write_r16_tile(height_root / f"{tile_x:03d}_{tile_z:03d}.r16", np.full((512, 512), 123, dtype="<i2"))
+
+    out = tmp_path / "hoverpreviews"
+    export_hover_previews(root, out, max_size=256, tile_size=128, workers=1)
+
+    hover_manifest = json.loads((out / "hover_manifest.json").read_text(encoding="utf-8"))
+    assert hover_manifest["world_width"] == 700
+    assert hover_manifest["world_depth"] == 513
+    assert hover_manifest["bng_min_easting"] == -220000
+    assert hover_manifest["world"]["width"] == 700
+    assert hover_manifest["world"]["depth"] == 513
+    assert hover_manifest["image_width"] == 256
+    assert hover_manifest["image_height"] == 256
+    assert hover_manifest["height_overlays"] == manifest["height_overlays"]

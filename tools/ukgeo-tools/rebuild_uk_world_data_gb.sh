@@ -13,12 +13,15 @@ ORE_JOBS="${ORE_JOBS:-1}"
 VEGETATION_JOBS="${VEGETATION_JOBS:-1}"
 UKGEO_TILE_COMPRESSION="${UKGEO_TILE_COMPRESSION:-none}"
 export UKGEO_TILE_COMPRESSION
+INCLUDE_IRELAND="${INCLUDE_IRELAND:-1}"
+USE_LEGACY_OSNI_HEIGHT="${USE_LEGACY_OSNI_HEIGHT:-0}"
 
 OS_TERRAIN_ZIP="${OS_TERRAIN_ZIP:-$DATA_DIR/terr50_gagg_gb.zip}"
 BGS_GEOLOGY_ZIP="${BGS_GEOLOGY_ZIP:-$DATA_DIR/BGS_Geology_625k_bedrock_gpkg.zip}"
 COAL_RESOURCES_ZIP="${COAL_RESOURCES_ZIP:-$DATA_DIR/OGC_CoalResourcesForNewTechnologies.zip}"
 GOLD_OCCURRENCES="${GOLD_OCCURRENCES:-$DATA_DIR/bgs_gold_occurrences.geojson}"
 OSNI_DTM_ZIP="${OSNI_DTM_ZIP:-$DATA_DIR/osni_opendata_50m_dtm.zip}"
+COP30_ARCHIVE="${COP30_ARCHIVE:-$DATA_DIR/rasters_COP30.tar.gz}"
 RIVERS_ZIP="${RIVERS_ZIP:-$DATA_DIR/oprvrs_gpkg_gb.zip}"
 LANDCOVER_ZIP="${LANDCOVER_ZIP:-$DATA_DIR/FME_3564346A_1778997494261_5633.zip}"
 IRON_OVERLAY_IMAGE="${IRON_OVERLAY_IMAGE:-$DATA_DIR/uk_iron_ore_reference_overlay.svg}"
@@ -39,7 +42,11 @@ require_file() {
 require_file "$OS_TERRAIN_ZIP"
 require_file "$BGS_GEOLOGY_ZIP"
 require_file "$COAL_RESOURCES_ZIP"
-require_file "$OSNI_DTM_ZIP"
+if [[ "$USE_LEGACY_OSNI_HEIGHT" == "1" ]]; then
+  require_file "$OSNI_DTM_ZIP"
+else
+  require_file "$COP30_ARCHIVE"
+fi
 require_file "$RIVERS_ZIP"
 require_file "$LANDCOVER_ZIP"
 require_file "$ORE_RULES"
@@ -59,6 +66,41 @@ UKGEO="$SCRIPT_DIR/.venv/bin/ukgeo"
 TMP_ROOT="$OUT_ROOT.rebuild.$$"
 BACKUP_ROOT="$OUT_ROOT.backup.$(date +%Y%m%d-%H%M%S)"
 
+if [[ "$INCLUDE_IRELAND" == "1" ]]; then
+  # Western Ireland projects to negative British National Grid eastings. Expand
+  # westward while preserving the existing 26 m/block scale and the 0..1300000
+  # northing range used by the GB dataset.
+  BNG_MIN_EASTING="${BNG_MIN_EASTING:--220000}"
+  BNG_MIN_NORTHING="${BNG_MIN_NORTHING:-0}"
+  BNG_MAX_EASTING="${BNG_MAX_EASTING:-650000}"
+  BNG_MAX_NORTHING="${BNG_MAX_NORTHING:-1300000}"
+  WORLD_DEPTH="${WORLD_DEPTH:-50000}"
+  WORLD_WIDTH="${WORLD_WIDTH:-33462}"
+else
+  BNG_MIN_EASTING="${BNG_MIN_EASTING:-0}"
+  BNG_MIN_NORTHING="${BNG_MIN_NORTHING:-0}"
+  BNG_MAX_EASTING="${BNG_MAX_EASTING:-650000}"
+  BNG_MAX_NORTHING="${BNG_MAX_NORTHING:-1300000}"
+  WORLD_WIDTH="${WORLD_WIDTH:-25000}"
+  WORLD_DEPTH="${WORLD_DEPTH:-50000}"
+fi
+
+read -r MINECRAFT_MIN_X MINECRAFT_MIN_Z < <("$SCRIPT_DIR/.venv/bin/python" - <<PY
+from ukgeo.coords import minecraft_min_for_bng_origin, NOTTINGHAM_ORIGIN_BNG_EASTING, NOTTINGHAM_ORIGIN_BNG_NORTHING
+x, z = minecraft_min_for_bng_origin(
+    bng_easting=NOTTINGHAM_ORIGIN_BNG_EASTING,
+    bng_northing=NOTTINGHAM_ORIGIN_BNG_NORTHING,
+    bng_min_easting=float("$BNG_MIN_EASTING"),
+    bng_min_northing=float("$BNG_MIN_NORTHING"),
+    bng_max_easting=float("$BNG_MAX_EASTING"),
+    bng_max_northing=float("$BNG_MAX_NORTHING"),
+    world_width=int("$WORLD_WIDTH"),
+    world_depth=int("$WORLD_DEPTH"),
+)
+print(x, z)
+PY
+)
+
 cleanup() {
   if [[ -d "$TMP_ROOT" ]]; then
     echo "Removing incomplete rebuild directory: $TMP_ROOT"
@@ -72,28 +114,28 @@ mkdir -p "$TMP_ROOT"
 
 echo "Rebuilding GB runtime tiles into: $TMP_ROOT"
 echo "Tile compression: $UKGEO_TILE_COMPRESSION (none writes .r16/.u8; gzip writes .r16.gz/.u8.gz)"
+echo "Height extent: E $BNG_MIN_EASTING..$BNG_MAX_EASTING, N $BNG_MIN_NORTHING..$BNG_MAX_NORTHING, world ${WORLD_WIDTH}x${WORLD_DEPTH}"
+if [[ "$USE_LEGACY_OSNI_HEIGHT" == "1" ]]; then
+  echo "Height overlay: legacy OSNI DTM"
+else
+  echo "Height overlay: COP30 Ireland/Northern Ireland/Isle of Man"
+fi
 
 "$UKGEO" make-height-tiles \
   --os-zip "$OS_TERRAIN_ZIP" \
   --out "$TMP_ROOT" \
-  --bng-min-easting 0 \
-  --bng-min-northing 0 \
-  --bng-max-easting 650000 \
-  --bng-max-northing 1300000 \
-  --world-width 25000 \
-  --world-depth 50000 \
-  --minecraft-min-x -17588 \
-  --minecraft-min-z -36925 \
+  --bng-min-easting "$BNG_MIN_EASTING" \
+  --bng-min-northing "$BNG_MIN_NORTHING" \
+  --bng-max-easting "$BNG_MAX_EASTING" \
+  --bng-max-northing "$BNG_MAX_NORTHING" \
+  --world-width "$WORLD_WIDTH" \
+  --world-depth "$WORLD_DEPTH" \
+  --minecraft-min-x "$MINECRAFT_MIN_X" \
+  --minecraft-min-z "$MINECRAFT_MIN_Z" \
   --sea-level-y 64 \
   --height-resampling bilinear \
   --height-smoothing light \
   --height-deterrace
-
-"$UKGEO" add-osni-height-tiles \
-  --osni-dtm "$OSNI_DTM_ZIP" \
-  --manifest "$TMP_ROOT/manifest.json" \
-  --out "$TMP_ROOT" \
-  --resampling bilinear
 
 "$UKGEO" mask-height-to-bgs-land \
   --bgs "$BGS_GEOLOGY_ZIP" \
@@ -103,6 +145,24 @@ echo "Tile compression: $UKGEO_TILE_COMPRESSION (none writes .r16/.u8; gzip writ
   --layer 625k_V5_SUPERFICIAL_Geology \
   --buffer-metres 0 \
   --max-height-metres 30
+
+if [[ "$USE_LEGACY_OSNI_HEIGHT" == "1" ]]; then
+  "$UKGEO" add-osni-height-tiles \
+    --osni-dtm "$OSNI_DTM_ZIP" \
+    --manifest "$TMP_ROOT/manifest.json" \
+    --out "$TMP_ROOT" \
+    --resampling bilinear
+else
+  "$UKGEO" add-cop30-height-tiles \
+    --cop30 "$COP30_ARCHIVE" \
+    --manifest "$TMP_ROOT/manifest.json" \
+    --out "$TMP_ROOT" \
+    --resampling bilinear \
+    --smoothing light \
+    --height-deterrace \
+    --target ireland-iom \
+    --protect-mainland-gb
+fi
 
 "$UKGEO" make-ore-tiles \
   --bgs "$BGS_GEOLOGY_ZIP" \
