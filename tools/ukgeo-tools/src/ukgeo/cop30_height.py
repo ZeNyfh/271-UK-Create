@@ -27,6 +27,7 @@ console = Console()
 
 TARGET_MODES = {"ireland-iom", "ireland-only", "iom-only", "all-cop30"}
 DEST_CRS = "EPSG:27700"
+DEFAULT_MINECRAFT_HEIGHT_SCALE = 0.18
 
 
 @dataclass(frozen=True)
@@ -46,6 +47,14 @@ class OverlayStats:
     cells_skipped_outside_target: int = 0
     cells_skipped_mainland_gb: int = 0
     tiles_touched: int = 0
+    target_min_x: float | None = None
+    target_min_y: float | None = None
+    target_max_x: float | None = None
+    target_max_y: float | None = None
+    written_min_x: float | None = None
+    written_min_y: float | None = None
+    written_max_x: float | None = None
+    written_max_y: float | None = None
 
 
 def add_cop30_height_tiles(
@@ -58,7 +67,10 @@ def add_cop30_height_tiles(
     deterrace: bool = True,
     target: str = "ireland-iom",
     protect_mainland_gb: bool = True,
+    minecraft_y_offset: float = -2.0,
     debug_geotiff: Path | None = None,
+    debug_mask_geotiff: Path | None = None,
+    debug_written_geotiff: Path | None = None,
     allow_empty: bool = False,
 ) -> None:
     resampling = _normalise_choice(resampling, {"nearest", "bilinear"}, "resampling")
@@ -80,6 +92,9 @@ def add_cop30_height_tiles(
     z_scale = (float(geo["bng_max_northing"]) - float(geo["bng_min_northing"])) / depth
     method = _resampling(resampling)
     height_root = out / manifest["height"]["path"]
+    height_scale = _minecraft_height_scale(manifest)
+    height_offset_decimetres = int(round((minecraft_y_offset / height_scale) * 10.0)) if minecraft_y_offset else 0
+    written_debug_path = debug_written_geotiff or debug_geotiff
 
     with tempfile.TemporaryDirectory(prefix="ukgeo-cop30-") as tmp_name:
         rasters = _extract_geotiffs(cop30_archive, Path(tmp_name))
@@ -89,7 +104,8 @@ def add_cop30_height_tiles(
         source_crs_summary = _source_crs_summary(rasters)
         _warn_if_source_extends_outside_manifest(rasters, geo, manifest_crs)
         stats = OverlayStats(source_rasters=len(rasters))
-        debug = _DebugWriter(debug_geotiff, manifest) if debug_geotiff else None
+        debug_written = _DebugWriter(written_debug_path, manifest, dtype="int16", nodata=HEIGHT_NODATA) if written_debug_path else None
+        debug_mask = _DebugWriter(debug_mask_geotiff, manifest, dtype="uint8", nodata=0) if debug_mask_geotiff else None
         try:
             for tile_z in tqdm(range(tiles_z), desc="COP30 height tile rows"):
                 for tile_x in range(tiles_x):
@@ -106,8 +122,10 @@ def add_cop30_height_tiles(
                     )
                     source_valid = np.isfinite(padded)
                     if not source_valid.any():
-                        if debug is not None:
-                            debug.write_tile(tile_x, tile_z, np.full((tile_size, tile_size), HEIGHT_NODATA, dtype="<i2"))
+                        if debug_written is not None:
+                            debug_written.write_tile(tile_x, tile_z, np.full((tile_size, tile_size), HEIGHT_NODATA, dtype="<i2"))
+                        if debug_mask is not None:
+                            debug_mask.write_tile(tile_x, tile_z, np.zeros((tile_size, tile_size), dtype=np.uint8))
                         continue
 
                     xs, ys = _tile_cell_centres(tile_x, tile_z, tile_size, x_scale, z_scale, geo, border=1)
@@ -117,17 +135,26 @@ def add_cop30_height_tiles(
                     usable = source_valid & target_mask & ~protected
                     center_usable = usable[1:-1, 1:-1]
                     center_source_valid = source_valid[1:-1, 1:-1]
+                    center_xs = xs[1:-1]
+                    center_ys = ys[1:-1]
                     stats.target_cells_covered += int(center_usable.sum())
+                    _update_bounds(stats, "target", center_usable, center_xs, center_ys)
                     stats.cells_skipped_nodata += int((~center_source_valid & target_mask[1:-1, 1:-1] & ~protected[1:-1, 1:-1]).sum())
                     stats.cells_skipped_outside_target += int((center_source_valid & ~target_mask[1:-1, 1:-1]).sum())
                     stats.cells_skipped_mainland_gb += int((center_source_valid & target_mask[1:-1, 1:-1] & protected[1:-1, 1:-1]).sum())
                     if not center_usable.any():
-                        if debug is not None:
-                            debug.write_tile(tile_x, tile_z, np.full((tile_size, tile_size), HEIGHT_NODATA, dtype="<i2"))
+                        if debug_written is not None:
+                            debug_written.write_tile(tile_x, tile_z, np.full((tile_size, tile_size), HEIGHT_NODATA, dtype="<i2"))
+                        if debug_mask is not None:
+                            debug_mask.write_tile(tile_x, tile_z, center_usable.astype(np.uint8))
                         continue
 
                     overlay_values = np.where(np.isfinite(padded), padded, 0.0)
                     overlay_dm = np.rint(overlay_values * 10.0).clip(-32767, 32767).astype("<i2")
+                    if height_offset_decimetres:
+                        can_offset = usable & (overlay_dm != HEIGHT_NODATA)
+                        adjusted = overlay_dm.astype(np.int32) + height_offset_decimetres
+                        overlay_dm = np.where(can_offset, np.clip(adjusted, -32767, 32767), overlay_dm).astype("<i2")
                     overlay_dm[~usable] = HEIGHT_NODATA
                     if smoothing != "none" or deterrace:
                         overlay_dm = process_height_mosaic(overlay_dm, smoothing=smoothing, deterrace=deterrace, strip_rows=tile_size)
@@ -136,8 +163,10 @@ def add_cop30_height_tiles(
                     overlay = overlay_dm[1:-1, 1:-1]
                     valid = center_usable & (overlay != HEIGHT_NODATA)
                     if not valid.any():
-                        if debug is not None:
-                            debug.write_tile(tile_x, tile_z, np.full((tile_size, tile_size), HEIGHT_NODATA, dtype="<i2"))
+                        if debug_written is not None:
+                            debug_written.write_tile(tile_x, tile_z, np.full((tile_size, tile_size), HEIGHT_NODATA, dtype="<i2"))
+                        if debug_mask is not None:
+                            debug_mask.write_tile(tile_x, tile_z, center_usable.astype(np.uint8))
                         continue
 
                     path = height_root / f"{tile_x:03d}_{tile_z:03d}{manifest['height'].get('extension', r16_extension())}"
@@ -148,13 +177,18 @@ def add_cop30_height_tiles(
                     write_r16_tile(path, existing)
                     stats.cells_written += int(write_mask.sum())
                     stats.tiles_touched += 1
-                    if debug is not None:
+                    _update_bounds(stats, "written", write_mask, center_xs, center_ys)
+                    if debug_written is not None:
                         debug_tile = np.full((tile_size, tile_size), HEIGHT_NODATA, dtype="<i2")
                         debug_tile[write_mask] = overlay[write_mask]
-                        debug.write_tile(tile_x, tile_z, debug_tile)
+                        debug_written.write_tile(tile_x, tile_z, debug_tile)
+                    if debug_mask is not None:
+                        debug_mask.write_tile(tile_x, tile_z, center_usable.astype(np.uint8))
         finally:
-            if debug is not None:
-                debug.close()
+            if debug_written is not None:
+                debug_written.close()
+            if debug_mask is not None:
+                debug_mask.close()
 
     if stats.cells_written == 0 and not allow_empty:
         raise ValueError(
@@ -172,6 +206,9 @@ def add_cop30_height_tiles(
             "smoothing": smoothing,
             "deterrace": deterrace,
             "protect_mainland_gb": protect_mainland_gb,
+            "minecraft_y_offset": minecraft_y_offset,
+            "minecraft_height_scale": height_scale,
+            "height_offset_decimetres": height_offset_decimetres,
         }
     )
     write_manifest(manifest_path, manifest)
@@ -183,6 +220,9 @@ def add_cop30_height_tiles(
     console.print(f"Cells skipped outside target mask: {stats.cells_skipped_outside_target:,}")
     console.print(f"Cells skipped due to mainland GB protection: {stats.cells_skipped_mainland_gb:,}")
     console.print(f"Tiles touched: {stats.tiles_touched}")
+    console.print(f"Height offset: {minecraft_y_offset:g} Minecraft blocks / {height_offset_decimetres:+d} decimetres (height scale {height_scale:g})")
+    console.print(f"Target bounds in BNG: {_format_bounds(stats, 'target')}")
+    console.print(f"Actual written bounds in BNG: {_format_bounds(stats, 'written')}")
     console.print(f"Source CRS summary: {source_crs_summary}")
 
 
@@ -217,12 +257,14 @@ def _ireland_polygon() -> Polygon:
             (-8.05, 51.48),
             (-7.25, 51.68),
             (-6.55, 52.02),
-            (-6.05, 52.55),
-            (-5.82, 53.20),
-            (-5.63, 54.05),
-            (-5.86, 54.70),
-            (-6.33, 55.15),
-            (-7.18, 55.43),
+            (-5.86, 52.55),
+            (-5.58, 53.25),
+            (-5.43, 54.05),
+            (-5.45, 54.55),
+            (-5.78, 54.95),
+            (-6.25, 55.26),
+            (-7.05, 55.50),
+            (-7.75, 55.50),
             (-8.20, 55.35),
             (-9.20, 54.95),
             (-10.08, 54.35),
@@ -432,6 +474,50 @@ def _resampling(value: str) -> Resampling:
     raise ValueError("--resampling must be nearest or bilinear")
 
 
+def _minecraft_height_scale(manifest: dict) -> float:
+    world = manifest.get("world", {})
+    height = manifest.get("height", {})
+    generator = manifest.get("generator") or manifest.get("worldgen") or manifest.get("ukgeo_generator") or {}
+    model = manifest.get("minecraft_height") or manifest.get("height_model") or world.get("height_model") or height.get("minecraft") or generator.get("height") or {}
+    for source in (model, world, height, generator, manifest):
+        for key in ("height_scale", "heightScale"):
+            value = source.get(key) if isinstance(source, dict) else None
+            if value is not None:
+                scale = float(value)
+                if scale <= 0.0:
+                    raise ValueError(f"height scale must be positive, got {scale:g}")
+                return scale
+    return DEFAULT_MINECRAFT_HEIGHT_SCALE
+
+
+def _update_bounds(stats: OverlayStats, prefix: str, mask: np.ndarray, xs: np.ndarray, ys: np.ndarray) -> None:
+    if not mask.any():
+        return
+    rows, cols = np.nonzero(mask)
+    min_x = float(xs[cols].min())
+    max_x = float(xs[cols].max())
+    min_y = float(ys[rows].min())
+    max_y = float(ys[rows].max())
+    current_min_x = getattr(stats, f"{prefix}_min_x")
+    setattr(stats, f"{prefix}_min_x", min_x if current_min_x is None else min(current_min_x, min_x))
+    current_min_y = getattr(stats, f"{prefix}_min_y")
+    setattr(stats, f"{prefix}_min_y", min_y if current_min_y is None else min(current_min_y, min_y))
+    current_max_x = getattr(stats, f"{prefix}_max_x")
+    setattr(stats, f"{prefix}_max_x", max_x if current_max_x is None else max(current_max_x, max_x))
+    current_max_y = getattr(stats, f"{prefix}_max_y")
+    setattr(stats, f"{prefix}_max_y", max_y if current_max_y is None else max(current_max_y, max_y))
+
+
+def _format_bounds(stats: OverlayStats, prefix: str) -> str:
+    min_x = getattr(stats, f"{prefix}_min_x")
+    min_y = getattr(stats, f"{prefix}_min_y")
+    max_x = getattr(stats, f"{prefix}_max_x")
+    max_y = getattr(stats, f"{prefix}_max_y")
+    if min_x is None or min_y is None or max_x is None or max_y is None:
+        return "none"
+    return f"E {min_x:.0f}..{max_x:.0f}, N {min_y:.0f}..{max_y:.0f}"
+
+
 def _bounds_from_transform(transform: Affine, width: int, height: int) -> tuple[float, float, float, float]:
     left = transform.c
     top = transform.f
@@ -479,7 +565,7 @@ def _source_crs_summary(rasters: list[Cop30Raster]) -> str:
 
 
 class _DebugWriter:
-    def __init__(self, path: Path, manifest: dict) -> None:
+    def __init__(self, path: Path, manifest: dict, *, dtype: str, nodata: int) -> None:
         geo = manifest["georeferencing"]
         world = manifest["world"]
         self.width = int(world["width"])
@@ -493,7 +579,7 @@ class _DebugWriter:
             height=self.depth,
             width=self.width,
             count=1,
-            dtype="int16",
+            dtype=dtype,
             crs=geo.get("crs", DEST_CRS),
             transform=from_bounds(
                 geo["bng_min_easting"],
@@ -503,7 +589,7 @@ class _DebugWriter:
                 self.width,
                 self.depth,
             ),
-            nodata=HEIGHT_NODATA,
+            nodata=nodata,
             tiled=True,
             compress="deflate",
         )

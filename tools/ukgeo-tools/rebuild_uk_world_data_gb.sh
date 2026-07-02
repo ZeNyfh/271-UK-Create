@@ -15,6 +15,7 @@ UKGEO_TILE_COMPRESSION="${UKGEO_TILE_COMPRESSION:-none}"
 export UKGEO_TILE_COMPRESSION
 INCLUDE_IRELAND="${INCLUDE_IRELAND:-1}"
 USE_LEGACY_OSNI_HEIGHT="${USE_LEGACY_OSNI_HEIGHT:-0}"
+COP30_MINECRAFT_Y_OFFSET="${COP30_MINECRAFT_Y_OFFSET:--2}"
 
 OS_TERRAIN_ZIP="${OS_TERRAIN_ZIP:-$DATA_DIR/terr50_gagg_gb.zip}"
 BGS_GEOLOGY_ZIP="${BGS_GEOLOGY_ZIP:-$DATA_DIR/BGS_Geology_625k_bedrock_gpkg.zip}"
@@ -144,7 +145,8 @@ fi
   --layer 625k_V5_BEDROCK_Geology \
   --layer 625k_V5_SUPERFICIAL_Geology \
   --buffer-metres 0 \
-  --max-height-metres 30
+  --max-height-metres 30 \
+  --preserve-height-overlays
 
 if [[ "$USE_LEGACY_OSNI_HEIGHT" == "1" ]]; then
   "$UKGEO" add-osni-height-tiles \
@@ -161,6 +163,7 @@ else
     --smoothing light \
     --height-deterrace \
     --target ireland-iom \
+    --minecraft-y-offset "$COP30_MINECRAFT_Y_OFFSET" \
     --protect-mainland-gb
 fi
 

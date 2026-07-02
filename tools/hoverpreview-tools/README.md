@@ -46,7 +46,9 @@ Useful export options:
 hover map. The default height rebuild uses `data/rasters_COP30.tar.gz` for
 Ireland, Northern Ireland, the Isle of Man, and nearby target islands, while
 mainland Great Britain remains protected and based on OS Terrain 50. The old
-OSNI Northern Ireland DTM is available only when explicitly requested.
+OSNI Northern Ireland DTM is available only when explicitly requested. COP30
+heights are lowered by `COP30_MINECRAFT_Y_OFFSET=-2` by default to match the
+current generated terrain scale.
 
 Useful height rebuild environment variables:
 
@@ -58,6 +60,7 @@ COP30_SMOOTHING=light
 COP30_RESAMPLING=bilinear
 COP30_DETERRACE=1
 COP30_PROTECT_MAINLAND_GB=1
+COP30_MINECRAFT_Y_OFFSET=-2
 COP30_DEBUG_GEOTIFF=/tmp/cop30_overlay.tif
 USE_LEGACY_OSNI_HEIGHT=0
 OSNI_DTM_ZIP=/path/to/osni_opendata_50m_dtm.zip

@@ -131,7 +131,9 @@ def test_generate_script_defaults_to_cop30_without_requiring_osni():
     run_height = script[script.index("run_height() {") : script.index("\nrun_vegetation()")]
 
     assert 'COP30_ARCHIVE="${COP30_ARCHIVE:-$DATA_DIR/rasters_COP30.tar.gz}"' in script
+    assert 'COP30_MINECRAFT_Y_OFFSET="${COP30_MINECRAFT_Y_OFFSET:--2}"' in script
     assert "add-cop30-height-tiles" in run_height
+    assert '--minecraft-y-offset "$COP30_MINECRAFT_Y_OFFSET"' in run_height
     assert "USE_LEGACY_OSNI_HEIGHT" in run_height
     assert 'require_file "$COP30_ARCHIVE"' in run_height
     assert 'require_file "$OSNI_DTM_ZIP"' in run_height

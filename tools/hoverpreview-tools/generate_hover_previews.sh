@@ -30,6 +30,7 @@ COP30_SMOOTHING="${COP30_SMOOTHING:-light}"
 COP30_RESAMPLING="${COP30_RESAMPLING:-bilinear}"
 COP30_DETERRACE="${COP30_DETERRACE:-1}"
 COP30_PROTECT_MAINLAND_GB="${COP30_PROTECT_MAINLAND_GB:-1}"
+COP30_MINECRAFT_Y_OFFSET="${COP30_MINECRAFT_Y_OFFSET:--2}"
 COP30_DEBUG_GEOTIFF="${COP30_DEBUG_GEOTIFF:-}"
 RIVERS_ZIP="${RIVERS_ZIP:-$DATA_DIR/oprvrs_gpkg_gb.zip}"
 LANDCOVER_ZIP="${LANDCOVER_ZIP:-$DATA_DIR/FME_3564346A_1778997494261_5633.zip}"
@@ -493,7 +494,8 @@ PY
     --layer 625k_V5_BEDROCK_Geology \
     --layer 625k_V5_SUPERFICIAL_Geology \
     --buffer-metres 0 \
-    --max-height-metres 30
+    --max-height-metres 30 \
+    --preserve-height-overlays
 
   if is_truthy "$INCLUDE_IRELAND"; then
     if is_truthy "$USE_LEGACY_OSNI_HEIGHT"; then
@@ -511,6 +513,7 @@ PY
         --target "$COP30_TARGET"
         --resampling "$COP30_RESAMPLING"
         --smoothing "$COP30_SMOOTHING"
+        --minecraft-y-offset "$COP30_MINECRAFT_Y_OFFSET"
       )
       if is_truthy "$COP30_DETERRACE"; then
         cop30_args+=(--height-deterrace)

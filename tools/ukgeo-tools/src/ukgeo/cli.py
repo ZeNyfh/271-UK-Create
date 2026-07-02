@@ -241,7 +241,10 @@ def add_cop30_height_tiles(
     height_deterrace: bool = typer.Option(True, "--height-deterrace/--no-height-deterrace"),
     target: str = typer.Option("ireland-iom", "--target", help="ireland-iom, ireland-only, iom-only, or all-cop30"),
     protect_mainland_gb: bool = typer.Option(True, "--protect-mainland-gb/--no-protect-mainland-gb"),
+    minecraft_y_offset: float = typer.Option(-2.0, "--minecraft-y-offset", help="Minecraft Y blocks to add to COP30 terrain before writing height tiles."),
     debug_geotiff: Path | None = typer.Option(None, "--debug-geotiff"),
+    debug_mask_geotiff: Path | None = typer.Option(None, "--debug-mask-geotiff"),
+    debug_written_geotiff: Path | None = typer.Option(None, "--debug-written-geotiff"),
     allow_empty: bool = typer.Option(False, "--allow-empty"),
 ) -> None:
     add_cop30_height_tiles_impl(
@@ -253,7 +256,10 @@ def add_cop30_height_tiles(
         deterrace=height_deterrace,
         target=target,
         protect_mainland_gb=protect_mainland_gb,
+        minecraft_y_offset=minecraft_y_offset,
         debug_geotiff=debug_geotiff,
+        debug_mask_geotiff=debug_mask_geotiff,
+        debug_written_geotiff=debug_written_geotiff,
         allow_empty=allow_empty,
     )
 
@@ -309,6 +315,7 @@ def mask_height_to_bgs_land(
     layer: list[str] | None = typer.Option(None, "--layer", help="BGS polygon layer to use as land. Repeat for multiple layers."),
     buffer_metres: float = typer.Option(250.0, "--buffer-metres"),
     max_height_metres: float = typer.Option(20.0, "--max-height-metres"),
+    preserve_height_overlays: bool = typer.Option(False, "--preserve-height-overlays/--no-preserve-height-overlays"),
     debug_geotiff: Path | None = typer.Option(None, "--debug-geotiff"),
 ) -> None:
     mask_height_to_bgs_land_impl(
@@ -318,6 +325,7 @@ def mask_height_to_bgs_land(
         layers=layer,
         buffer_metres=buffer_metres,
         max_height_metres=max_height_metres,
+        preserve_height_overlays=preserve_height_overlays,
         debug_geotiff=debug_geotiff,
     )
 

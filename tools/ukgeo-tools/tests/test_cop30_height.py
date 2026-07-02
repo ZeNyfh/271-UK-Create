@@ -8,6 +8,7 @@ from typer.testing import CliRunner
 
 from ukgeo.cli import app
 from ukgeo.cop30_height import add_cop30_height_tiles, mainland_gb_protection_mask_lonlat, target_mask_lonlat
+from ukgeo.landmask import _height_overlay_preserve_tile
 from ukgeo.manifest import default_manifest, read_manifest, write_manifest
 from ukgeo.tiles import read_r16_tile, write_r16_tile
 
@@ -15,6 +16,12 @@ from ukgeo.tiles import read_r16_tile, write_r16_tile
 def test_ireland_iom_target_mask_known_points():
     included = {
         "Belfast": (-5.9301, 54.5973),
+        "Larne": (-5.8140, 54.8506),
+        "Ballymena": (-6.2767, 54.8653),
+        "Antrim": (-6.2140, 54.7195),
+        "Newry": (-6.3374, 54.1751),
+        "Armagh": (-6.6546, 54.3503),
+        "Dundalk": (-6.4058, 54.0037),
         "Dublin": (-6.2603, 53.3498),
         "Galway": (-9.0568, 53.2707),
         "Cork": (-8.4756, 51.8985),
@@ -29,6 +36,7 @@ def test_ireland_iom_target_mask_known_points():
         "Edinburgh": (-3.1883, 55.9533),
         "Oban": (-5.4718, 56.4154),
         "Anglesey": (-4.3634, 53.2653),
+        "London": (-0.1276, 51.5072),
     }
     for name, (lon, lat) in included.items():
         assert bool(target_mask_lonlat(np.array([[lon]]), np.array([[lat]]), "ireland-iom")[0, 0]), name
@@ -70,6 +78,7 @@ def test_cop30_overlay_writes_target_cells_preserves_nodata_and_metadata(tmp_pat
         deterrace=False,
         target="ireland-iom",
         protect_mainland_gb=True,
+        minecraft_y_offset=0,
     )
 
     tile = read_r16_tile(root / "height" / "000_000.r16")
@@ -80,6 +89,7 @@ def test_cop30_overlay_writes_target_cells_preserves_nodata_and_metadata(tmp_pat
     assert manifest["height_processing"]["source"] == "OS Terrain 50"
     assert manifest["height_overlays"][-1]["source"] == "Copernicus DEM COP30 GeoTIFF"
     assert manifest["height_overlays"][-1]["target"] == "ireland-iom"
+    assert manifest["height_overlays"][-1]["minecraft_y_offset"] == 0
 
 
 def test_cop30_target_mask_prevents_non_target_write(tmp_path):
@@ -95,6 +105,7 @@ def test_cop30_target_mask_prevents_non_target_write(tmp_path):
         deterrace=False,
         target="ireland-iom",
         protect_mainland_gb=False,
+        minecraft_y_offset=0,
         allow_empty=True,
     )
 
@@ -114,10 +125,49 @@ def test_cop30_mainland_protection_prevents_gb_overwrite(tmp_path):
         deterrace=False,
         target="all-cop30",
         protect_mainland_gb=True,
+        minecraft_y_offset=0,
         allow_empty=True,
     )
 
     assert np.all(read_r16_tile(root / "height" / "000_000.r16") == 100)
+
+
+def test_cop30_minecraft_y_offset_converts_to_decimetres(tmp_path):
+    root, manifest_path, bounds = _dataset(tmp_path, lon=-5.9301, lat=54.5973)
+    manifest = read_manifest(manifest_path)
+    manifest["minecraft_height"] = {"height_scale": 0.5}
+    write_manifest(manifest_path, manifest)
+    archive = _cop30_archive(tmp_path, bounds, value=50.0)
+
+    add_cop30_height_tiles(
+        cop30_archive=archive,
+        manifest_path=manifest_path,
+        out=root,
+        resampling="nearest",
+        smoothing="none",
+        deterrace=False,
+        target="ireland-iom",
+        protect_mainland_gb=True,
+        minecraft_y_offset=-2,
+    )
+
+    tile = read_r16_tile(root / "height" / "000_000.r16")
+    assert np.count_nonzero(tile == 460) > 200_000
+    overlay = read_manifest(manifest_path)["height_overlays"][-1]
+    assert overlay["minecraft_y_offset"] == -2
+    assert overlay["height_offset_decimetres"] == -40
+
+
+def test_landmask_preserve_height_overlays_marks_cop30_target_cells(tmp_path):
+    root, manifest_path, _bounds = _dataset(tmp_path, lon=-5.9301, lat=54.5973)
+    manifest = read_manifest(manifest_path)
+    manifest["height_overlays"] = [{"source": "Copernicus DEM COP30 GeoTIFF", "target": "ireland-iom"}]
+    write_manifest(manifest_path, manifest)
+
+    preserve = _height_overlay_preserve_tile(manifest, 0, 0, ["ireland-iom"])
+
+    assert preserve.shape == (512, 512)
+    assert preserve[256, 256]
 
 
 def test_add_cop30_cli_smoke(tmp_path):
@@ -141,6 +191,8 @@ def test_add_cop30_cli_smoke(tmp_path):
             "--no-height-deterrace",
             "--target",
             "iom-only",
+            "--minecraft-y-offset",
+            "0",
             "--protect-mainland-gb",
         ],
     )
