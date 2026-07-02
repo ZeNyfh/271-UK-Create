@@ -7,7 +7,7 @@ from rasterio.transform import from_bounds
 from typer.testing import CliRunner
 
 from ukgeo.cli import app
-from ukgeo.cop30_height import add_cop30_height_tiles, mainland_gb_protection_mask_lonlat, target_mask_lonlat
+from ukgeo.cop30_height import add_cop30_height_tiles, cop30_land_mask_lonlat, mainland_gb_protection_mask_lonlat, target_mask_lonlat
 from ukgeo.landmask import _height_overlay_preserve_tile
 from ukgeo.manifest import default_manifest, read_manifest, write_manifest
 from ukgeo.tiles import read_r16_tile, write_r16_tile
@@ -19,6 +19,9 @@ def test_ireland_iom_target_mask_known_points():
         "Larne": (-5.8140, 54.8506),
         "Ballymena": (-6.2767, 54.8653),
         "Antrim": (-6.2140, 54.7195),
+        "Carrickfergus": (-5.8101, 54.7158),
+        "Bangor NI": (-5.6680, 54.6608),
+        "Newtownards": (-5.6950, 54.5924),
         "Newry": (-6.3374, 54.1751),
         "Armagh": (-6.6546, 54.3503),
         "Dundalk": (-6.4058, 54.0037),
@@ -65,6 +68,38 @@ def test_mainland_gb_protection_known_points():
         assert not bool(mainland_gb_protection_mask_lonlat(np.array([[lon]]), np.array([[lat]]) )[0, 0]), name
 
 
+def test_cop30_land_mask_known_points():
+    included = {
+        "Belfast": (-5.9301, 54.5973),
+        "Larne": (-5.8140, 54.8506),
+        "Ballymena": (-6.2767, 54.8653),
+        "Antrim": (-6.2140, 54.7195),
+        "Bangor NI": (-5.6680, 54.6608),
+        "Derry": (-7.3092, 54.9966),
+        "Newtownards": (-5.6950, 54.5924),
+        "Newry": (-6.3374, 54.1751),
+        "Armagh": (-6.6546, 54.3503),
+        "Dundalk": (-6.4058, 54.0037),
+        "Dublin": (-6.2603, 53.3498),
+        "Cork": (-8.4756, 51.8985),
+        "Galway": (-9.0568, 53.2707),
+        "Douglas": (-4.4821, 54.1523),
+    }
+    excluded = {
+        "Irish Sea east of NI": (-5.54, 54.65),
+        "Sea between Ireland and Isle of Man": (-5.20, 54.20),
+        "Sea between Isle of Man and England": (-3.80, 54.10),
+        "Liverpool": (-2.9916, 53.4084),
+        "Anglesey": (-4.3634, 53.2653),
+        "Glasgow": (-4.2518, 55.8642),
+        "Edinburgh": (-3.1883, 55.9533),
+    }
+    for name, (lon, lat) in included.items():
+        assert bool(cop30_land_mask_lonlat(np.array([[lon]]), np.array([[lat]]), "ireland-iom")[0, 0]), name
+    for name, (lon, lat) in excluded.items():
+        assert not bool(cop30_land_mask_lonlat(np.array([[lon]]), np.array([[lat]]), "ireland-iom")[0, 0]), name
+
+
 def test_cop30_overlay_writes_target_cells_preserves_nodata_and_metadata(tmp_path):
     root, manifest_path, bounds = _dataset(tmp_path, lon=-5.9301, lat=54.5973)
     archive = _cop30_archive(tmp_path, bounds, value=12.3, nodata_center=True)
@@ -78,7 +113,6 @@ def test_cop30_overlay_writes_target_cells_preserves_nodata_and_metadata(tmp_pat
         deterrace=False,
         target="ireland-iom",
         protect_mainland_gb=True,
-        minecraft_y_offset=0,
     )
 
     tile = read_r16_tile(root / "height" / "000_000.r16")
@@ -90,6 +124,28 @@ def test_cop30_overlay_writes_target_cells_preserves_nodata_and_metadata(tmp_pat
     assert manifest["height_overlays"][-1]["source"] == "Copernicus DEM COP30 GeoTIFF"
     assert manifest["height_overlays"][-1]["target"] == "ireland-iom"
     assert manifest["height_overlays"][-1]["minecraft_y_offset"] == 0
+    assert manifest["height_overlays"][-1]["height_offset_decimetres"] == 0
+
+
+def test_cop30_ocean_inside_target_is_not_written(tmp_path):
+    root, manifest_path, bounds = _dataset(tmp_path, lon=-5.54, lat=54.65)
+    archive = _cop30_archive(tmp_path, bounds, value=0.0)
+
+    add_cop30_height_tiles(
+        cop30_archive=archive,
+        manifest_path=manifest_path,
+        out=root,
+        resampling="nearest",
+        smoothing="none",
+        deterrace=False,
+        target="ireland-iom",
+        protect_mainland_gb=True,
+        allow_empty=True,
+    )
+
+    tile = read_r16_tile(root / "height" / "000_000.r16")
+    assert tile[256, 256] == 100
+    assert read_manifest(manifest_path)["height_overlays"][-1]["minecraft_y_offset"] == 0
 
 
 def test_cop30_target_mask_prevents_non_target_write(tmp_path):
@@ -158,7 +214,7 @@ def test_cop30_minecraft_y_offset_converts_to_decimetres(tmp_path):
     assert overlay["height_offset_decimetres"] == -40
 
 
-def test_landmask_preserve_height_overlays_marks_cop30_target_cells(tmp_path):
+def test_landmask_preserve_height_overlays_marks_only_cop30_land_cells(tmp_path):
     root, manifest_path, _bounds = _dataset(tmp_path, lon=-5.9301, lat=54.5973)
     manifest = read_manifest(manifest_path)
     manifest["height_overlays"] = [{"source": "Copernicus DEM COP30 GeoTIFF", "target": "ireland-iom"}]
@@ -168,6 +224,13 @@ def test_landmask_preserve_height_overlays_marks_cop30_target_cells(tmp_path):
 
     assert preserve.shape == (512, 512)
     assert preserve[256, 256]
+
+    _root, sea_manifest_path, _sea_bounds = _dataset(tmp_path, lon=-5.54, lat=54.65)
+    sea_manifest = read_manifest(sea_manifest_path)
+    sea_manifest["height_overlays"] = [{"source": "Copernicus DEM COP30 GeoTIFF", "target": "ireland-iom"}]
+    write_manifest(sea_manifest_path, sea_manifest)
+    sea_preserve = _height_overlay_preserve_tile(sea_manifest, 0, 0, ["ireland-iom"])
+    assert not sea_preserve[256, 256]
 
 
 def test_add_cop30_cli_smoke(tmp_path):
@@ -191,8 +254,6 @@ def test_add_cop30_cli_smoke(tmp_path):
             "--no-height-deterrace",
             "--target",
             "iom-only",
-            "--minecraft-y-offset",
-            "0",
             "--protect-mainland-gb",
         ],
     )
@@ -202,7 +263,8 @@ def test_add_cop30_cli_smoke(tmp_path):
 
 
 def _dataset(tmp_path, *, lon: float, lat: float):
-    root = tmp_path / "world"
+    stem = f"world_{lon:.4f}_{lat:.4f}".replace("-", "m").replace(".", "_")
+    root = tmp_path / stem
     height = root / "height"
     height.mkdir(parents=True)
     to_bng = Transformer.from_crs("EPSG:4326", "EPSG:27700", always_xy=True)

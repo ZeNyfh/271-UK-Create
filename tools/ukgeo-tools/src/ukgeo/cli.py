@@ -241,9 +241,11 @@ def add_cop30_height_tiles(
     height_deterrace: bool = typer.Option(True, "--height-deterrace/--no-height-deterrace"),
     target: str = typer.Option("ireland-iom", "--target", help="ireland-iom, ireland-only, iom-only, or all-cop30"),
     protect_mainland_gb: bool = typer.Option(True, "--protect-mainland-gb/--no-protect-mainland-gb"),
-    minecraft_y_offset: float = typer.Option(-2.0, "--minecraft-y-offset", help="Minecraft Y blocks to add to COP30 terrain before writing height tiles."),
+    minecraft_y_offset: float = typer.Option(0.0, "--minecraft-y-offset", help="Optional Minecraft Y blocks to add to COP30 terrain before writing height tiles."),
     debug_geotiff: Path | None = typer.Option(None, "--debug-geotiff"),
     debug_mask_geotiff: Path | None = typer.Option(None, "--debug-mask-geotiff"),
+    debug_target_mask_geotiff: Path | None = typer.Option(None, "--debug-target-mask-geotiff"),
+    debug_land_mask_geotiff: Path | None = typer.Option(None, "--debug-land-mask-geotiff"),
     debug_written_geotiff: Path | None = typer.Option(None, "--debug-written-geotiff"),
     allow_empty: bool = typer.Option(False, "--allow-empty"),
 ) -> None:
@@ -259,6 +261,8 @@ def add_cop30_height_tiles(
         minecraft_y_offset=minecraft_y_offset,
         debug_geotiff=debug_geotiff,
         debug_mask_geotiff=debug_mask_geotiff,
+        debug_target_mask_geotiff=debug_target_mask_geotiff,
+        debug_land_mask_geotiff=debug_land_mask_geotiff,
         debug_written_geotiff=debug_written_geotiff,
         allow_empty=allow_empty,
     )

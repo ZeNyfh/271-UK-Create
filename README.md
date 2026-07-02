@@ -51,7 +51,7 @@ For the full BGS 625k GeoPackage, use:
 .venv/bin/ukgeo add-cop30-height-tiles --cop30 ../../data/rasters_COP30.tar.gz \
   --manifest ./uk_world_data/manifest.json --out ./uk_world_data \
   --resampling bilinear --smoothing light --height-deterrace \
-  --target ireland-iom --minecraft-y-offset -2 --protect-mainland-gb
+  --target ireland-iom --protect-mainland-gb
 
 .venv/bin/ukgeo make-river-tiles --rivers ../../data/oprvrs_gpkg_gb.zip \
   --manifest ./uk_world_data/manifest.json --out ./uk_world_data --width-metres 220

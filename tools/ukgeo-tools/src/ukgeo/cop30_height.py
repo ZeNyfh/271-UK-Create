@@ -41,7 +41,9 @@ class Cop30Raster:
 @dataclass
 class OverlayStats:
     source_rasters: int = 0
-    target_cells_covered: int = 0
+    target_cells_considered: int = 0
+    land_mask_cells: int = 0
+    ocean_cells_skipped: int = 0
     cells_written: int = 0
     cells_skipped_nodata: int = 0
     cells_skipped_outside_target: int = 0
@@ -51,6 +53,10 @@ class OverlayStats:
     target_min_y: float | None = None
     target_max_x: float | None = None
     target_max_y: float | None = None
+    land_min_x: float | None = None
+    land_min_y: float | None = None
+    land_max_x: float | None = None
+    land_max_y: float | None = None
     written_min_x: float | None = None
     written_min_y: float | None = None
     written_max_x: float | None = None
@@ -67,9 +73,11 @@ def add_cop30_height_tiles(
     deterrace: bool = True,
     target: str = "ireland-iom",
     protect_mainland_gb: bool = True,
-    minecraft_y_offset: float = -2.0,
+    minecraft_y_offset: float = 0.0,
     debug_geotiff: Path | None = None,
     debug_mask_geotiff: Path | None = None,
+    debug_target_mask_geotiff: Path | None = None,
+    debug_land_mask_geotiff: Path | None = None,
     debug_written_geotiff: Path | None = None,
     allow_empty: bool = False,
 ) -> None:
@@ -104,8 +112,10 @@ def add_cop30_height_tiles(
         source_crs_summary = _source_crs_summary(rasters)
         _warn_if_source_extends_outside_manifest(rasters, geo, manifest_crs)
         stats = OverlayStats(source_rasters=len(rasters))
+        land_debug_path = debug_land_mask_geotiff or debug_mask_geotiff
         debug_written = _DebugWriter(written_debug_path, manifest, dtype="int16", nodata=HEIGHT_NODATA) if written_debug_path else None
-        debug_mask = _DebugWriter(debug_mask_geotiff, manifest, dtype="uint8", nodata=0) if debug_mask_geotiff else None
+        debug_target_mask = _DebugWriter(debug_target_mask_geotiff, manifest, dtype="uint8", nodata=0) if debug_target_mask_geotiff else None
+        debug_land_mask = _DebugWriter(land_debug_path, manifest, dtype="uint8", nodata=0) if land_debug_path else None
         try:
             for tile_z in tqdm(range(tiles_z), desc="COP30 height tile rows"):
                 for tile_x in range(tiles_x):
@@ -124,29 +134,45 @@ def add_cop30_height_tiles(
                     if not source_valid.any():
                         if debug_written is not None:
                             debug_written.write_tile(tile_x, tile_z, np.full((tile_size, tile_size), HEIGHT_NODATA, dtype="<i2"))
-                        if debug_mask is not None:
-                            debug_mask.write_tile(tile_x, tile_z, np.zeros((tile_size, tile_size), dtype=np.uint8))
+                        if debug_target_mask is not None:
+                            debug_target_mask.write_tile(tile_x, tile_z, np.zeros((tile_size, tile_size), dtype=np.uint8))
+                        if debug_land_mask is not None:
+                            debug_land_mask.write_tile(tile_x, tile_z, np.zeros((tile_size, tile_size), dtype=np.uint8))
                         continue
 
                     xs, ys = _tile_cell_centres(tile_x, tile_z, tile_size, x_scale, z_scale, geo, border=1)
                     lon, lat = Transformer.from_crs(manifest_crs, "EPSG:4326", always_xy=True).transform(xs[None, :], ys[:, None])
-                    target_mask = target_mask_lonlat(lon, lat, target)
+                    target_mask = is_in_cop30_target(lon, lat, target)
+                    land_mask = is_in_cop30_land_mask(lon, lat, target)
                     protected = mainland_gb_protection_mask_lonlat(lon, lat) if protect_mainland_gb else np.zeros_like(target_mask, dtype=bool)
-                    usable = source_valid & target_mask & ~protected
+                    # The target mask is intentionally a broad envelope where
+                    # COP30 may be considered. The land mask is the tighter
+                    # coastline approximation that decides which cells may be
+                    # written. This prevents 0m COP30 sea pixels from becoming
+                    # valid flat land around Ireland/IOM.
+                    usable = source_valid & target_mask & land_mask & ~protected
                     center_usable = usable[1:-1, 1:-1]
                     center_source_valid = source_valid[1:-1, 1:-1]
+                    center_target = target_mask[1:-1, 1:-1]
+                    center_land = land_mask[1:-1, 1:-1]
+                    center_protected = protected[1:-1, 1:-1]
                     center_xs = xs[1:-1]
                     center_ys = ys[1:-1]
-                    stats.target_cells_covered += int(center_usable.sum())
-                    _update_bounds(stats, "target", center_usable, center_xs, center_ys)
-                    stats.cells_skipped_nodata += int((~center_source_valid & target_mask[1:-1, 1:-1] & ~protected[1:-1, 1:-1]).sum())
-                    stats.cells_skipped_outside_target += int((center_source_valid & ~target_mask[1:-1, 1:-1]).sum())
-                    stats.cells_skipped_mainland_gb += int((center_source_valid & target_mask[1:-1, 1:-1] & protected[1:-1, 1:-1]).sum())
+                    stats.target_cells_considered += int((center_source_valid & center_target & ~center_protected).sum())
+                    stats.land_mask_cells += int((center_source_valid & center_target & center_land & ~center_protected).sum())
+                    stats.ocean_cells_skipped += int((center_source_valid & center_target & ~center_land & ~center_protected).sum())
+                    _update_bounds(stats, "target", center_source_valid & center_target & ~center_protected, center_xs, center_ys)
+                    _update_bounds(stats, "land", center_source_valid & center_target & center_land & ~center_protected, center_xs, center_ys)
+                    stats.cells_skipped_nodata += int((~center_source_valid & center_target & center_land & ~center_protected).sum())
+                    stats.cells_skipped_outside_target += int((center_source_valid & ~center_target).sum())
+                    stats.cells_skipped_mainland_gb += int((center_source_valid & center_target & center_protected).sum())
                     if not center_usable.any():
                         if debug_written is not None:
                             debug_written.write_tile(tile_x, tile_z, np.full((tile_size, tile_size), HEIGHT_NODATA, dtype="<i2"))
-                        if debug_mask is not None:
-                            debug_mask.write_tile(tile_x, tile_z, center_usable.astype(np.uint8))
+                        if debug_target_mask is not None:
+                            debug_target_mask.write_tile(tile_x, tile_z, center_target.astype(np.uint8))
+                        if debug_land_mask is not None:
+                            debug_land_mask.write_tile(tile_x, tile_z, (center_target & center_land & ~center_protected).astype(np.uint8))
                         continue
 
                     overlay_values = np.where(np.isfinite(padded), padded, 0.0)
@@ -165,8 +191,10 @@ def add_cop30_height_tiles(
                     if not valid.any():
                         if debug_written is not None:
                             debug_written.write_tile(tile_x, tile_z, np.full((tile_size, tile_size), HEIGHT_NODATA, dtype="<i2"))
-                        if debug_mask is not None:
-                            debug_mask.write_tile(tile_x, tile_z, center_usable.astype(np.uint8))
+                        if debug_target_mask is not None:
+                            debug_target_mask.write_tile(tile_x, tile_z, center_target.astype(np.uint8))
+                        if debug_land_mask is not None:
+                            debug_land_mask.write_tile(tile_x, tile_z, (center_target & center_land & ~center_protected).astype(np.uint8))
                         continue
 
                     path = height_root / f"{tile_x:03d}_{tile_z:03d}{manifest['height'].get('extension', r16_extension())}"
@@ -182,13 +210,17 @@ def add_cop30_height_tiles(
                         debug_tile = np.full((tile_size, tile_size), HEIGHT_NODATA, dtype="<i2")
                         debug_tile[write_mask] = overlay[write_mask]
                         debug_written.write_tile(tile_x, tile_z, debug_tile)
-                    if debug_mask is not None:
-                        debug_mask.write_tile(tile_x, tile_z, center_usable.astype(np.uint8))
+                    if debug_target_mask is not None:
+                        debug_target_mask.write_tile(tile_x, tile_z, center_target.astype(np.uint8))
+                    if debug_land_mask is not None:
+                        debug_land_mask.write_tile(tile_x, tile_z, (center_target & center_land & ~center_protected).astype(np.uint8))
         finally:
             if debug_written is not None:
                 debug_written.close()
-            if debug_mask is not None:
-                debug_mask.close()
+            if debug_target_mask is not None:
+                debug_target_mask.close()
+            if debug_land_mask is not None:
+                debug_land_mask.close()
 
     if stats.cells_written == 0 and not allow_empty:
         raise ValueError(
@@ -214,19 +246,27 @@ def add_cop30_height_tiles(
     write_manifest(manifest_path, manifest)
 
     console.print(f"COP30 source rasters: {stats.source_rasters}")
-    console.print(f"Target cells covered: {stats.target_cells_covered:,}")
+    console.print(f"COP30 target cells considered: {stats.target_cells_considered:,}")
+    console.print(f"COP30 land-mask cells: {stats.land_mask_cells:,}")
+    console.print(f"COP30 ocean/sea cells skipped: {stats.ocean_cells_skipped:,}")
     console.print(f"Cells written: {stats.cells_written:,}")
-    console.print(f"Cells skipped nodata: {stats.cells_skipped_nodata:,}")
+    console.print(f"COP30 cells skipped due nodata: {stats.cells_skipped_nodata:,}")
     console.print(f"Cells skipped outside target mask: {stats.cells_skipped_outside_target:,}")
-    console.print(f"Cells skipped due to mainland GB protection: {stats.cells_skipped_mainland_gb:,}")
+    console.print(f"COP30 cells skipped due mainland GB protection: {stats.cells_skipped_mainland_gb:,}")
     console.print(f"Tiles touched: {stats.tiles_touched}")
     console.print(f"Height offset: {minecraft_y_offset:g} Minecraft blocks / {height_offset_decimetres:+d} decimetres (height scale {height_scale:g})")
     console.print(f"Target bounds in BNG: {_format_bounds(stats, 'target')}")
+    console.print(f"Land-mask bounds in BNG: {_format_bounds(stats, 'land')}")
     console.print(f"Actual written bounds in BNG: {_format_bounds(stats, 'written')}")
     console.print(f"Source CRS summary: {source_crs_summary}")
 
 
-def target_mask_lonlat(lon: np.ndarray, lat: np.ndarray, target: str = "ireland-iom") -> np.ndarray:
+def is_in_cop30_target(lon: np.ndarray, lat: np.ndarray, target: str = "ireland-iom") -> np.ndarray:
+    """Broad envelope where COP30 may be considered for a target mode.
+
+    This is deliberately more generous than the land-write mask. It should not
+    be used as a coastline or as proof that a cell is land.
+    """
     target = _normalise_choice(target, TARGET_MODES, "target")
     if target == "all-cop30":
         return np.ones(np.broadcast_shapes(np.shape(lon), np.shape(lat)), dtype=bool)
@@ -236,6 +276,32 @@ def target_mask_lonlat(lon: np.ndarray, lat: np.ndarray, target: str = "ireland-
     if target in {"ireland-iom", "iom-only"}:
         polygons.append(_iom_polygon())
     return contains_xy(MultiPolygon(polygons), lon, lat)
+
+
+def is_in_cop30_land_mask(lon: np.ndarray, lat: np.ndarray, target: str = "ireland-iom") -> np.ndarray:
+    """Approximate Ireland/IOM land where COP30 heights are allowed to write.
+
+    The target envelope catches the right source raster area; this tighter mask
+    prevents sea pixels around Ireland and the Isle of Man from becoming valid
+    flat terrain in height tiles.
+    """
+    target = _normalise_choice(target, TARGET_MODES, "target")
+    if target == "all-cop30":
+        return np.ones(np.broadcast_shapes(np.shape(lon), np.shape(lat)), dtype=bool)
+    polygons = []
+    if target in {"ireland-iom", "ireland-only"}:
+        polygons.append(_ireland_land_polygon())
+    if target in {"ireland-iom", "iom-only"}:
+        polygons.append(_iom_land_polygon())
+    return contains_xy(MultiPolygon(polygons), lon, lat)
+
+
+def target_mask_lonlat(lon: np.ndarray, lat: np.ndarray, target: str = "ireland-iom") -> np.ndarray:
+    return is_in_cop30_target(lon, lat, target)
+
+
+def cop30_land_mask_lonlat(lon: np.ndarray, lat: np.ndarray, target: str = "ireland-iom") -> np.ndarray:
+    return is_in_cop30_land_mask(lon, lat, target)
 
 
 def mainland_gb_protection_mask_lonlat(lon: np.ndarray, lat: np.ndarray) -> np.ndarray:
@@ -275,6 +341,43 @@ def _ireland_polygon() -> Polygon:
     )
 
 
+def _ireland_land_polygon() -> Polygon:
+    # Rough clockwise coastline approximation for the island of Ireland. It is
+    # intentionally tighter than the target envelope so COP30 0m sea pixels in
+    # the Irish Sea and Atlantic are skipped instead of written as flat land.
+    return Polygon(
+        [
+            (-10.55, 51.42),
+            (-10.05, 51.54),
+            (-9.55, 51.42),
+            (-8.80, 51.50),
+            (-8.20, 51.44),
+            (-7.55, 51.72),
+            (-7.05, 52.05),
+            (-6.35, 52.16),
+            (-6.08, 52.62),
+            (-6.00, 53.10),
+            (-6.02, 53.55),
+            (-6.22, 53.92),
+            (-6.05, 54.18),
+            (-5.78, 54.52),
+            (-5.62, 54.60),
+            (-5.58, 54.72),
+            (-5.72, 54.96),
+            (-6.15, 55.20),
+            (-6.85, 55.35),
+            (-7.65, 55.38),
+            (-8.35, 55.15),
+            (-9.15, 54.86),
+            (-9.85, 54.25),
+            (-10.22, 53.55),
+            (-10.05, 52.92),
+            (-10.42, 52.18),
+            (-10.55, 51.42),
+        ]
+    )
+
+
 def _iom_polygon() -> Polygon:
     return Polygon(
         [
@@ -286,6 +389,22 @@ def _iom_polygon() -> Polygon:
             (-4.55, 54.48),
             (-4.82, 54.34),
             (-4.92, 54.02),
+        ]
+    )
+
+
+def _iom_land_polygon() -> Polygon:
+    return Polygon(
+        [
+            (-4.86, 54.03),
+            (-4.70, 53.98),
+            (-4.45, 54.02),
+            (-4.31, 54.14),
+            (-4.31, 54.31),
+            (-4.50, 54.42),
+            (-4.72, 54.33),
+            (-4.84, 54.14),
+            (-4.86, 54.03),
         ]
     )
 

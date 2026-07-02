@@ -13,7 +13,7 @@ from shapely.geometry.base import BaseGeometry
 from tqdm import tqdm
 
 from .bgs import resolve_gpkg
-from .cop30_height import target_mask_lonlat
+from .cop30_height import cop30_land_mask_lonlat
 from .manifest import read_manifest, write_manifest
 from .tiles import HEIGHT_NODATA, read_r16_tile, write_r16_tile, r16_extension
 
@@ -148,7 +148,7 @@ def _height_overlay_preserve_tile(manifest: dict, tile_x: int, tile_z: int, targ
     lon, lat = Transformer.from_crs(geo.get("crs", "EPSG:27700"), "EPSG:4326", always_xy=True).transform(xs[None, :], ys[:, None])
     preserve = np.zeros((tile_size, tile_size), dtype=bool)
     for target in targets:
-        preserve |= target_mask_lonlat(lon, lat, target)
+        preserve |= cop30_land_mask_lonlat(lon, lat, target)
     return preserve
 
 
