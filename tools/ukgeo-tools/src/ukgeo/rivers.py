@@ -260,6 +260,7 @@ def _strahler_widths(lines: list[_InputLine], manifest: dict, root: Path) -> _St
     if not lines:
         return _StrahlerResult([])
     sampler = _HeightSampler(manifest, root)
+    source_max_order = max((item.source_order or 0) for item in lines)
     node_ids: dict[tuple[int, int], int] = {}
     node_points: list[tuple[float, float]] = []
 
@@ -332,9 +333,11 @@ def _strahler_widths(lines: list[_InputLine], manifest: dict, root: Path) -> _St
         incoming_orders[dst].append(node_order[src])
         node_order[dst] = max(node_order[dst], combine(incoming_orders[dst]))
 
+    computed_max_order = max((node_order[src] for src, _, _, source_order in oriented if source_order is None), default=0)
     edges = []
     for src, dst, line, source_order in oriented:
         computed_order = max(1, node_order[src])
+        computed_order = _normalize_computed_order_to_source_scale(computed_order, computed_max_order, source_max_order)
         order = source_order if source_order is not None else computed_order
         base_half_width = _half_width_for_order(order)
         half_width = _scaled_half_width_for_order(order, base_half_width)
@@ -362,6 +365,15 @@ def _thin_top_order_half_widths(edges: list[_Edge]) -> None:
         if factor is None:
             continue
         edge.half_width = max(1, int(round(edge.half_width * factor)))
+
+
+def _normalize_computed_order_to_source_scale(order: int, computed_max_order: int, source_max_order: int) -> int:
+    if order <= 0:
+        return 1
+    if source_max_order <= 0 or computed_max_order <= 0 or computed_max_order <= source_max_order:
+        return order
+    scaled = int(round(order * source_max_order / computed_max_order))
+    return max(1, min(source_max_order, scaled))
 
 
 def _scaled_half_width_for_order(order: int, base_half_width: int) -> int:
