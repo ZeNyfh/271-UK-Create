@@ -125,7 +125,7 @@ Generate GB river mask tiles from OS Open Rivers:
 
 ```bash
 .venv/bin/ukgeo make-river-tiles \
-  --rivers ../../data/oprvrs_gpkg_gb.zip \
+  --rivers ../../data/oprvrs_gpkg_gb_ie.zip \
   --manifest ./uk_world_data/manifest.json \
   --out ./uk_world_data \
   --width-metres 220

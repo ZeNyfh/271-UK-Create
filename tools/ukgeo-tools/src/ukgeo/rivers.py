@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from collections import defaultdict, deque
 import math
@@ -21,6 +22,7 @@ console = Console()
 
 MAX_RIVER_HALFWIDTH = 40
 MIN_RIVER_HALFWIDTH_BY_ORDER = {1: 2, 2: 3, 3: 5}
+SOURCE_ORDER_FIELDS = ("ORDER_", "ORDER", "US_ORDER", "STRAHLER", "STRAHLER_ORDER", "STREAM_ORDER")
 
 
 def make_river_tiles(
@@ -65,7 +67,7 @@ def make_river_tiles(
         else:
             if frame.crs and str(frame.crs).upper() != "EPSG:27700":
                 frame = frame.to_crs("EPSG:27700")
-            lines = _extract_lines(frame.geometry)
+            lines = _extract_lines(frame)
             strahler = _strahler_widths(lines, manifest, manifest_path.parent)
             order_shapes = []
             variable_shapes = []
@@ -117,7 +119,7 @@ def make_river_tiles(
             "order_path": "water/river_order",
             "half_width_path": "water/river_half_width",
             "max_half_width": int(half_width_arr.max()) if half_width_arr.size else 0,
-            "note": "255 marks cells inside variable-width river/watercourse vectors. Widths are derived from approximate Strahler stream order.",
+            "note": "255 marks cells inside variable-width river/watercourse vectors. Widths are derived from source river order where present, otherwise approximate Strahler stream order.",
         }
         write_manifest(manifest_path, manifest)
         if debug_geotiff:
@@ -158,18 +160,51 @@ def _write_debug(path: Path, arr: np.ndarray, transform) -> None:
         dst.write(arr, 1)
 
 
-def _extract_lines(geometries) -> list[LineString]:
-    lines: list[LineString] = []
-    for geom in geometries:
+@dataclass(frozen=True)
+class _InputLine:
+    line: LineString
+    source_order: int | None = None
+
+
+def _source_order_column(columns: list[str]) -> str | None:
+    lookup = {column.upper(): column for column in columns}
+    for candidate in SOURCE_ORDER_FIELDS:
+        found = lookup.get(candidate.upper())
+        if found is not None:
+            return found
+    return None
+
+
+def _coerce_source_order(value) -> int | None:
+    if value is None:
+        return None
+    try:
+        if np.isnan(value):
+            return None
+    except TypeError:
+        pass
+    try:
+        order = int(value)
+    except (TypeError, ValueError):
+        return None
+    return order if order > 0 else None
+
+
+def _extract_lines(frame: gpd.GeoDataFrame) -> list[_InputLine]:
+    order_column = _source_order_column(list(frame.columns))
+    order_values = frame[order_column] if order_column is not None else None
+    lines: list[_InputLine] = []
+    for geom, raw_order in zip(frame.geometry, order_values if order_values is not None else [None] * len(frame), strict=False):
+        source_order = _coerce_source_order(raw_order)
         if geom is None or geom.is_empty:
             continue
         if isinstance(geom, LineString):
             if len(geom.coords) >= 2:
-                lines.append(geom)
+                lines.append(_InputLine(geom, source_order))
         elif isinstance(geom, MultiLineString):
             for part in geom.geoms:
                 if len(part.coords) >= 2:
-                    lines.append(part)
+                    lines.append(_InputLine(part, source_order))
     return lines
 
 
@@ -220,7 +255,7 @@ class _StrahlerResult:
         self.edges = edges
 
 
-def _strahler_widths(lines: list[LineString], manifest: dict, root: Path) -> _StrahlerResult:
+def _strahler_widths(lines: list[_InputLine], manifest: dict, root: Path) -> _StrahlerResult:
     if not lines:
         return _StrahlerResult([])
     sampler = _HeightSampler(manifest, root)
@@ -237,21 +272,21 @@ def _strahler_widths(lines: list[LineString], manifest: dict, root: Path) -> _St
         node_points.append((float(point[0]), float(point[1])))
         return found
 
-    raw_edges: list[tuple[int, int, LineString]] = []
-    for line in lines:
-        coords = list(line.coords)
+    raw_edges: list[tuple[int, int, LineString, int | None]] = []
+    for item in lines:
+        coords = list(item.line.coords)
         a = node_id((coords[0][0], coords[0][1]))
         b = node_id((coords[-1][0], coords[-1][1]))
         if a != b:
-            raw_edges.append((a, b, line))
+            raw_edges.append((a, b, item.line, item.source_order))
     if not raw_edges:
         return _StrahlerResult([])
 
     heights = [sampler.sample(e, n) for e, n in node_points]
     downstream: dict[int, list[tuple[int, int]]] = defaultdict(list)
     upstream_count: dict[int, int] = defaultdict(int)
-    oriented: list[tuple[int, int, LineString]] = []
-    for a, b, line in raw_edges:
+    oriented: list[tuple[int, int, LineString, int | None]] = []
+    for a, b, line, source_order in raw_edges:
         ha = heights[a]
         hb = heights[b]
         if ha is not None and hb is not None and ha != hb:
@@ -264,7 +299,7 @@ def _strahler_widths(lines: list[LineString], manifest: dict, root: Path) -> _St
         downstream[src].append((dst, len(oriented)))
         upstream_count[dst] += 1
         upstream_count.setdefault(src, upstream_count.get(src, 0))
-        oriented.append((src, dst, line))
+        oriented.append((src, dst, line, source_order))
 
     node_order = [1] * len(node_points)
     incoming_orders: list[list[int]] = [[] for _ in node_points]
@@ -291,14 +326,15 @@ def _strahler_widths(lines: list[LineString], manifest: dict, root: Path) -> _St
     # Cycles/braids are collapsed deterministically by processing high-to-low elevation and carrying max incoming order.
     unresolved = [i for i in range(len(oriented)) if i not in processed_edges]
     for edge_index in sorted(unresolved, key=lambda i: (-(heights[oriented[i][0]] or -9999.0), oriented[i][0], oriented[i][1])):
-        src, dst, _ = oriented[edge_index]
+        src, dst, _, _ = oriented[edge_index]
         node_order[src] = max(node_order[src], combine(incoming_orders[src]))
         incoming_orders[dst].append(node_order[src])
         node_order[dst] = max(node_order[dst], combine(incoming_orders[dst]))
 
     edges = []
-    for src, dst, line in oriented:
-        order = max(1, node_order[src])
+    for src, dst, line, source_order in oriented:
+        computed_order = max(1, node_order[src])
+        order = source_order if source_order is not None else computed_order
         base_half_width = _half_width_for_order(order)
         half_width = _scaled_half_width_for_order(order, base_half_width)
         e0 = heights[src]
