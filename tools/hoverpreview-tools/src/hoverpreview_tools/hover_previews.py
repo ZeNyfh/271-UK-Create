@@ -150,7 +150,7 @@ def export_hover_previews(
         report("surface")
         done = timed("surface")
         values = _read_u8_preview(root, manifest["surface_geology"]["path"], tiles_x, tiles_z, source_tile_size, scale, missing_ok=False)
-        visual = _fit_image(_categorical_overlay_image(values, manifest["surface_geology"].get("classes", {}), alpha=166, transparent_zero=False), base_size)
+        visual = _fit_image(_categorical_overlay_image(values, manifest["surface_geology"].get("classes", {}), alpha=166, transparent_zero=True), base_size)
         sample = _fit_image(Image.fromarray(values, mode="L"), base_size)
         mips = _save_visual_layer(
             out,

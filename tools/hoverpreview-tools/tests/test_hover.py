@@ -7,6 +7,7 @@ from PIL import Image
 from hoverpreview_tools.hover_previews import (
     PREVIEW_RIVER_MAX_RADIUS,
     PREVIEW_RIVER_MIN_RADIUS,
+    _categorical_overlay_image,
     export_hover_previews,
     hover_preview_steps,
     hover_preview_scale,
@@ -124,6 +125,19 @@ def test_hover_preview_steps_include_biome_regions(tmp_path):
 
     assert "vegetation" in steps
     assert "biome_regions" in steps
+
+
+def test_surface_overlay_keeps_default_zero_class_transparent():
+    values = np.array([[0, 1]], dtype=np.uint8)
+    classes = {
+        "0": {"color": "#5f625d"},
+        "1": {"color": "#c97f3a"},
+    }
+
+    image = _categorical_overlay_image(values, classes, alpha=166, transparent_zero=True)
+
+    assert image.getpixel((0, 0)) == (0, 0, 0, 0)
+    assert image.getpixel((1, 0)) == (201, 127, 58, 166)
 
 
 def test_generate_script_defaults_to_cop30_without_requiring_osni():
