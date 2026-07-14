@@ -73,3 +73,5 @@ tools/ukgeo-tools/uk_world_data_gb/*
 _site/
 *.gz
 /tools/ukgeo-tools/uk_world_data_gb/ores/iron
+/graphify-out
+/.graphify-test-kubejs
