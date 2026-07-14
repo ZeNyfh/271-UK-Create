@@ -356,6 +356,7 @@ def export_hover_previews(
         "visual_format": visual_format,
         "force": force,
         "clean_stale": clean_stale,
+        "cache_buster": str(time.time_ns()),
     }
     if profile:
         index["generation"]["timings_seconds"] = {step: round(seconds, 3) for step, seconds in timings}

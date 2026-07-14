@@ -397,7 +397,7 @@ function chooseMip(layer) {
 }
 
 function layerUrl(layer, mip) {
-  return new URL(mip.file || layer.file, state.baseUrl).href;
+  return assetUrl(mip.file || layer.file);
 }
 
 function layerCacheKey(layer, mip) {
@@ -410,12 +410,18 @@ function layerRegionCacheKey(layer, mip, region) {
 
 function layerRegionUrl(layer, mip, region) {
   if (mip.tiles && region.tileX !== undefined && region.tileY !== undefined) {
-    return new URL(
+    return assetUrl(
       String(mip.tiles.template).replace("{x}", String(region.tileX)).replace("{y}", String(region.tileY)),
-      state.baseUrl
-    ).href;
+    );
   }
   return layerUrl(layer, mip);
+}
+
+function assetUrl(path) {
+  const url = new URL(path, state.baseUrl || location.href);
+  const cacheBuster = String(state.manifest?.generation?.cache_buster || "").trim();
+  if (cacheBuster) url.searchParams.set("v", cacheBuster);
+  return url.href;
 }
 
 function fitView() {
@@ -1708,7 +1714,7 @@ async function loadSample(layer, imageX = null, imageY = null) {
       if (layer.name !== "height" && (!entry || !shouldLoadSample(entry))) return null;
       const blob = crop.tile
         ? await fetchBlob(sampleRegionUrl(layer, crop))
-        : await loadSourceBlob(new URL(sampleFile, state.baseUrl).href);
+        : await loadSourceBlob(assetUrl(sampleFile));
       return decodeSampleBitmap(blob, crop);
     }, null, SAMPLE_LOAD_PRIORITY);
     if (!decoded) return;
@@ -1860,10 +1866,9 @@ function sampleTileCacheKey(layer, tileX, tileY) {
 }
 
 function sampleRegionUrl(layer, crop) {
-  return new URL(
-    String(layer.sample_tiles.template).replace("{x}", String(crop.tileX)).replace("{y}", String(crop.tileY)),
-    state.baseUrl
-  ).href;
+  return assetUrl(
+    String(layer.sample_tiles.template).replace("{x}", String(crop.tileX)).replace("{y}", String(crop.tileY))
+  );
 }
 
 function sampleContains(sample, imageX, imageY) {
