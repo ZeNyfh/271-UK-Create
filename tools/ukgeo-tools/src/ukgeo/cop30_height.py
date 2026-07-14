@@ -28,6 +28,7 @@ console = Console()
 TARGET_MODES = {"ireland-iom", "ireland-only", "iom-only", "all-cop30"}
 DEST_CRS = "EPSG:27700"
 DEFAULT_MINECRAFT_HEIGHT_SCALE = 0.18
+COP30_MIN_LAND_METRES = 0.0
 
 
 @dataclass(frozen=True)
@@ -150,19 +151,26 @@ def add_cop30_height_tiles(
                     # coastline approximation that decides which cells may be
                     # written. This prevents 0m COP30 sea pixels from becoming
                     # valid flat land around Ireland/IOM.
-                    usable = source_valid & target_mask & land_mask & ~protected
+                    # The hand-drawn land masks are only spatial filters. Do
+                    # not let sea-level or below-sea-level COP30 samples become
+                    # valid terrain, otherwise they show up as broad Y=64
+                    # shelves around Ireland/IoM where the target mask is
+                    # intentionally conservative.
+                    source_land = padded > COP30_MIN_LAND_METRES
+                    usable = source_valid & source_land & target_mask & land_mask & ~protected
                     center_usable = usable[1:-1, 1:-1]
                     center_source_valid = source_valid[1:-1, 1:-1]
+                    center_source_land = source_land[1:-1, 1:-1]
                     center_target = target_mask[1:-1, 1:-1]
                     center_land = land_mask[1:-1, 1:-1]
                     center_protected = protected[1:-1, 1:-1]
                     center_xs = xs[1:-1]
                     center_ys = ys[1:-1]
                     stats.target_cells_considered += int((center_source_valid & center_target & ~center_protected).sum())
-                    stats.land_mask_cells += int((center_source_valid & center_target & center_land & ~center_protected).sum())
-                    stats.ocean_cells_skipped += int((center_source_valid & center_target & ~center_land & ~center_protected).sum())
+                    stats.land_mask_cells += int((center_source_valid & center_target & center_land & center_source_land & ~center_protected).sum())
+                    stats.ocean_cells_skipped += int((center_source_valid & center_target & (~center_land | ~center_source_land) & ~center_protected).sum())
                     _update_bounds(stats, "target", center_source_valid & center_target & ~center_protected, center_xs, center_ys)
-                    _update_bounds(stats, "land", center_source_valid & center_target & center_land & ~center_protected, center_xs, center_ys)
+                    _update_bounds(stats, "land", center_source_valid & center_target & center_land & center_source_land & ~center_protected, center_xs, center_ys)
                     stats.cells_skipped_nodata += int((~center_source_valid & center_target & center_land & ~center_protected).sum())
                     stats.cells_skipped_outside_target += int((center_source_valid & ~center_target).sum())
                     stats.cells_skipped_mainland_gb += int((center_source_valid & center_target & center_protected).sum())

@@ -148,6 +148,26 @@ def test_cop30_ocean_inside_target_is_not_written(tmp_path):
     assert read_manifest(manifest_path)["height_overlays"][-1]["minecraft_y_offset"] == 0
 
 
+def test_cop30_sea_level_samples_do_not_write_even_inside_land_mask(tmp_path):
+    root, manifest_path, bounds = _dataset(tmp_path, lon=-6.2603, lat=53.3498)
+    archive = _cop30_archive(tmp_path, bounds, value=0.0)
+
+    add_cop30_height_tiles(
+        cop30_archive=archive,
+        manifest_path=manifest_path,
+        out=root,
+        resampling="nearest",
+        smoothing="none",
+        deterrace=False,
+        target="ireland-iom",
+        protect_mainland_gb=True,
+        allow_empty=True,
+    )
+
+    tile = read_r16_tile(root / "height" / "000_000.r16")
+    assert tile[256, 256] == 100
+
+
 def test_cop30_target_mask_prevents_non_target_write(tmp_path):
     root, manifest_path, bounds = _dataset(tmp_path, lon=-3.1791, lat=51.4816)
     archive = _cop30_archive(tmp_path, bounds, value=50.0)
