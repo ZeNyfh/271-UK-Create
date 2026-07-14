@@ -33,6 +33,8 @@ WGS84_TO_BNG = Transformer.from_crs("EPSG:4326", DEST_CRS, always_xy=True)
 IRELAND_MASK_EXTENSION_CIRCLES_BNG = (
     (162_623.7, 513_045.0, 31_200.0),  # Belfast coast cutoff, northern patch
     (147_725.9, 467_831.0, 31_200.0),  # Belfast coast cutoff, southern patch
+    (-183_652.5, 283_868.0, 9_100.0),   # SW Ireland cutoff near MC (-24652, 2157), 350 blocks
+    (-120_083.4, 497_900.0, 39_000.0),  # W Ireland cutoff near MC (-22207, -6075), 1500 blocks
 )
 
 
@@ -241,21 +243,21 @@ def add_cop30_height_tiles(
             "use --allow-empty only for deliberate dry/debug runs."
         )
 
+    overlay_entry = {
+        "source": "Copernicus DEM COP30 GeoTIFF",
+        "archive": cop30_archive.name,
+        "target": target,
+        "resampling": resampling,
+        "smoothing": smoothing,
+        "deterrace": deterrace,
+        "protect_mainland_gb": protect_mainland_gb,
+        "minecraft_y_offset": minecraft_y_offset,
+        "minecraft_height_scale": height_scale,
+        "height_offset_decimetres": height_offset_decimetres,
+    }
     overlays = manifest.setdefault("height_overlays", [])
-    overlays.append(
-        {
-            "source": "Copernicus DEM COP30 GeoTIFF",
-            "archive": cop30_archive.name,
-            "target": target,
-            "resampling": resampling,
-            "smoothing": smoothing,
-            "deterrace": deterrace,
-            "protect_mainland_gb": protect_mainland_gb,
-            "minecraft_y_offset": minecraft_y_offset,
-            "minecraft_height_scale": height_scale,
-            "height_offset_decimetres": height_offset_decimetres,
-        }
-    )
+    if overlay_entry not in overlays:
+        overlays.append(overlay_entry)
     write_manifest(manifest_path, manifest)
 
     console.print(f"COP30 source rasters: {stats.source_rasters}")
