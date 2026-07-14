@@ -23,6 +23,7 @@ console = Console()
 MAX_RIVER_HALFWIDTH = 40
 MIN_RIVER_HALFWIDTH_BY_ORDER = {1: 2, 2: 3, 3: 5}
 SOURCE_ORDER_FIELDS = ("ORDER_", "ORDER", "US_ORDER", "STRAHLER", "STRAHLER_ORDER", "STREAM_ORDER")
+TOP_ORDER_THINNING_FACTORS = (0.5, 1.0 / 1.5, 1.0 / 1.25, 1.0 / 1.125)
 
 
 def make_river_tiles(
@@ -347,7 +348,20 @@ def _strahler_widths(lines: list[_InputLine], manifest: dict, root: Path) -> _St
                 half_width = round(half_width * 1.2)
         minimum = _minimum_half_width_for_order(order)
         edges.append(_Edge(line, min(order, 255), min(MAX_RIVER_HALFWIDTH, max(minimum, half_width))))
+    _thin_top_order_half_widths(edges)
     return _StrahlerResult(edges)
+
+
+def _thin_top_order_half_widths(edges: list[_Edge]) -> None:
+    if not edges:
+        return
+    top_orders = sorted({edge.order for edge in edges if edge.order > 0}, reverse=True)[: len(TOP_ORDER_THINNING_FACTORS)]
+    factors = {order: factor for order, factor in zip(top_orders, TOP_ORDER_THINNING_FACTORS, strict=False)}
+    for edge in edges:
+        factor = factors.get(edge.order)
+        if factor is None:
+            continue
+        edge.half_width = max(1, int(round(edge.half_width * factor)))
 
 
 def _scaled_half_width_for_order(order: int, base_half_width: int) -> int:
