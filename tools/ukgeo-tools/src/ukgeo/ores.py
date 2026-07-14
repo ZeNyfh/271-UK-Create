@@ -56,6 +56,7 @@ def make_ore_tiles(
                 configured_layers.get(ore, {}),
                 str(gpkg),
                 geo,
+                world,
                 width,
                 depth,
                 tile_size,
@@ -81,7 +82,7 @@ def make_ore_tiles(
 
 
 def _make_ore_layer(task: tuple) -> tuple[str, list[str]]:
-    ore, layer_config, gpkg, geo, width, depth, tile_size, out, debug_geotiff_dir, show_tile_progress = task
+    ore, layer_config, gpkg, geo, world, width, depth, tile_size, out, debug_geotiff_dir, show_tile_progress = task
     messages: list[str] = []
     transform = from_bounds(
         geo["bng_min_easting"],
@@ -136,6 +137,7 @@ def _make_ore_layer(task: tuple) -> tuple[str, list[str]]:
             )
             arr = np.maximum(arr, burned)
     arr = np.clip(arr, 0, int(layer_config.get("maximum_score", 255))).astype(np.uint8)
+    _apply_component_exclusions(arr, layer_config, world, ore, messages)
     _write_tiles(arr, Path(out) / "ores" / ore, tile_size, show_progress=show_tile_progress)
     if debug_geotiff_dir:
         _write_debug(Path(debug_geotiff_dir) / f"{ore}.tif", arr, transform)
@@ -169,3 +171,77 @@ def _write_debug(path: Path, arr: np.ndarray, transform) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with rasterio.open(path, "w", driver="GTiff", height=arr.shape[0], width=arr.shape[1], count=1, dtype="uint8", crs="EPSG:27700", transform=transform) as dst:
         dst.write(arr, 1)
+
+
+def _apply_component_exclusions(
+    arr: np.ndarray,
+    layer_config: dict,
+    world: dict,
+    ore: str,
+    messages: list[str],
+) -> None:
+    exclusions = layer_config.get("exclude_nearest_components_minecraft") or []
+    if not exclusions:
+        return
+    min_x = int(world["minecraft_min_x"])
+    min_z = int(world["minecraft_min_z"])
+    width = int(world["width"])
+    depth = int(world["depth"])
+    for entry in exclusions:
+        target_x = int(entry["x"])
+        target_z = int(entry["z"])
+        search_radius = max(0, int(entry.get("search_radius", 0)))
+        cell_x = target_x - min_x
+        cell_z = target_z - min_z
+        if not (0 <= cell_x < width and 0 <= cell_z < depth):
+            messages.append(
+                f"[yellow]{ore}: exclusion target ({target_x}, {target_z}) is outside the generated world bounds.[/yellow]"
+            )
+            continue
+        seed = _resolve_exclusion_seed(arr, cell_x, cell_z, search_radius)
+        if seed is None:
+            messages.append(
+                f"[yellow]{ore}: no positive component found within {search_radius} blocks of ({target_x}, {target_z}); nothing removed.[/yellow]"
+            )
+            continue
+        removed = _clear_connected_component(arr, *seed)
+        if removed:
+            removed_x = seed[0] + min_x
+            removed_z = seed[1] + min_z
+            messages.append(
+                f"{ore}: removed {removed} cells from the component nearest ({target_x}, {target_z}) using seed ({removed_x}, {removed_z})"
+            )
+
+
+def _resolve_exclusion_seed(arr: np.ndarray, cell_x: int, cell_z: int, search_radius: int) -> tuple[int, int] | None:
+    if arr[cell_z, cell_x] > 0:
+        return cell_x, cell_z
+    if search_radius <= 0:
+        return None
+    z0 = max(0, cell_z - search_radius)
+    z1 = min(arr.shape[0], cell_z + search_radius + 1)
+    x0 = max(0, cell_x - search_radius)
+    x1 = min(arr.shape[1], cell_x + search_radius + 1)
+    window = arr[z0:z1, x0:x1]
+    ys, xs = np.nonzero(window > 0)
+    if len(xs) == 0:
+        return None
+    distances = (xs + x0 - cell_x) ** 2 + (ys + z0 - cell_z) ** 2
+    nearest = int(distances.argmin())
+    return int(xs[nearest] + x0), int(ys[nearest] + z0)
+
+
+def _clear_connected_component(arr: np.ndarray, seed_x: int, seed_z: int) -> int:
+    if arr[seed_z, seed_x] == 0:
+        return 0
+    pending = [(seed_x, seed_z)]
+    arr[seed_z, seed_x] = 0
+    removed = 0
+    while pending:
+        x, z = pending.pop()
+        removed += 1
+        for next_x, next_z in ((x - 1, z), (x + 1, z), (x, z - 1), (x, z + 1)):
+            if 0 <= next_x < arr.shape[1] and 0 <= next_z < arr.shape[0] and arr[next_z, next_x] > 0:
+                arr[next_z, next_x] = 0
+                pending.append((next_x, next_z))
+    return removed

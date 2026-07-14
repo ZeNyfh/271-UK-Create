@@ -29,6 +29,11 @@ TARGET_MODES = {"ireland-iom", "ireland-only", "iom-only", "all-cop30"}
 DEST_CRS = "EPSG:27700"
 DEFAULT_MINECRAFT_HEIGHT_SCALE = 0.18
 COP30_MIN_LAND_METRES = 0.0
+WGS84_TO_BNG = Transformer.from_crs("EPSG:4326", DEST_CRS, always_xy=True)
+IRELAND_MASK_EXTENSION_CIRCLES_BNG = (
+    (162_623.7, 513_045.0, 31_200.0),  # Belfast coast cutoff, northern patch
+    (147_725.9, 467_831.0, 31_200.0),  # Belfast coast cutoff, southern patch
+)
 
 
 @dataclass(frozen=True)
@@ -283,7 +288,10 @@ def is_in_cop30_target(lon: np.ndarray, lat: np.ndarray, target: str = "ireland-
         polygons.append(_ireland_polygon())
     if target in {"ireland-iom", "iom-only"}:
         polygons.append(_iom_polygon())
-    return contains_xy(MultiPolygon(polygons), lon, lat)
+    mask = contains_xy(MultiPolygon(polygons), lon, lat)
+    if target in {"ireland-iom", "ireland-only"}:
+        mask |= _ireland_extension_mask_lonlat(lon, lat)
+    return mask
 
 
 def is_in_cop30_land_mask(lon: np.ndarray, lat: np.ndarray, target: str = "ireland-iom") -> np.ndarray:
@@ -301,7 +309,10 @@ def is_in_cop30_land_mask(lon: np.ndarray, lat: np.ndarray, target: str = "irela
         polygons.append(_ireland_land_polygon())
     if target in {"ireland-iom", "iom-only"}:
         polygons.append(_iom_land_polygon())
-    return contains_xy(MultiPolygon(polygons), lon, lat)
+    mask = contains_xy(MultiPolygon(polygons), lon, lat)
+    if target in {"ireland-iom", "ireland-only"}:
+        mask |= _ireland_extension_mask_lonlat(lon, lat)
+    return mask
 
 
 def target_mask_lonlat(lon: np.ndarray, lat: np.ndarray, target: str = "ireland-iom") -> np.ndarray:
@@ -449,6 +460,14 @@ def _mainland_gb_protection_polygon() -> MultiPolygon:
     )
     anglesey = Polygon([(-4.78, 53.05), (-4.00, 53.05), (-4.00, 53.48), (-4.78, 53.48), (-4.78, 53.05)])
     return MultiPolygon([mainland, anglesey])
+
+
+def _ireland_extension_mask_lonlat(lon: np.ndarray, lat: np.ndarray) -> np.ndarray:
+    easting, northing = WGS84_TO_BNG.transform(lon, lat)
+    mask = np.zeros(np.broadcast_shapes(np.shape(lon), np.shape(lat)), dtype=bool)
+    for center_easting, center_northing, radius_metres in IRELAND_MASK_EXTENSION_CIRCLES_BNG:
+        mask |= (easting - center_easting) ** 2 + (northing - center_northing) ** 2 <= radius_metres**2
+    return mask
 
 
 def _extract_geotiffs(archive_path: Path, tmp: Path) -> list[Cop30Raster]:

@@ -36,6 +36,10 @@ ores:
     layers: [625k_V5_BEDROCK_Geology, 625k_V5_DYKES_Geology]
     fields: [LEX_D, LEX_RCS_D, RCS_D, GP_EQ_D, PREV_NAME]
     maximum_score: 255
+    exclude_nearest_components_minecraft:
+      - x: -14844
+        z: -17241
+        search_radius: 512
     keyword_groups:
       - score: 220
         keywords: [copper]

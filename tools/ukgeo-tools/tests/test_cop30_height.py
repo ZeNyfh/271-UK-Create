@@ -30,6 +30,7 @@ def test_ireland_iom_target_mask_known_points():
         "Cork": (-8.4756, 51.8985),
         "Derry": (-7.3092, 54.9966),
         "Douglas": (-4.4821, 54.1523),
+        "Belfast coast extension east": (-5.1833, 54.4708),
     }
     excluded = {
         "Cardiff": (-3.1791, 51.4816),
@@ -84,6 +85,8 @@ def test_cop30_land_mask_known_points():
         "Cork": (-8.4756, 51.8985),
         "Galway": (-9.0568, 53.2707),
         "Douglas": (-4.4821, 54.1523),
+        "Belfast coast extension north": (-5.66377, 54.45715),
+        "Belfast coast extension south": (-5.85500, 54.04455),
     }
     excluded = {
         "Irish Sea east of NI": (-5.54, 54.65),
