@@ -30,7 +30,7 @@ def test_ireland_iom_target_mask_known_points():
         "Cork": (-8.4756, 51.8985),
         "Derry": (-7.3092, 54.9966),
         "Douglas": (-4.4821, 54.1523),
-        "Belfast coast extension east": (-5.1833, 54.4708),
+        "Belfast coast extension east": (-5.29421, 54.46780),
     }
     excluded = {
         "Cardiff": (-3.1791, 51.4816),
@@ -89,7 +89,7 @@ def test_cop30_land_mask_known_points():
         "Belfast coast extension south": (-5.85500, 54.04455),
     }
     excluded = {
-        "Irish Sea east of NI": (-5.54, 54.65),
+        "Irish Sea east of NI": (-5.30, 54.65),
         "Sea between Ireland and Isle of Man": (-5.20, 54.20),
         "Sea between Isle of Man and England": (-3.80, 54.10),
         "Liverpool": (-2.9916, 53.4084),
@@ -248,7 +248,7 @@ def test_landmask_preserve_height_overlays_marks_only_cop30_land_cells(tmp_path)
     assert preserve.shape == (512, 512)
     assert preserve[256, 256]
 
-    _root, sea_manifest_path, _sea_bounds = _dataset(tmp_path, lon=-5.54, lat=54.65)
+    _root, sea_manifest_path, _sea_bounds = _dataset(tmp_path, lon=-5.30, lat=54.65)
     sea_manifest = read_manifest(sea_manifest_path)
     sea_manifest["height_overlays"] = [{"source": "Copernicus DEM COP30 GeoTIFF", "target": "ireland-iom"}]
     write_manifest(sea_manifest_path, sea_manifest)
