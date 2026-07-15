@@ -619,6 +619,9 @@ run_preview() {
   if is_truthy "$HOVERPREVIEW_CLEAN_STALE"; then
     args+=(--clean-stale)
   fi
+  if is_truthy "$HOVERPREVIEW_DEPLOY_MINIMAL"; then
+    args+=(--deploy-minimal)
+  fi
   if is_truthy "$HOVERPREVIEW_PROFILE"; then
     args+=(--profile)
   fi

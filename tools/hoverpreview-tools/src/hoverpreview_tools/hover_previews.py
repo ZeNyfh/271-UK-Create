@@ -77,6 +77,7 @@ def export_hover_previews(
     visual_format: str = "png",
     force: bool = False,
     clean_stale: bool = False,
+    deploy_minimal: bool = False,
     profile: bool = False,
     progress: Callable[[str], None] | None = None,
 ) -> Path:
@@ -362,6 +363,7 @@ def export_hover_previews(
         "visual_format": visual_format,
         "force": force,
         "clean_stale": clean_stale,
+        "deploy_minimal": deploy_minimal,
         "cache_buster": str(time.time_ns()),
     }
     if profile:
@@ -372,6 +374,8 @@ def export_hover_previews(
     _write_cache_metadata(out, index["generation"], layers)
     if clean_stale:
         _clean_stale_outputs(out, layers)
+    if deploy_minimal:
+        _prune_deploy_minimal_outputs(out)
     if profile and progress is None:
         for step, seconds in timings:
             print(f"{step}: {seconds:.3f}s")
@@ -701,6 +705,13 @@ def _clean_stale_outputs(out: Path, layers: list[dict[str, Any]]) -> None:
             rel = path.relative_to(out).as_posix()
             if path not in keep_files and not any(rel.startswith(prefix) for prefix in keep_templates):
                 path.unlink(missing_ok=True)
+
+
+def _prune_deploy_minimal_outputs(out: Path) -> None:
+    for relative in ("layers", "mips", "samples"):
+        path = out / relative
+        if path.exists():
+            shutil.rmtree(path)
 
 
 def _fit_image(image: Image.Image, size: tuple[int, int]) -> Image.Image:

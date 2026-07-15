@@ -27,6 +27,10 @@ directory. The export contains:
 - `samples/` exact hover-data sample images.
 - `sample_tiles/` exact lossless PNG sample tiles used for hover reads.
 
+For GitHub Pages deployment, only `hover_manifest.json`, `tiles/`, and
+`sample_tiles/` are required by the browser. `layers/`, `mips/`, and `samples/`
+are redundant for the published site.
+
 The browser chooses a MIP level for the current zoom, loads only visible tiles,
 and keeps a bounded least-recently-used bitmap cache. Hover status reads come
 from `sample_tiles/`, not from visual RGB tiles, so categorical classes and
@@ -43,6 +47,8 @@ Useful export options:
 ./generate_hover_previews.sh --regenerate all
 ./generate_hover_previews.sh --tile-size 256 --workers 8 --visual-format png
 ./generate_hover_previews.sh --force --clean-stale --profile
+# Set HOVERPREVIEW_DEPLOY_MINIMAL: true in config.yml to trim redundant files.
+./generate_hover_previews.sh --regenerate preview
 ```
 
 `--regenerate height,preview` rebuilds the height tiles and then exports the
@@ -82,6 +88,8 @@ CLI options exposed by `python -m hoverpreview_tools.cli`:
 - `--visual-format png|webp`: visual output format; sample tiles remain PNG.
 - `--force`: rewrite existing generated files.
 - `--clean-stale`: remove tile files no longer referenced by the manifest.
+- `--deploy-minimal`: delete redundant `layers/`, `mips/`, and `samples/`
+  after export. Keep only the manifest plus visual/sample tiles.
 - `--profile`: print rough per-layer generation timings.
 - Existing options `--out`, `--max-size`, `--style`, and `--clean` remain
   supported.
@@ -127,17 +135,20 @@ Before publishing, generate or copy the preview export to:
 tools/ukgeo-tools/uk_world_data_gb/hoverpreviews/
 ```
 
-The included `.github/workflows/pages.yml` workflow stages these root files for
-GitHub Pages. Use the workflow when Pages is configured for **GitHub Actions**;
-if Pages is configured for **Deploy from a branch**, choose the `main` branch and
+The included `.github/workflows/pages.yml` workflow does not regenerate preview
+data. It stages the checked-in site files plus the checked-in
+`hover_manifest.json`, `tiles/`, and `sample_tiles/` data for GitHub Pages.
+Use the workflow when Pages is configured for **GitHub Actions**; if Pages is
+configured for **Deploy from a branch**, choose the `main` branch and
 repository root so GitHub serves the checked-in root `index.html`.
 
 ## If GitHub Pages shows the README
 
 GitHub Pages falls back to rendering `README.md` when the published artifact does
 not contain a root `index.html`. This repo includes `.github/workflows/pages.yml`
-to publish a staged root site containing `index.html`, the viewer assets, and the
-`tools/ukgeo-tools/uk_world_data_gb/hoverpreviews/` data folder when it exists.
+to publish a staged root site containing `index.html`, the viewer assets, and
+the required subset of `tools/ukgeo-tools/uk_world_data_gb/hoverpreviews/`
+when it exists.
 
 In the repository settings, set **Pages → Build and deployment → Source** to
 **GitHub Actions**, then run the **Deploy GitHub Pages site** workflow or push to
@@ -200,10 +211,13 @@ For a full rebuild:
 ./generate_hover_previews.sh --regenerate all --profile
 ```
 
-Inspect `manifest.json`, `hoverpreviews/hover_manifest.json`,
-`hoverpreviews/layers/height*`, and `hoverpreviews/samples/height_rgb.png`.
-Ireland, Northern Ireland, and the Isle of Man should have valid height samples;
-England, Wales, and Scotland should remain valid OS Terrain 50-derived data.
+Inspect `manifest.json`, `hoverpreviews/hover_manifest.json`, and the generated
+tile pyramids under `hoverpreviews/tiles/` and `hoverpreviews/sample_tiles/`.
+If you did not use `--deploy-minimal`, you can also inspect
+`hoverpreviews/layers/height*` and `hoverpreviews/samples/height_rgb.png`.
+Ireland, Northern Ireland, and the Isle of Man should have valid height
+samples; England, Wales, and Scotland should remain valid OS Terrain 50-derived
+data.
 
 Full preview generation can be expensive on the complete UKGeo dataset; use
 `./generate_hover_previews.sh --profile` when regenerating production assets.

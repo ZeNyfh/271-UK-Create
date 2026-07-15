@@ -39,6 +39,7 @@ def export_cmd(
     visual_format: str = typer.Option("png", "--visual-format", help="Visual tile format: png or webp. Sample tiles are always lossless PNG."),
     force: bool = typer.Option(False, "--force", help="Regenerate tile/image files even if they already exist."),
     clean_stale: bool = typer.Option(False, "--clean-stale", help="Delete stale tile files that are no longer referenced by the generated manifest."),
+    deploy_minimal: bool = typer.Option(False, "--deploy-minimal", help="Delete redundant full-size layers, mips, and sample images after export. Keep only manifest, visual tiles, and sample tiles."),
     profile: bool = typer.Option(False, "--profile", help="Print rough per-layer export timings."),
 ) -> None:
     """Export stackable PNG layers consumed by the hover map."""
@@ -70,6 +71,7 @@ def export_cmd(
                 visual_format=visual_format,
                 force=force,
                 clean_stale=clean_stale,
+                deploy_minimal=deploy_minimal,
                 profile=profile,
                 progress=advance,
             )

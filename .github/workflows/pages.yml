@@ -35,12 +35,23 @@ jobs:
         run: |
           set -euo pipefail
           rm -rf _site
-          mkdir -p _site/tools/hoverpreview-tools _site/tools/ukgeo-tools/uk_world_data_gb
+          mkdir -p _site/tools/hoverpreview-tools _site/tools/ukgeo-tools/uk_world_data_gb/hoverpreviews
           cp index.html _site/index.html
           cp .nojekyll _site/.nojekyll
           cp -R tools/hoverpreview-tools/site _site/tools/hoverpreview-tools/site
           if [ -d tools/ukgeo-tools/uk_world_data_gb/hoverpreviews ]; then
-            cp -R tools/ukgeo-tools/uk_world_data_gb/hoverpreviews _site/tools/ukgeo-tools/uk_world_data_gb/hoverpreviews
+            if [ -f tools/ukgeo-tools/uk_world_data_gb/hoverpreviews/hover_manifest.json ]; then
+              cp tools/ukgeo-tools/uk_world_data_gb/hoverpreviews/hover_manifest.json \
+                _site/tools/ukgeo-tools/uk_world_data_gb/hoverpreviews/hover_manifest.json
+            fi
+            if [ -d tools/ukgeo-tools/uk_world_data_gb/hoverpreviews/tiles ]; then
+              cp -R tools/ukgeo-tools/uk_world_data_gb/hoverpreviews/tiles \
+                _site/tools/ukgeo-tools/uk_world_data_gb/hoverpreviews/tiles
+            fi
+            if [ -d tools/ukgeo-tools/uk_world_data_gb/hoverpreviews/sample_tiles ]; then
+              cp -R tools/ukgeo-tools/uk_world_data_gb/hoverpreviews/sample_tiles \
+                _site/tools/ukgeo-tools/uk_world_data_gb/hoverpreviews/sample_tiles
+            fi
           else
             echo "::warning::tools/ukgeo-tools/uk_world_data_gb/hoverpreviews is missing; the page will load but show the empty state."
           fi

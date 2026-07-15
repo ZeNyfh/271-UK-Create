@@ -12,6 +12,7 @@ generate:
   HOVERPREVIEW_VISUAL_FORMAT: png
   HOVERPREVIEW_FORCE: false
   HOVERPREVIEW_CLEAN_STALE: false
+  HOVERPREVIEW_DEPLOY_MINIMAL: false
   HOVERPREVIEW_PROFILE: false
   DATA_DIR: ../../data
   OS_TERRAIN_ZIP: ../../data/terr50_gagg_gb.zip

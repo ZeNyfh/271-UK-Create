@@ -144,12 +144,14 @@ def test_generate_script_defaults_to_cop30_without_requiring_osni():
     script = (Path(__file__).resolve().parents[1] / "generate_hover_previews.sh").read_text(encoding="utf-8")
     config = (Path(__file__).resolve().parents[1] / "config.yml").read_text(encoding="utf-8")
     run_height = script[script.index("run_height() {") : script.index("\nrun_vegetation()")]
+    run_preview = script[script.index("run_preview() {") : script.index("\nrun_clean()")]
 
     assert 'python3 -m ukgeo.config --config "$CONFIG_FILE" --section generate --format shell' in script
     assert "COP30_ARCHIVE: ../../data/rasters_COP30.tar.gz" in config
     assert "COP30_MINECRAFT_Y_OFFSET: 0" in config
     assert "COP30_DEBUG_TARGET_MASK_GEOTIFF: null" in config
     assert "COP30_DEBUG_LAND_MASK_GEOTIFF: null" in config
+    assert "HOVERPREVIEW_DEPLOY_MINIMAL: false" in config
     assert "add-cop30-height-tiles" in run_height
     assert '--minecraft-y-offset "$COP30_MINECRAFT_Y_OFFSET"' in run_height
     assert '--debug-target-mask-geotiff "$COP30_DEBUG_TARGET_MASK_GEOTIFF"' in run_height
@@ -157,6 +159,8 @@ def test_generate_script_defaults_to_cop30_without_requiring_osni():
     assert "USE_LEGACY_OSNI_HEIGHT" in run_height
     assert 'require_file "$COP30_ARCHIVE"' in run_height
     assert 'require_file "$OSNI_DTM_ZIP"' in run_height
+    assert '--deploy-minimal' in run_preview
+    assert 'HOVERPREVIEW_DEPLOY_MINIMAL' in run_preview
     assert run_height.index('require_file "$OSNI_DTM_ZIP"') > run_height.index('if is_truthy "$USE_LEGACY_OSNI_HEIGHT"; then')
 
 
@@ -202,3 +206,25 @@ def test_export_hover_manifest_preserves_height_overlays_and_manifest_bounds(tmp
     assert hover_manifest["image_width"] == 256
     assert hover_manifest["image_height"] == 256
     assert hover_manifest["height_overlays"] == manifest["height_overlays"]
+
+
+def test_export_hover_previews_deploy_minimal_keeps_only_manifest_and_tile_pyramids(tmp_path):
+    root = tmp_path / "world"
+    height_root = root / "height"
+    height_root.mkdir(parents=True)
+    manifest = default_manifest(width=512, depth=512, tile_size=512)
+    write_manifest(root / "manifest.json", manifest)
+    write_r16_tile(height_root / "000_000.r16", np.full((512, 512), 123, dtype="<i2"))
+
+    out = tmp_path / "hoverpreviews"
+    export_hover_previews(root, out, max_size=256, tile_size=128, workers=1, deploy_minimal=True)
+
+    assert (out / "hover_manifest.json").exists()
+    assert (out / "tiles").exists()
+    assert (out / "sample_tiles").exists()
+    assert not (out / "layers").exists()
+    assert not (out / "mips").exists()
+    assert not (out / "samples").exists()
+
+    hover_manifest = json.loads((out / "hover_manifest.json").read_text(encoding="utf-8"))
+    assert hover_manifest["generation"]["deploy_minimal"] is True
