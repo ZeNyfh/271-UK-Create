@@ -480,6 +480,7 @@ def export_hover_previews(
         "bng_max_northing": geo.get("bng_max_northing"),
         "world": world,
         "georeferencing": geo,
+        "axis_scale": manifest.get("axis_scale", {"x": 1.0, "z": 1.0}),
         "minecraft_origin": _minecraft_origin(manifest),
         "height_processing": manifest.get("height_processing", {}),
         "height_overlays": manifest.get("height_overlays", []),

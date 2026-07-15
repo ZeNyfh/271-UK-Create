@@ -40,6 +40,8 @@ def default_manifest(
     bng_min_northing: float | None = None,
     bng_max_easting: float | None = None,
     bng_max_northing: float | None = None,
+    axis_scale_x: float = 1.0,
+    axis_scale_z: float = 1.0,
 ) -> dict[str, Any]:
     padded_width = math.ceil(width / tile_size) * tile_size
     padded_depth = math.ceil(depth / tile_size) * tile_size
@@ -64,6 +66,11 @@ def default_manifest(
             "bng_max_easting": bng_max_easting,
             "bng_max_northing": bng_max_northing,
             "note": "Final map cells are Minecraft x/z blocks resampled from the source GIS extent.",
+        },
+        "axis_scale": {
+            "x": float(axis_scale_x),
+            "z": float(axis_scale_z),
+            "note": "Multipliers applied to the historic UKGeo horizontal and vertical block scales before raster resampling.",
         },
         "height": {
             "path": "height",

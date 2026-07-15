@@ -424,6 +424,12 @@ run_height() {
     world_width="${WORLD_WIDTH:-25000}"
     world_depth="${WORLD_DEPTH:-50000}"
   fi
+  read -r world_width world_depth < <("${UKGEO_ENV[@]}" "$PYTHON" - <<PY
+width = max(1, int(round(float("$world_width") * float("${WORLD_X_SCALE:-1.0}"))))
+depth = max(1, int(round(float("$world_depth") * float("${WORLD_Z_SCALE:-1.0}"))))
+print(width, depth)
+PY
+)
   read -r minecraft_min_x minecraft_min_z < <("${UKGEO_ENV[@]}" "$PYTHON" - <<PY
 from ukgeo.coords import minecraft_min_for_bng_origin, NOTTINGHAM_ORIGIN_BNG_EASTING, NOTTINGHAM_ORIGIN_BNG_NORTHING
 x, z = minecraft_min_for_bng_origin(
@@ -452,6 +458,8 @@ PY
     --minecraft-min-x "$minecraft_min_x" \
     --minecraft-min-z "$minecraft_min_z" \
     --sea-level-y 64 \
+    --axis-scale-x "${WORLD_X_SCALE:-1.0}" \
+    --axis-scale-z "${WORLD_Z_SCALE:-1.0}" \
     --height-resampling bilinear \
     --height-smoothing light \
     --height-deterrace
@@ -561,6 +569,17 @@ run_ores() {
   if [[ -f "$GOLD_OCCURRENCES" ]]; then
     "${UKGEO_ENV[@]}" "$PYTHON" -m ukgeo.cli make-gold-occurrence-tiles \
       --gold-occurrences "$GOLD_OCCURRENCES" \
+      --manifest "$ROOT/manifest.json" \
+      --out "$ROOT"
+  fi
+  if [[ -n "$ROI_ORES_SVG" ]]; then
+    require_file "$ROI_ORES_SVG"
+    "${UKGEO_ENV[@]}" "$PYTHON" -m ukgeo.cli apply-named-svg-ore-overlays \
+      --image "$ROI_ORES_SVG" \
+      --overlay "coal=Coal:$ROI_ORE_OVERLAY_SCORE" \
+      --overlay "zinc=Zinc:$ROI_ORE_OVERLAY_SCORE" \
+      --overlay "copper=Copper:$ROI_ORE_OVERLAY_SCORE" \
+      --fit full-frame \
       --manifest "$ROOT/manifest.json" \
       --out "$ROOT"
   fi

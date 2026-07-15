@@ -117,8 +117,10 @@ button:active { background: var(--button-active); }
 .layer-toggle input { margin: 0; }
 .layer-toggle input:disabled + span { color: #666666; }
 
-.ore-menu { position: relative; z-index: 110; }
-.ore-menu summary {
+.ore-menu,
+.animal-menu { position: relative; z-index: 110; }
+.ore-menu summary,
+.animal-menu summary {
   display: inline-flex;
   align-items: center;
   min-height: 26px;
@@ -129,8 +131,10 @@ button:active { background: var(--button-active); }
   list-style: none;
   cursor: default;
 }
-.ore-menu summary::-webkit-details-marker { display: none; }
-.ore-list {
+.ore-menu summary::-webkit-details-marker,
+.animal-menu summary::-webkit-details-marker { display: none; }
+.ore-list,
+.animal-list {
   position: absolute;
   z-index: 120;
   top: calc(100% + 2px);
@@ -145,7 +149,8 @@ button:active { background: var(--button-active); }
   background: #ffffff;
   box-shadow: 2px 3px 8px rgb(0 0 0 / 0.25);
 }
-.ore-menu:not([open]) .ore-list { display: none; }
+.ore-menu:not([open]) .ore-list,
+.animal-menu:not([open]) .animal-list { display: none; }
 
 .map-frame {
   position: relative;
@@ -234,13 +239,7 @@ button:active { background: var(--button-active); }
   overflow: visible;
 }
 
-.animal-toggle {
-  text-transform: none;
-  white-space: nowrap;
-  min-height: 26px;
-  padding: 2px 7px;
-  border: 1px solid #9f9f9f;
-  border-radius: 2px;
-  background: linear-gradient(#ffffff, var(--button));
-  color: var(--text);
+.animal-list {
+  min-width: 220px;
+  grid-template-columns: 1fr;
 }

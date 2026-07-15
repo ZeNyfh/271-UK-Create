@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from collections.abc import Mapping
 import math
 import re
 import xml.etree.ElementTree as ET
@@ -32,15 +33,6 @@ def apply_ore_image_overlay(
     svg_raster_scale: int = 4,
 ) -> None:
     manifest = read_manifest(manifest_path)
-    tile_size = int(manifest["tile_size"])
-    world = manifest["world"]
-    width = int(world["width"])
-    depth = int(world["depth"])
-    padded_width = int(world["padded_width"])
-    padded_depth = int(world["padded_depth"])
-    tiles_x = math.ceil(padded_width / tile_size)
-    tiles_z = math.ceil(padded_depth / tile_size)
-
     red_mask, outline_bbox = _read_overlay_mask(
         image,
         red_min=red_min,
@@ -52,77 +44,24 @@ def apply_ore_image_overlay(
     if not np.any(red_mask):
         console.print(f"[yellow]No red ore pixels found in {image}; {ore} tiles were unchanged.[/yellow]")
         return
-    scale_x, scale_z, offset_x, offset_z, placement = _overlay_placement(
-        red_mask.shape[1],
-        red_mask.shape[0],
-        width,
-        depth,
-        fit,
-        source_bbox=outline_bbox,
-        target_bbox=_uk_reference_target_bbox(manifest) or _height_valid_bbox(out, manifest),
-        control_matrix=_uk_reference_control_matrix(manifest, red_mask.shape[1], red_mask.shape[0]),
-    )
-    inverse_matrix = np.asarray(placement.get("inverse_matrix"), dtype=np.float64) if "inverse_matrix" in placement else None
 
     manifest.setdefault("ore_layers", {}).setdefault(ore, default_u8_layer(f"ores/{ore}"))
     layer = manifest["ore_layers"][ore]
-    layer_extension = layer.get("extension", u8_extension())
-    layer_root = out / layer["path"]
-    layer_root.mkdir(parents=True, exist_ok=True)
     score = max(0, min(255, int(score)))
-
-    changed_tiles = 0
-    for tile_z in tqdm(range(tiles_z), desc=f"{ore} image overlay rows"):
-        z = tile_z * tile_size + np.arange(tile_size)
-        valid_z = z < depth
-        if inverse_matrix is None:
-            image_y_float = (z + 0.5 - offset_z) / scale_z
-            valid_z &= (image_y_float >= 0) & (image_y_float < red_mask.shape[0])
-            image_y = np.clip(image_y_float.astype(np.int64), 0, red_mask.shape[0] - 1)
-        for tile_x in range(tiles_x):
-            x = tile_x * tile_size + np.arange(tile_size)
-            valid_x = x < width
-            if inverse_matrix is None:
-                if not np.any(valid_x) or not np.any(valid_z):
-                    continue
-                image_x_float = (x + 0.5 - offset_x) / scale_x
-                valid_x &= (image_x_float >= 0) & (image_x_float < red_mask.shape[1])
-                if not np.any(valid_x):
-                    continue
-                image_x = np.clip(image_x_float.astype(np.int64), 0, red_mask.shape[1] - 1)
-                mask = red_mask[np.ix_(image_y, image_x)]
-                mask &= valid_z[:, None]
-                mask &= valid_x[None, :]
-            else:
-                if not np.any(valid_x) or not np.any(valid_z):
-                    continue
-                grid_x, grid_z = np.meshgrid(x + 0.5, z + 0.5)
-                image_x_float = inverse_matrix[0, 0] * grid_x + inverse_matrix[0, 1] * grid_z + inverse_matrix[0, 2]
-                image_y_float = inverse_matrix[1, 0] * grid_x + inverse_matrix[1, 1] * grid_z + inverse_matrix[1, 2]
-                valid = (
-                    valid_z[:, None]
-                    & valid_x[None, :]
-                    & (image_x_float >= 0)
-                    & (image_x_float < red_mask.shape[1])
-                    & (image_y_float >= 0)
-                    & (image_y_float < red_mask.shape[0])
-                )
-                image_x = np.clip(image_x_float.astype(np.int64), 0, red_mask.shape[1] - 1)
-                image_y = np.clip(image_y_float.astype(np.int64), 0, red_mask.shape[0] - 1)
-                mask = red_mask[image_y, image_x] & valid
-            if not np.any(mask):
-                continue
-
-            path = layer_root / f"{tile_x:03d}_{tile_z:03d}{layer_extension}"
-            if path.exists():
-                tile = read_u8_tile(path, tile_size).copy()
-            else:
-                tile = np.zeros((tile_size, tile_size), dtype=np.uint8)
-            before = tile.copy()
-            tile[mask] = np.maximum(tile[mask], score)
-            if not np.array_equal(tile, before):
-                write_u8_tile(path, tile, tile_size)
-                changed_tiles += 1
+    changed_tiles, placement = _merge_mask_into_u8_layer(
+        mask=red_mask,
+        manifest=manifest,
+        out=out,
+        layer_name=ore,
+        layer_path=layer["path"],
+        layer_extension=layer.get("extension", u8_extension()),
+        score=score,
+        fit=fit,
+        source_bbox=outline_bbox,
+        target_bbox=_uk_reference_target_bbox(manifest) or _height_valid_bbox(out, manifest),
+        control_matrix=_uk_reference_control_matrix(manifest, red_mask.shape[1], red_mask.shape[0]),
+        desc=f"{ore} image overlay rows",
+    )
 
     entry = {
         "ore": ore,
@@ -141,6 +80,151 @@ def apply_ore_image_overlay(
     manifest["ore_image_overlays"] = overlays
     write_manifest(manifest_path, manifest)
     console.print(f"{ore}: applied image overlay from {image} to {changed_tiles} tiles")
+
+
+def apply_named_svg_ore_overlays(
+    *,
+    image: Path,
+    manifest_path: Path,
+    out: Path,
+    overlays: Mapping[str, tuple[str, int]],
+    fit: str = "full-frame",
+    svg_raster_scale: int = 1,
+) -> None:
+    manifest = read_manifest(manifest_path)
+    overlays_by_path: dict[str, list[tuple[str, int]]] = {}
+    for ore, (path_id, score) in overlays.items():
+        overlays_by_path.setdefault(path_id, []).append((ore, score))
+    target_bbox = _full_target_bbox(manifest) if fit == "full-frame" else None
+    fit_mode = "outline" if fit == "full-frame" else fit
+    overlay_entries = [
+        item for item in manifest.setdefault("ore_image_overlays", [])
+        if item.get("source") != str(image) or item.get("kind") != "named_svg_paths"
+    ]
+    for path_id, ore_specs in overlays_by_path.items():
+        mask = _read_named_svg_mask(image, path_id=path_id, svg_raster_scale=svg_raster_scale)
+        source_bbox = _full_source_bbox(mask)
+        for ore, raw_score in ore_specs:
+            manifest.setdefault("ore_layers", {}).setdefault(ore, default_u8_layer(f"ores/{ore}"))
+            layer = manifest["ore_layers"][ore]
+            score = max(0, min(255, int(raw_score)))
+            changed_tiles, _placement = _merge_mask_into_u8_layer(
+                mask=mask,
+                manifest=manifest,
+                out=out,
+                layer_name=ore,
+                layer_path=layer["path"],
+                layer_extension=layer.get("extension", u8_extension()),
+                score=score,
+                fit=fit_mode,
+                source_bbox=source_bbox,
+                target_bbox=target_bbox,
+                control_matrix=None,
+                desc=f"{ore} named SVG overlay rows",
+            )
+            overlay_entries.append({
+                "kind": "named_svg_paths",
+                "ore": ore,
+                "source": str(image),
+                "svg_path_id": path_id,
+                "score": score,
+                "fit": fit,
+                "svg_raster_scale": int(svg_raster_scale),
+                "note": "Named SVG path was max-merged into the existing ore score tiles.",
+            })
+            console.print(f"{ore}: applied SVG layer {path_id} from {image} to {changed_tiles} tiles")
+    manifest["ore_image_overlays"] = overlay_entries
+    write_manifest(manifest_path, manifest)
+
+
+def _merge_mask_into_u8_layer(
+    *,
+    mask: np.ndarray,
+    manifest: dict,
+    out: Path,
+    layer_name: str,
+    layer_path: str,
+    layer_extension: str,
+    score: int,
+    fit: str,
+    source_bbox: BBox | None,
+    target_bbox: BBox | None,
+    control_matrix: np.ndarray | None,
+    desc: str,
+) -> tuple[int, dict[str, float | str | list[list[float]] | list[float]]]:
+    tile_size = int(manifest["tile_size"])
+    world = manifest["world"]
+    width = int(world["width"])
+    depth = int(world["depth"])
+    padded_width = int(world["padded_width"])
+    padded_depth = int(world["padded_depth"])
+    tiles_x = math.ceil(padded_width / tile_size)
+    tiles_z = math.ceil(padded_depth / tile_size)
+    scale_x, scale_z, offset_x, offset_z, placement = _overlay_placement(
+        mask.shape[1],
+        mask.shape[0],
+        width,
+        depth,
+        fit,
+        source_bbox=source_bbox,
+        target_bbox=target_bbox,
+        control_matrix=control_matrix,
+    )
+    inverse_matrix = np.asarray(placement.get("inverse_matrix"), dtype=np.float64) if "inverse_matrix" in placement else None
+    layer_root = out / layer_path
+    layer_root.mkdir(parents=True, exist_ok=True)
+    changed_tiles = 0
+    for tile_z in tqdm(range(tiles_z), desc=desc):
+        z = tile_z * tile_size + np.arange(tile_size)
+        valid_z = z < depth
+        if inverse_matrix is None:
+            image_y_float = (z + 0.5 - offset_z) / scale_z
+            valid_z &= (image_y_float >= 0) & (image_y_float < mask.shape[0])
+            image_y = np.clip(image_y_float.astype(np.int64), 0, mask.shape[0] - 1)
+        for tile_x in range(tiles_x):
+            x = tile_x * tile_size + np.arange(tile_size)
+            valid_x = x < width
+            if inverse_matrix is None:
+                if not np.any(valid_x) or not np.any(valid_z):
+                    continue
+                image_x_float = (x + 0.5 - offset_x) / scale_x
+                valid_x &= (image_x_float >= 0) & (image_x_float < mask.shape[1])
+                if not np.any(valid_x):
+                    continue
+                image_x = np.clip(image_x_float.astype(np.int64), 0, mask.shape[1] - 1)
+                tile_mask = mask[np.ix_(image_y, image_x)]
+                tile_mask &= valid_z[:, None]
+                tile_mask &= valid_x[None, :]
+            else:
+                if not np.any(valid_x) or not np.any(valid_z):
+                    continue
+                grid_x, grid_z = np.meshgrid(x + 0.5, z + 0.5)
+                image_x_float = inverse_matrix[0, 0] * grid_x + inverse_matrix[0, 1] * grid_z + inverse_matrix[0, 2]
+                image_y_float = inverse_matrix[1, 0] * grid_x + inverse_matrix[1, 1] * grid_z + inverse_matrix[1, 2]
+                valid = (
+                    valid_z[:, None]
+                    & valid_x[None, :]
+                    & (image_x_float >= 0)
+                    & (image_x_float < mask.shape[1])
+                    & (image_y_float >= 0)
+                    & (image_y_float < mask.shape[0])
+                )
+                image_x = np.clip(image_x_float.astype(np.int64), 0, mask.shape[1] - 1)
+                image_y = np.clip(image_y_float.astype(np.int64), 0, mask.shape[0] - 1)
+                tile_mask = mask[image_y, image_x] & valid
+            if not np.any(tile_mask):
+                continue
+            path = layer_root / f"{tile_x:03d}_{tile_z:03d}{layer_extension}"
+            if path.exists():
+                tile = read_u8_tile(path, tile_size).copy()
+            else:
+                tile = np.zeros((tile_size, tile_size), dtype=np.uint8)
+            before = tile.copy()
+            tile[tile_mask] = np.maximum(tile[tile_mask], score)
+            if not np.array_equal(tile, before):
+                write_u8_tile(path, tile, tile_size)
+                changed_tiles += 1
+    return changed_tiles, placement
 
 
 def _read_overlay_mask(
@@ -230,6 +314,41 @@ def _read_svg_overlay_mask(
         else None
     )
     return np.asarray(mask, dtype=np.uint8) > 0, outline_bbox
+
+
+def _read_named_svg_mask(path: Path, *, path_id: str, svg_raster_scale: int = 1) -> np.ndarray:
+    root = ET.parse(path).getroot()
+    min_x, min_y, width, height = _svg_viewbox(root)
+    raster_scale = _bounded_svg_raster_scale(width, height, svg_raster_scale)
+    source_width = max(1, math.ceil(width)) * raster_scale
+    source_height = max(1, math.ceil(height)) * raster_scale
+    mask = Image.new("1", (source_width, source_height), 0)
+    draw = ImageDraw.Draw(mask)
+    found = False
+    for element in root.iter():
+        if not element.tag.endswith("path"):
+            continue
+        if element.attrib.get("id") != path_id:
+            continue
+        polygons = _path_polygons(element.attrib.get("d", ""))
+        for polygon in polygons:
+            if len(polygon) >= 3:
+                draw.polygon([((x - min_x) * raster_scale, (y - min_y) * raster_scale) for x, y in polygon], fill=255)
+        found = True
+    if not found:
+        raise ValueError(f"SVG path id {path_id!r} was not found in {path}")
+    return np.asarray(mask, dtype=np.uint8) > 0
+
+
+def _bounded_svg_raster_scale(width: float, height: float, requested_scale: int, *, max_pixels: int = 128_000_000) -> int:
+    scale = max(1, int(requested_scale))
+    base_pixels = max(1, math.ceil(width)) * max(1, math.ceil(height))
+    if base_pixels * scale * scale <= max_pixels:
+        return scale
+    bounded = max(1, int(math.floor(math.sqrt(max_pixels / base_pixels))))
+    if bounded < scale:
+        console.print(f"[yellow]Reducing SVG raster scale from {scale} to {bounded} to stay within the memory guard.[/yellow]")
+    return bounded
 
 
 def _svg_viewbox(root: ET.Element) -> BBox:
@@ -334,6 +453,15 @@ def _points_bbox(points: list[tuple[float, float]], *, min_x: float, min_y: floa
 def _scale_bbox(bbox: BBox, scale: float) -> BBox:
     min_x, min_y, max_x, max_y = bbox
     return min_x * scale, min_y * scale, max_x * scale, max_y * scale
+
+
+def _full_source_bbox(mask: np.ndarray) -> BBox:
+    return 0.0, 0.0, float(mask.shape[1] - 1), float(mask.shape[0] - 1)
+
+
+def _full_target_bbox(manifest: dict) -> BBox:
+    world = manifest["world"]
+    return 0.0, 0.0, float(int(world["width"]) - 1), float(int(world["depth"]) - 1)
 
 
 # Exact local targets from in-game Minecraft X/Z boxes supplied for the checked
@@ -443,6 +571,8 @@ def _overlay_placement(
         )
     if fit == "outline":
         fit = "cover"
+    if fit == "full-frame":
+        fit = "outline"
     if fit == "contain":
         scale = min(target_width / source_width, target_depth / source_height)
     elif fit == "cover":

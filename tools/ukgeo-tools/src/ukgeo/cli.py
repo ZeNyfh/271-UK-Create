@@ -9,6 +9,7 @@ from rich.console import Console
 from rich.table import Table
 
 from .asc import iter_nested_asc_headers
+from .animal_habitats import make_animal_habitat_tiles as make_animal_habitat_tiles_impl
 from .bgs import likely_geology_fields, resolve_gpkg
 from .coal import make_coal_resource_tiles as make_coal_resource_tiles_impl
 from .coords import (
@@ -24,6 +25,7 @@ from .gold import harvest_gold_occurrences as harvest_gold_occurrences_impl
 from .gold import make_gold_occurrence_tiles as make_gold_occurrence_tiles_impl
 from .landmask import mask_height_to_bgs_land as mask_height_to_bgs_land_impl
 from .manifest import read_manifest
+from .ore_image_overlay import apply_named_svg_ore_overlays as apply_named_svg_ore_overlays_impl
 from .ore_image_overlay import apply_ore_image_overlay as apply_ore_image_overlay_impl
 from .ores import make_ore_tiles as make_ore_tiles_impl
 from .preview import make_preview
@@ -92,6 +94,8 @@ def make_height_tiles(
     minecraft_min_x: int = typer.Option(DEFAULT_MINECRAFT_MIN_X, "--minecraft-min-x"),
     minecraft_min_z: int = typer.Option(DEFAULT_MINECRAFT_MIN_Z, "--minecraft-min-z"),
     sea_level_y: int = typer.Option(64, "--sea-level-y"),
+    axis_scale_x: float = typer.Option(1.0, "--axis-scale-x"),
+    axis_scale_z: float = typer.Option(1.0, "--axis-scale-z"),
     height_resampling: str = typer.Option("nearest", "--height-resampling", help="nearest or bilinear"),
     height_smoothing: str = typer.Option("none", "--height-smoothing", help="none, light, or medium"),
     height_deterrace: bool = typer.Option(False, "--height-deterrace/--no-height-deterrace"),
@@ -110,6 +114,8 @@ def make_height_tiles(
         minecraft_min_x=minecraft_min_x,
         minecraft_min_z=minecraft_min_z,
         sea_level_y=sea_level_y,
+        axis_scale_x=axis_scale_x,
+        axis_scale_z=axis_scale_z,
         height_resampling=height_resampling,
         height_smoothing=height_smoothing,
         height_deterrace=height_deterrace,
@@ -152,6 +158,51 @@ def apply_ore_image_overlay(
         green_max=green_max,
         blue_max=blue_max,
         fit=fit,
+    )
+
+
+@app.command("apply-named-svg-ore-overlays")
+def apply_named_svg_ore_overlays(
+    image: Path = typer.Option(..., "--image"),
+    manifest: Path = typer.Option(..., "--manifest"),
+    out: Path = typer.Option(..., "--out"),
+    overlay: list[str] = typer.Option(..., "--overlay", help="Repeat as ore=SvgPathId:score, for example --overlay copper=Copper:180"),
+    fit: str = typer.Option("full-frame", "--fit", help="Placement: full-frame, outline, cover, or contain."),
+    svg_raster_scale: int = typer.Option(1, "--svg-raster-scale"),
+) -> None:
+    overlays: dict[str, tuple[str, int]] = {}
+    for item in overlay:
+        ore, sep, rest = item.partition("=")
+        if not ore or not sep:
+            raise typer.BadParameter(f"Invalid overlay mapping {item!r}; expected ore=SvgPathId:score")
+        path_id, score_sep, raw_score = rest.rpartition(":")
+        if not path_id or not score_sep:
+            raise typer.BadParameter(f"Invalid overlay mapping {item!r}; expected ore=SvgPathId:score")
+        overlays[ore.strip()] = (path_id.strip(), int(raw_score))
+    apply_named_svg_ore_overlays_impl(
+        image=image,
+        manifest_path=manifest,
+        out=out,
+        overlays=overlays,
+        fit=fit,
+        svg_raster_scale=svg_raster_scale,
+    )
+
+
+@app.command("make-animal-habitat-tiles")
+def make_animal_habitat_tiles(
+    image: Path = typer.Option(..., "--image"),
+    manifest: Path = typer.Option(..., "--manifest"),
+    out: Path = typer.Option(..., "--out"),
+    fit: str = typer.Option("full-frame", "--fit", help="Placement: full-frame, outline, cover, or contain."),
+    svg_raster_scale: int = typer.Option(1, "--svg-raster-scale"),
+) -> None:
+    make_animal_habitat_tiles_impl(
+        image=image,
+        manifest_path=manifest,
+        out=out,
+        fit=fit,
+        svg_raster_scale=svg_raster_scale,
     )
 
 

@@ -30,6 +30,8 @@ def make_height_tiles(
     minecraft_min_x: int,
     minecraft_min_z: int,
     sea_level_y: int,
+    axis_scale_x: float = 1.0,
+    axis_scale_z: float = 1.0,
     height_resampling: str = "nearest",
     height_smoothing: str = "none",
     height_deterrace: bool = False,
@@ -97,6 +99,8 @@ def make_height_tiles(
         bng_min_northing=bng_min_northing,
         bng_max_easting=bng_max_easting,
         bng_max_northing=bng_max_northing,
+        axis_scale_x=axis_scale_x,
+        axis_scale_z=axis_scale_z,
     )
     manifest["height_processing"] = {
         "source": "OS Terrain 50",

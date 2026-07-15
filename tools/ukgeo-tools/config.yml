@@ -20,11 +20,18 @@ rebuild:
   COP30_ARCHIVE: ../../data/rasters_COP30.tar.gz
   RIVERS_ZIP: ../../data/oprvrs_gpkg_gb_ie.zip
   LANDCOVER_ZIP: ../../data/FME_3564346A_1778997494261_5633.zip
+  ANIMALS_SVG: ../../data/SVGS/Animals British Isles export.svg
   IRON_OVERLAY_IMAGE: ../../data/uk_iron_ore_reference_overlay.svg
   IRON_OVERLAY_SCORE: 180
   IRON_OVERLAY_FIT: outline
+  ROI_ORES_SVG: ../../data/SVGS/Ores Republic of Ireland export.svg
+  ROI_ORE_OVERLAY_SCORE: 180
   ORE_RULES: examples/ore_rules_625k.yml
   SURFACE_RULES: examples/surface_geology_625k.yml
+  WORLD_X_SCALE: 1.0
+  WORLD_Z_SCALE: 1.0
+  # WORLD_X_SCALE: 1.5
+  # WORLD_Z_SCALE: 1.5
   BNG_MIN_EASTING_IRELAND: -220000
   BNG_MIN_NORTHING_IRELAND: 0
   BNG_MAX_EASTING: 650000
@@ -38,9 +45,12 @@ previews:
   MAX_SIZE: 12000
   LEGEND_SCALE: 20
   DATA_DIR: ../../data
+  ANIMALS_SVG: ../../data/SVGS/Animals British Isles export.svg
   IRON_OVERLAY_IMAGE: ../../data/uk_iron_ore_reference_overlay.svg
   IRON_OVERLAY_SCORE: 180
   IRON_OVERLAY_FIT: outline
+  ROI_ORES_SVG: ../../data/SVGS/Ores Republic of Ireland export.svg
+  ROI_ORE_OVERLAY_SCORE: 180
   BGS_GEOLOGY_ZIP: ../../data/BGS_Geology_625k_bedrock_gpkg.zip
   ORE_RULES: examples/ore_rules_625k.yml
   REBUILD_IRON: auto
