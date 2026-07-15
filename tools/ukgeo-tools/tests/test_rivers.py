@@ -119,8 +119,8 @@ def test_extract_lines_treats_nan_topology_fields_as_missing():
 
 
 def test_dataset_half_width_only_thins_irish_datasets():
-    assert _dataset_half_width(10, "epa_river_network_routes_ie") == 8
-    assert _dataset_half_width(10, "ni_river_segment") == 8
+    assert _dataset_half_width(10, "epa_river_network_routes_ie") == 7
+    assert _dataset_half_width(10, "ni_river_segment") == 7
     assert _dataset_half_width(10, "os_open_rivers_gb") == 10
     assert _dataset_half_width(1, "ni_river_segment") == 1
 

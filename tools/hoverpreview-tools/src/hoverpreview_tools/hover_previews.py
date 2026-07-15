@@ -132,6 +132,7 @@ def export_hover_previews(
     done = timed("height")
     height_values = _read_height_preview(root, manifest, tiles_x, tiles_z, source_tile_size, scale)
     base_size = (height_values.shape[1], height_values.shape[0])
+    height_content_bounds = _content_bounds(height_values, HEIGHT_NODATA)
     with tempfile.TemporaryDirectory(prefix="hoverpreview-height-", dir=out) as temp_dir_name:
         temp_dir = Path(temp_dir_name)
         height_visual = _create_disk_raster(temp_dir / "height.visual.bin", base_size, "RGB")
@@ -490,6 +491,9 @@ def export_hover_previews(
             "river_width_scale": PREVIEW_RIVER_WIDTH_SCALE,
             "river_min_radius": PREVIEW_RIVER_MIN_RADIUS,
             "river_max_radius": PREVIEW_RIVER_MAX_RADIUS,
+        },
+        "content_bounds": {
+            "height": height_content_bounds,
         },
         "viewer": {
             "renderer_preference": renderer,
@@ -898,6 +902,17 @@ def _height_sample_image(values: np.ndarray) -> Image.Image:
     encoded = values.astype(np.int32) + 32768
     encoded[values == HEIGHT_NODATA] = 0
     return Image.fromarray(np.clip(encoded, 0, 65535).astype(np.uint16), mode="I;16")
+
+
+def _content_bounds(values: np.ndarray, nodata: int) -> dict[str, int]:
+    valid = np.argwhere(values != nodata)
+    if valid.size == 0:
+        return {"left": 0, "top": 0, "right": values.shape[1], "bottom": values.shape[0]}
+    top = int(valid[:, 0].min())
+    bottom = int(valid[:, 0].max()) + 1
+    left = int(valid[:, 1].min())
+    right = int(valid[:, 1].max()) + 1
+    return {"left": left, "top": top, "right": right, "bottom": bottom}
 
 
 def _height_browser_sample_image(values: np.ndarray) -> Image.Image:

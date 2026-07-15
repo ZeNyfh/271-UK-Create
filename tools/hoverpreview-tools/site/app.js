@@ -18,7 +18,7 @@ const DEFAULT_ANIMALS_TEXT = `
 12|rocky|upland|mountain|stony_peaks|minecraft:stony_peaks|ukgeo:rocky: Sheep, Rabbit, Bat
 13|coastal_ocean|ocean|sea|beach|coast|minecraft:ocean|ukgeo:coastal_ocean: —
 `;
-const START_STATUS = "Mouse wheel zooms. Middle/right drag pans. Left click copies the current Minecraft coordinates.";
+const START_STATUS = "Mouse wheel zooms. Middle/right drag pans. Left drag measures distance. Left click copies the current Minecraft coordinates.";
 const DEFAULT_VISIBLE_OVERLAYS = new Set(["surface", "vegetation", "rivers"]);
 const DEFAULT_VISIBLE_ORES = new Set(["coal", "iron", "copper", "zinc", "gold"]);
 const MAX_DEVICE_PIXEL_RATIO = 2;
@@ -29,15 +29,17 @@ const MAX_CONCURRENT_BITMAP_LOADS = 10;
 const CHUNK_LOAD_DEBOUNCE_MS = 60;
 const DEFAULT_TILE_SIZE = 256;
 const SAMPLE_LOAD_PRIORITY = -10000;
-const MIN_MAP_ZOOM = 0.09;
+const ABSOLUTE_MIN_MAP_ZOOM = 0.01;
+const MIN_ZOOM_FROM_FIT_FACTOR = 0.7;
 const MAX_DISPLAY_ZOOM_PERCENT = 500;
-const MAX_MAP_ZOOM = MIN_MAP_ZOOM + MAX_DISPLAY_ZOOM_PERCENT / 100;
 const WHEEL_DELTA_PER_ZOOM_STEP = 100;
 const PINCH_ZOOM_SENSITIVITY = 1.25;
 const PINCH_ZOOM_DEADZONE = 0.2;
 const PINCH_MIN_DISTANCE = 8;
 const SAMPLE_CROP_SIZE = 512;
 const DEFAULT_RENDERER_PREFERENCE = "auto";
+const FIT_VIEW_PADDING_PX = 72;
+const RenderMath = globalThis.HoverRenderMath || {};
 const BACKGROUND_ORE_ATTEMPT_MULTIPLIER = 0.1;
 const ORE_AREA_ATTEMPT_MULTIPLIER = 3.0;
 // Hover UI displays ore density in player-facing relative density units;
@@ -80,8 +82,6 @@ const elements = {
   latlonForm: document.querySelector("#latlon-form"),
   latInput: document.querySelector("#lat-input"),
   lonInput: document.querySelector("#lon-input"),
-  scrollX: document.querySelector(".scrollbar-x span"),
-  scrollY: document.querySelector(".scrollbar-y span"),
 };
 
 const state = {
@@ -274,6 +274,7 @@ elements.viewer.addEventListener("pointerup", (event) => {
     return;
   }
   if (state.measurePointerId === event.pointerId) {
+    updateMeasurement(event);
     state.measurePointerId = null;
     if (!state.measureMoved) copyCoordinates(event);
   }
@@ -431,7 +432,11 @@ function createWebGlRenderer(canvas) {
   gl.enable(gl.BLEND);
   gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
   gl.disable(gl.DEPTH_TEST);
+  gl.disable(gl.DITHER);
   gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+  if ("UNPACK_COLORSPACE_CONVERSION_WEBGL" in gl) {
+    gl.pixelStorei(gl.UNPACK_COLORSPACE_CONVERSION_WEBGL, gl.NONE);
+  }
 
   return {
     mode: "webgl",
@@ -582,9 +587,12 @@ function assetUrl(path) {
 function fitView() {
   if (!state.manifest) return;
   const rect = elements.viewer.getBoundingClientRect();
-  state.zoom = clampZoom(Math.min(1, rect.width / state.imageWidth, rect.height / state.imageHeight));
-  state.offsetX = 0;
-  state.offsetY = 0;
+  const bounds = viewerFitBounds();
+  const boundsWidth = Math.max(1, bounds.right - bounds.left);
+  const boundsHeight = Math.max(1, bounds.bottom - bounds.top);
+  state.zoom = clampZoom(fitZoomToViewport(rect.width, rect.height, boundsWidth, boundsHeight));
+  state.offsetX = rect.width / 2 - ((bounds.left + bounds.right) / 2) * state.zoom;
+  state.offsetY = rect.height / 2 - ((bounds.top + bounds.bottom) / 2) * state.zoom;
   applyTransform();
   updateZoomInput();
 }
@@ -714,16 +722,59 @@ function setDisplayZoomAt(percent, clientX, clientY) {
 }
 
 function clampZoom(zoom) {
-  return Math.max(MIN_MAP_ZOOM, Math.min(MAX_MAP_ZOOM, zoom));
+  return Math.max(minimumMapZoom(), Math.min(maximumMapZoom(), zoom));
+}
+
+function minimumMapZoom() {
+  if (!state.manifest || !state.imageWidth || !state.imageHeight) return ABSOLUTE_MIN_MAP_ZOOM;
+  const rect = elements.viewer.getBoundingClientRect();
+  const bounds = viewerFitBounds();
+  const boundsWidth = Math.max(1, bounds.right - bounds.left);
+  const boundsHeight = Math.max(1, bounds.bottom - bounds.top);
+  const fitZoom = fitZoomToViewport(rect.width, rect.height, boundsWidth, boundsHeight);
+  return Math.max(ABSOLUTE_MIN_MAP_ZOOM, fitZoom * MIN_ZOOM_FROM_FIT_FACTOR);
+}
+
+function maximumMapZoom() {
+  return minimumMapZoom() + MAX_DISPLAY_ZOOM_PERCENT / 100;
+}
+
+function fitZoomToViewport(viewportWidth, viewportHeight, imageWidth, imageHeight) {
+  if (typeof RenderMath.fitZoom === "function") {
+    return RenderMath.fitZoom(viewportWidth, viewportHeight, imageWidth, imageHeight, FIT_VIEW_PADDING_PX);
+  }
+  return Math.min(1, Math.max(1, viewportWidth - FIT_VIEW_PADDING_PX * 2) / imageWidth, Math.max(1, viewportHeight - FIT_VIEW_PADDING_PX * 2) / imageHeight);
+}
+
+function clampAxisOffset(offset, viewportSize, scaledImageSize) {
+  if (typeof RenderMath.clampAxisOffset === "function") {
+    return RenderMath.clampAxisOffset(offset, viewportSize, scaledImageSize);
+  }
+  const minOffset = Math.min(0, viewportSize - scaledImageSize);
+  const maxOffset = Math.max(0, viewportSize - scaledImageSize);
+  return Math.min(maxOffset, Math.max(minOffset, offset));
+}
+
+function viewerFitBounds() {
+  const bounds = state.manifest?.content_bounds?.height;
+  if (!bounds) {
+    return { left: 0, top: 0, right: state.imageWidth, bottom: state.imageHeight };
+  }
+  const left = Math.max(0, Math.min(state.imageWidth, Number(bounds.left) || 0));
+  const top = Math.max(0, Math.min(state.imageHeight, Number(bounds.top) || 0));
+  const right = Math.max(left + 1, Math.min(state.imageWidth, Number(bounds.right) || state.imageWidth));
+  const bottom = Math.max(top + 1, Math.min(state.imageHeight, Number(bounds.bottom) || state.imageHeight));
+  return { left, top, right, bottom };
 }
 
 function displayZoomPercent() {
-  return Math.max(0, Math.min(MAX_DISPLAY_ZOOM_PERCENT, Math.round((state.zoom - MIN_MAP_ZOOM) * 100)));
+  const minZoom = minimumMapZoom();
+  return Math.max(0, Math.min(MAX_DISPLAY_ZOOM_PERCENT, Math.round((state.zoom - minZoom) * 100)));
 }
 
 function zoomForDisplayPercent(percent) {
   const cleanPercent = Number.isFinite(percent) ? percent : displayZoomPercent();
-  return clampZoom(MIN_MAP_ZOOM + Math.max(0, Math.min(MAX_DISPLAY_ZOOM_PERCENT, cleanPercent)) / 100);
+  return clampZoom(minimumMapZoom() + Math.max(0, Math.min(MAX_DISPLAY_ZOOM_PERCENT, cleanPercent)) / 100);
 }
 
 function commitZoomInput() {
@@ -757,8 +808,8 @@ function goToLatLon() {
     return;
   }
   centerImagePoint(image.x, image.y);
-  const inside = image.x >= 0 && image.y >= 0 && image.x < state.imageWidth && image.y < state.imageHeight;
-  setStatus(`Centered on lon ${lon.toFixed(6)}, lat ${lat.toFixed(6)} | BNG E ${bng.easting.toFixed(0)}, N ${bng.northing.toFixed(0)}${inside ? "" : " | outside generated world"}`);
+  const point = statusPointFromImage(image.x, image.y);
+  setStatus(`Centered on lon ${lon.toFixed(6)}, lat ${lat.toFixed(6)} | BNG E ${bng.easting.toFixed(0)}, N ${bng.northing.toFixed(0)} | Minecraft x ${point.minecraftX}, z ${point.minecraftZ}`);
 }
 
 function centerImagePoint(imageX, imageY) {
@@ -874,31 +925,11 @@ function applyTransform() {
   const rect = elements.viewer.getBoundingClientRect();
   const scaledWidth = state.imageWidth * state.zoom;
   const scaledHeight = state.imageHeight * state.zoom;
-  const minX = Math.min(0, rect.width - scaledWidth);
-  const minY = Math.min(0, rect.height - scaledHeight);
-  state.offsetX = Math.min(0, Math.max(minX, state.offsetX));
-  state.offsetY = Math.min(0, Math.max(minY, state.offsetY));
+  state.offsetX = clampAxisOffset(state.offsetX, rect.width, scaledWidth);
+  state.offsetY = clampAxisOffset(state.offsetY, rect.height, scaledHeight);
   if (document.activeElement !== elements.zoomLabel) updateZoomInput();
-  updateScrollbars(rect, scaledWidth, scaledHeight);
   updateMeasurementOverlay();
   scheduleRender();
-}
-
-function updateScrollbars(rect, scaledWidth, scaledHeight) {
-  const xRatio = rect.width / Math.max(scaledWidth, rect.width);
-  const yRatio = rect.height / Math.max(scaledHeight, rect.height);
-  const xTrack = rect.width;
-  const yTrack = rect.height;
-  const xThumb = Math.max(18, xTrack * xRatio);
-  const yThumb = Math.max(18, yTrack * yRatio);
-  const xTravel = Math.max(0, xTrack - xThumb - 2);
-  const yTravel = Math.max(0, yTrack - yThumb - 2);
-  const xOffset = scaledWidth <= rect.width ? 0 : (-state.offsetX / (scaledWidth - rect.width)) * xTravel;
-  const yOffset = scaledHeight <= rect.height ? 0 : (-state.offsetY / (scaledHeight - rect.height)) * yTravel;
-  elements.scrollX.style.width = `${xThumb}px`;
-  elements.scrollX.style.left = `${1 + xOffset}px`;
-  elements.scrollY.style.height = `${yThumb}px`;
-  elements.scrollY.style.top = `${1 + yOffset}px`;
 }
 
 function scheduleRender() {
@@ -994,7 +1025,7 @@ function prepareCanvasFrame(rect, dpr) {
   if (!ctx) throw new Error("2D canvas context unavailable");
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, rect.width, rect.height);
-  ctx.fillStyle = "#222222";
+  ctx.fillStyle = "#101820";
   ctx.fillRect(0, 0, rect.width, rect.height);
 }
 
@@ -1003,7 +1034,7 @@ function prepareWebGlFrame(rect, dpr) {
   if (!renderer || renderer.mode !== "webgl") throw new Error("WebGL renderer unavailable");
   const gl = renderer.gl;
   gl.viewport(0, 0, state.mapCanvas.width, state.mapCanvas.height);
-  gl.clearColor(34 / 255, 34 / 255, 34 / 255, 1);
+  gl.clearColor(16 / 255, 24 / 255, 32 / 255, 1);
   gl.clear(gl.COLOR_BUFFER_BIT);
   gl.useProgram(renderer.program);
   gl.bindBuffer(gl.ARRAY_BUFFER, renderer.buffer);
@@ -1011,10 +1042,14 @@ function prepareWebGlFrame(rect, dpr) {
 }
 
 function visibleImageCrop(rect) {
-  const left = Math.max(0, -state.offsetX / state.zoom);
-  const top = Math.max(0, -state.offsetY / state.zoom);
-  const right = Math.min(state.imageWidth, (rect.width - state.offsetX) / state.zoom);
-  const bottom = Math.min(state.imageHeight, (rect.height - state.offsetY) / state.zoom);
+  const scaledWidth = state.imageWidth * state.zoom;
+  const scaledHeight = state.imageHeight * state.zoom;
+  const fitsWidth = scaledWidth <= rect.width + 0.5;
+  const fitsHeight = scaledHeight <= rect.height + 0.5;
+  const left = fitsWidth ? 0 : Math.max(0, -state.offsetX / state.zoom);
+  const top = fitsHeight ? 0 : Math.max(0, -state.offsetY / state.zoom);
+  const right = fitsWidth ? state.imageWidth : Math.min(state.imageWidth, (rect.width - state.offsetX) / state.zoom);
+  const bottom = fitsHeight ? state.imageHeight : Math.min(state.imageHeight, (rect.height - state.offsetY) / state.zoom);
   if (right <= left || bottom <= top) return null;
   return { left, top, right, bottom };
 }
@@ -1173,8 +1208,8 @@ async function loadLayerBitmap(layer, mip, region, key, priority) {
     const url = layerRegionUrl(layer, mip, region);
     const blob = mip.tiles ? await fetchBlob(url) : await loadSourceBlob(url);
     if (!state.activeLayerBitmapKeys.has(key)) return null;
-    if (mip.tiles) return createImageBitmap(blob);
-    return createImageBitmap(blob, region.left, region.top, region.right - region.left, region.bottom - region.top);
+    if (mip.tiles) return createLayerImageBitmap(blob);
+    return createLayerImageBitmap(blob, region.left, region.top, region.right - region.left, region.bottom - region.top);
   }, key, priority);
   if (!bitmap) return;
   const entry = state.layers.get(layer.name);
@@ -1185,6 +1220,18 @@ async function loadLayerBitmap(layer, mip, region, key, priority) {
   state.layerBitmaps.set(key, { key, bitmap, mip, region, lastUsed: performance.now() });
   pruneLayerBitmapCache(state.activeLayerBitmapKeys);
   scheduleChunkRender();
+}
+
+function createLayerImageBitmap(source, ...args) {
+  const options = state.mapRendererMode === "webgl"
+    ? { colorSpaceConversion: "none", premultiplyAlpha: "none" }
+    : null;
+  if (!options) return createImageBitmap(source, ...args);
+  try {
+    return createImageBitmap(source, ...args, options);
+  } catch (_error) {
+    return createImageBitmap(source, ...args);
+  }
 }
 
 async function loadSourceBlob(url) {
@@ -1399,39 +1446,49 @@ function screenToImage(clientX, clientY) {
 
 function sampleFromEvent(event) {
   const image = screenToImage(event.clientX, event.clientY);
-  if (image.x < 0 || image.y < 0 || image.x >= state.imageWidth || image.y >= state.imageHeight) return null;
+  const point = statusPointFromImage(image.x, image.y);
+  const samplePoint = {
+    ...point,
+    clientX: event.clientX,
+    clientY: event.clientY,
+  };
+  if (image.x < 0 || image.y < 0 || image.x >= state.imageWidth || image.y >= state.imageHeight) {
+    return samplePoint;
+  }
   const scale = Number(state.manifest.scale || 1);
-  const dataX = Math.floor(image.x * scale);
-  const dataZ = Math.floor(image.y * scale);
-  const world = state.manifest.world || {};
-  const tileSize = Number(state.manifest.tile_size || 512);
   const height = samplePixel("height", image.x, image.y);
   const minecraftHeight = minecraftHeightFromRawHeight(height);
   return {
-    screenX: event.clientX,
-    screenY: event.clientY,
-    imageX: image.x,
-    imageY: image.y,
+    ...samplePoint,
+    height,
+    minecraftHeight,
+  };
+}
+
+function statusPointFromImage(imageX, imageY) {
+  const scale = Number(state.manifest?.scale || 1);
+  const world = state.manifest?.world || {};
+  const tileSize = Number(state.manifest?.tile_size || 512);
+  const dataX = Math.floor(imageX * scale);
+  const dataZ = Math.floor(imageY * scale);
+  return {
+    imageX,
+    imageY,
     dataX,
     dataZ,
     minecraftX: Number(world.minecraft_min_x || 0) + dataX,
     minecraftZ: Number(world.minecraft_min_z || 0) + dataZ,
     tileX: Math.floor(dataX / tileSize),
     tileZ: Math.floor(dataZ / tileSize),
-    localX: dataX % tileSize,
-    localZ: dataZ % tileSize,
-    height,
-    minecraftHeight,
+    localX: ((dataX % tileSize) + tileSize) % tileSize,
+    localZ: ((dataZ % tileSize) + tileSize) % tileSize,
+    insideWorld: imageX >= 0 && imageY >= 0 && imageX < state.imageWidth && imageY < state.imageHeight,
   };
 }
 
 function updateStatus(event) {
   state.lastStatusPoint = { clientX: event.clientX, clientY: event.clientY };
   const sample = sampleFromEvent(event);
-  if (!sample) {
-    setStatus("outside generated world");
-    return;
-  }
   const heightText = minecraftHeightText(sample);
   const bng = bngText(sample.dataX, sample.dataZ);
   const details = statusDetails(sample);
@@ -1918,7 +1975,7 @@ function updateMeasurement(event) {
     clearMeasurement();
     return;
   }
-  if (Math.abs(current.screenX - start.screenX) + Math.abs(current.screenY - start.screenY) >= 4) state.measureMoved = true;
+  if (Math.abs(current.clientX - start.clientX) + Math.abs(current.clientY - start.clientY) >= 4) state.measureMoved = true;
   if (!state.measureMoved) return;
   const line = ensureMeasurement();
   const dx = current.minecraftX - start.minecraftX;

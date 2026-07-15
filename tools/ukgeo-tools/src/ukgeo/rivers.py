@@ -29,7 +29,7 @@ SOURCE_START_NODE_FIELDS = ("start_node", "START_NODE", "source_start_node", "FR
 SOURCE_END_NODE_FIELDS = ("end_node", "END_NODE", "source_end_node", "TO_NODE", "to_node")
 SOURCE_FLOW_DIRECTION_FIELDS = ("flow_direction", "FLOW_DIRECTION", "direction")
 THINNER_RIVER_DATASETS = {"epa_river_network_routes_ie", "ni_river_segment"}
-THINNER_RIVER_WIDTH_FACTOR = 0.8
+THINNER_RIVER_WIDTH_FACTOR = 0.7
 TOP_ORDER_THINNING_FACTORS = (0.5, 1.0 / 1.5, 1.0 / 1.25, 1.0 / 1.125)
 RIVER_RASTER_BATCH_SIZE = 8000
 

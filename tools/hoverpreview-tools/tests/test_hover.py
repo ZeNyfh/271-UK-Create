@@ -209,6 +209,7 @@ def test_export_hover_manifest_preserves_height_overlays_and_manifest_bounds(tmp
     assert hover_manifest["image_width"] == 256
     assert hover_manifest["image_height"] == 256
     assert hover_manifest["height_overlays"] == manifest["height_overlays"]
+    assert hover_manifest["content_bounds"]["height"] == {"left": 0, "top": 0, "right": 256, "bottom": 256}
     assert hover_manifest["viewer"]["renderer_preference"] == "auto"
 
 

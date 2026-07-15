@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>UKGeo Hover Map</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
@@ -44,12 +44,11 @@
           <p>Run <code>./hoverpreview-local</code> from the repository root so preview paths match GitHub Pages.</p>
         </div>
       </div>
-      <div class="scrollbar scrollbar-y" aria-hidden="true"><span></span></div>
-      <div class="scrollbar scrollbar-x" aria-hidden="true"><span></span></div>
-      <output id="status" class="status" aria-live="polite">Mouse wheel zooms. Middle/right drag pans. Left click copies the current Minecraft coordinates.</output>
     </main>
   </div>
+  <output id="status" class="status" aria-live="polite">Mouse wheel zooms. Middle/right drag pans. Left drag measures distance. Left click copies the current Minecraft coordinates.</output>
 
+  <script src="render_math.js" defer></script>
   <script src="app.js" defer></script>
 </body>
 </html>

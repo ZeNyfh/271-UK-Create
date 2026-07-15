@@ -6,6 +6,8 @@ data/*.geojson filter=lfs diff=lfs merge=lfs -text
 /tools/ukgeo-tools/uk_world_data_gb/hoverpreviews/layers/height.png filter=lfs diff=lfs merge=lfs -text
 /tools/ukgeo-tools/uk_world_data_gb/hoverpreviews/samples/height_rgb.png filter=lfs diff=lfs merge=lfs -text
 /tools/ukgeo-tools/uk_world_data_gb/hoverpreviews/samples/height_u16.png filter=lfs diff=lfs merge=lfs -text
+/data/SVGS/Animals[[:space:]]British[[:space:]]Isles[[:space:]]export.svg filter=lfs diff=lfs merge=lfs -text
+/data/SVGS/Ores[[:space:]]Republic[[:space:]]of[[:space:]]Ireland[[:space:]]export.svg filter=lfs diff=lfs merge=lfs -text
 /tools/ukgeo-tools/uk_world_data_gb/hoverpreviews/layers/vegetation.png filter=lfs diff=lfs merge=lfs -text
 /tools/ukgeo-tools/uk_world_data_gb/hoverpreviews/mips/2/layers/height.png filter=lfs diff=lfs merge=lfs -text
 /tools/ukgeo-tools/uk_world_data_gb/hoverpreviews/mips/2/layers/surface.png filter=lfs diff=lfs merge=lfs -text
