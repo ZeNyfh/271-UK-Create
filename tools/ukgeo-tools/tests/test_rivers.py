@@ -3,7 +3,7 @@ from __future__ import annotations
 import geopandas as gpd
 from shapely.geometry import LineString, MultiLineString
 
-from ukgeo.rivers import _Edge, _coerce_source_order, _extract_lines, _normalize_computed_order_to_source_scale, _thin_top_order_half_widths
+from ukgeo.rivers import _Edge, _coerce_source_order, _dataset_half_width, _extract_lines, _normalize_computed_order_to_source_scale, _thin_top_order_half_widths
 
 
 def test_coerce_source_order_rejects_missing_or_non_positive_values():
@@ -36,6 +36,38 @@ def test_extract_lines_preserves_source_order_for_each_part():
 
     assert len(lines) == 3
     assert [item.source_order for item in lines] == [4, 4, None]
+
+
+def test_extract_lines_preserves_source_dataset():
+    frame = gpd.GeoDataFrame(
+        {
+            "ORDER_": [5],
+            "source_dataset": ["ni_river_segment"],
+            "geometry": [
+                MultiLineString(
+                    [
+                        [(0, 0), (1, 0)],
+                        [(1, 0), (2, 0)],
+                    ]
+                )
+            ],
+        },
+        geometry="geometry",
+        crs="EPSG:27700",
+    )
+
+    lines = _extract_lines(frame)
+
+    assert len(lines) == 2
+    assert [item.source_order for item in lines] == [5, 5]
+    assert [item.source_dataset for item in lines] == ["ni_river_segment", "ni_river_segment"]
+
+
+def test_dataset_half_width_only_thins_irish_datasets():
+    assert _dataset_half_width(10, "epa_river_network_routes_ie") == 8
+    assert _dataset_half_width(10, "ni_river_segment") == 8
+    assert _dataset_half_width(10, "os_open_rivers_gb") == 10
+    assert _dataset_half_width(1, "ni_river_segment") == 1
 
 
 def test_thin_top_order_half_widths_scales_top_four_order_levels():
