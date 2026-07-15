@@ -12,6 +12,7 @@ from rasterio.features import rasterize
 from rasterio.transform import from_bounds
 from rich.console import Console
 from shapely.geometry import LineString, MultiLineString
+from shapely.ops import linemerge
 from tqdm import tqdm
 
 from .bgs import resolve_gpkg
@@ -24,6 +25,9 @@ MAX_RIVER_HALFWIDTH = 40
 MIN_RIVER_HALFWIDTH_BY_ORDER = {1: 2, 2: 3, 3: 5}
 SOURCE_ORDER_FIELDS = ("ORDER_", "ORDER", "US_ORDER", "STRAHLER", "STRAHLER_ORDER", "STREAM_ORDER")
 SOURCE_DATASET_FIELDS = ("source_dataset", "SOURCE_DATASET")
+SOURCE_START_NODE_FIELDS = ("start_node", "START_NODE", "source_start_node", "FROM_NODE", "from_node")
+SOURCE_END_NODE_FIELDS = ("end_node", "END_NODE", "source_end_node", "TO_NODE", "to_node")
+SOURCE_FLOW_DIRECTION_FIELDS = ("flow_direction", "FLOW_DIRECTION", "direction")
 THINNER_RIVER_DATASETS = {"epa_river_network_routes_ie", "ni_river_segment"}
 THINNER_RIVER_WIDTH_FACTOR = 0.8
 TOP_ORDER_THINNING_FACTORS = (0.5, 1.0 / 1.5, 1.0 / 1.25, 1.0 / 1.125)
@@ -169,6 +173,9 @@ class _InputLine:
     line: LineString
     source_order: int | None = None
     source_dataset: str | None = None
+    source_start_node: str | None = None
+    source_end_node: str | None = None
+    source_flow_direction: str | None = None
 
 
 def _source_column(columns: list[str], candidates: tuple[str, ...]) -> str | None:
@@ -186,6 +193,18 @@ def _source_order_column(columns: list[str]) -> str | None:
 
 def _source_dataset_column(columns: list[str]) -> str | None:
     return _source_column(columns, SOURCE_DATASET_FIELDS)
+
+
+def _source_start_node_column(columns: list[str]) -> str | None:
+    return _source_column(columns, SOURCE_START_NODE_FIELDS)
+
+
+def _source_end_node_column(columns: list[str]) -> str | None:
+    return _source_column(columns, SOURCE_END_NODE_FIELDS)
+
+
+def _source_flow_direction_column(columns: list[str]) -> str | None:
+    return _source_column(columns, SOURCE_FLOW_DIRECTION_FIELDS)
 
 
 def _coerce_source_order(value) -> int | None:
@@ -207,26 +226,42 @@ def _extract_lines(frame: gpd.GeoDataFrame) -> list[_InputLine]:
     columns = list(frame.columns)
     order_column = _source_order_column(columns)
     source_dataset_column = _source_dataset_column(columns)
+    source_start_node_column = _source_start_node_column(columns)
+    source_end_node_column = _source_end_node_column(columns)
+    source_flow_direction_column = _source_flow_direction_column(columns)
     order_values = frame[order_column] if order_column is not None else None
     source_dataset_values = frame[source_dataset_column] if source_dataset_column is not None else None
+    source_start_node_values = frame[source_start_node_column] if source_start_node_column is not None else None
+    source_end_node_values = frame[source_end_node_column] if source_end_node_column is not None else None
+    source_flow_direction_values = frame[source_flow_direction_column] if source_flow_direction_column is not None else None
     lines: list[_InputLine] = []
-    for geom, raw_order, raw_source_dataset in zip(
+    for geom, raw_order, raw_source_dataset, raw_source_start_node, raw_source_end_node, raw_source_flow_direction in zip(
         frame.geometry,
         order_values if order_values is not None else [None] * len(frame),
         source_dataset_values if source_dataset_values is not None else [None] * len(frame),
+        source_start_node_values if source_start_node_values is not None else [None] * len(frame),
+        source_end_node_values if source_end_node_values is not None else [None] * len(frame),
+        source_flow_direction_values if source_flow_direction_values is not None else [None] * len(frame),
         strict=False,
     ):
         source_order = _coerce_source_order(raw_order)
         source_dataset = str(raw_source_dataset) if raw_source_dataset not in {None, ""} else None
+        source_start_node = str(raw_source_start_node) if raw_source_start_node not in {None, ""} else None
+        source_end_node = str(raw_source_end_node) if raw_source_end_node not in {None, ""} else None
+        source_flow_direction = str(raw_source_flow_direction) if raw_source_flow_direction not in {None, ""} else None
         if geom is None or geom.is_empty:
             continue
         if isinstance(geom, LineString):
             if len(geom.coords) >= 2:
-                lines.append(_InputLine(geom, source_order, source_dataset))
+                lines.append(_InputLine(geom, source_order, source_dataset, source_start_node, source_end_node, source_flow_direction))
         elif isinstance(geom, MultiLineString):
+            merged = linemerge(geom)
+            if isinstance(merged, LineString) and len(merged.coords) >= 2 and source_start_node and source_end_node:
+                lines.append(_InputLine(merged, source_order, source_dataset, source_start_node, source_end_node, source_flow_direction))
+                continue
             for part in geom.geoms:
                 if len(part.coords) >= 2:
-                    lines.append(_InputLine(part, source_order, source_dataset))
+                    lines.append(_InputLine(part, source_order, source_dataset, None, None, source_flow_direction))
     return lines
 
 
@@ -283,11 +318,15 @@ def _strahler_widths(lines: list[_InputLine], manifest: dict, root: Path) -> _St
         return _StrahlerResult([])
     sampler = _HeightSampler(manifest, root)
     source_max_order = max((item.source_order or 0) for item in lines)
-    node_ids: dict[tuple[int, int], int] = {}
+    node_ids: dict[tuple[str, str] | tuple[int, int], int] = {}
     node_points: list[tuple[float, float]] = []
 
-    def node_id(point: tuple[float, float]) -> int:
-        key = (round(point[0]), round(point[1]))
+    def node_id(point: tuple[float, float], source_node: str | None = None) -> int:
+        key: tuple[str, str] | tuple[int, int]
+        if source_node is not None:
+            key = ("source-node", source_node)
+        else:
+            key = (round(point[0]), round(point[1]))
         found = node_ids.get(key)
         if found is not None:
             return found
@@ -299,8 +338,8 @@ def _strahler_widths(lines: list[_InputLine], manifest: dict, root: Path) -> _St
     raw_edges: list[tuple[int, int, LineString, int | None, str | None]] = []
     for item in lines:
         coords = list(item.line.coords)
-        a = node_id((coords[0][0], coords[0][1]))
-        b = node_id((coords[-1][0], coords[-1][1]))
+        a = node_id((coords[0][0], coords[0][1]), item.source_start_node)
+        b = node_id((coords[-1][0], coords[-1][1]), item.source_end_node)
         if a != b:
             raw_edges.append((a, b, item.line, item.source_order, item.source_dataset))
     if not raw_edges:
@@ -310,15 +349,8 @@ def _strahler_widths(lines: list[_InputLine], manifest: dict, root: Path) -> _St
     downstream: dict[int, list[tuple[int, int]]] = defaultdict(list)
     upstream_count: dict[int, int] = defaultdict(int)
     oriented: list[tuple[int, int, LineString, int | None, str | None]] = []
-    for a, b, line, source_order, source_dataset in raw_edges:
-        ha = heights[a]
-        hb = heights[b]
-        if ha is not None and hb is not None and ha != hb:
-            src, dst = (a, b) if ha > hb else (b, a)
-        else:
-            na = node_points[a][1]
-            nb = node_points[b][1]
-            src, dst = (a, b) if (na > nb or (na == nb and a < b)) else (b, a)
+    for item, (a, b, line, source_order, source_dataset) in zip(lines, raw_edges, strict=False):
+        src, dst = _orient_edge(a, b, item.source_flow_direction, heights, node_points)
         downstream[src].append((dst, len(oriented)))
         upstream_count[dst] += 1
         upstream_count.setdefault(src, upstream_count.get(src, 0))
@@ -402,6 +434,28 @@ def _dataset_half_width(half_width: int, source_dataset: str | None) -> int:
     if source_dataset not in THINNER_RIVER_DATASETS:
         return half_width
     return max(1, int(math.floor(half_width * THINNER_RIVER_WIDTH_FACTOR)))
+
+
+def _orient_edge(
+    a: int,
+    b: int,
+    source_flow_direction: str | None,
+    heights: list[float | None],
+    node_points: list[tuple[float, float]],
+) -> tuple[int, int]:
+    flow = (source_flow_direction or "").strip().lower()
+    if flow:
+        if "against" in flow:
+            return b, a
+        if "in direction" in flow or "with" in flow:
+            return a, b
+    ha = heights[a]
+    hb = heights[b]
+    if ha is not None and hb is not None and ha != hb:
+        return (a, b) if ha > hb else (b, a)
+    na = node_points[a][1]
+    nb = node_points[b][1]
+    return (a, b) if (na > nb or (na == nb and a < b)) else (b, a)
 
 
 def _scaled_half_width_for_order(order: int, base_half_width: int) -> int:
