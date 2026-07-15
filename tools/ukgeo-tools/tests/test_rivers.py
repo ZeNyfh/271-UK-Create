@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import geopandas as gpd
+import numpy as np
 from shapely.geometry import LineString, MultiLineString
 
 from ukgeo.rivers import _Edge, _coerce_source_order, _dataset_half_width, _extract_lines, _normalize_computed_order_to_source_scale, _thin_top_order_half_widths
@@ -92,6 +93,29 @@ def test_extract_lines_preserves_topology_fields_for_mergeable_multiline():
     assert lines[0].source_end_node == "B"
     assert lines[0].source_flow_direction == "in direction"
     assert list(lines[0].line.coords) == [(0.0, 0.0), (1.0, 0.0), (2.0, 0.0)]
+
+
+def test_extract_lines_treats_nan_topology_fields_as_missing():
+    frame = gpd.GeoDataFrame(
+        {
+            "ORDER_": [np.nan],
+            "source_dataset": ["epa_river_network_routes_ie"],
+            "start_node": [np.nan],
+            "end_node": [np.nan],
+            "flow_direction": [np.nan],
+            "geometry": [LineString([(10.2, 10.2), (12.8, 11.6)])],
+        },
+        geometry="geometry",
+        crs="EPSG:27700",
+    )
+
+    lines = _extract_lines(frame)
+
+    assert len(lines) == 1
+    assert lines[0].source_order is None
+    assert lines[0].source_start_node is None
+    assert lines[0].source_end_node is None
+    assert lines[0].source_flow_direction is None
 
 
 def test_dataset_half_width_only_thins_irish_datasets():

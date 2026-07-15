@@ -42,6 +42,8 @@ def export_cmd(
     clean_stale: bool = typer.Option(False, "--clean-stale", help="Delete stale tile files that are no longer referenced by the generated manifest."),
     deploy_minimal: bool = typer.Option(False, "--deploy-minimal", help="Delete redundant full-size layers, mips, and sample images after export. Keep only manifest, visual tiles, and sample tiles."),
     profile: bool = typer.Option(False, "--profile", help="Print rough per-layer export timings."),
+    write_full_images: bool = typer.Option(False, "--write-full-images", help="Also write combined full-size layer/sample images. The viewer only requires tiles, so leaving this off lowers memory and disk usage."),
+    tile_batch_rows: int = typer.Option(4, "--tile-batch-rows", min=1, help="How many tile rows each disk-backed export job writes at once."),
 ) -> None:
     """Export stackable PNG layers consumed by the hover map."""
     if max_size == 0:
@@ -75,6 +77,8 @@ def export_cmd(
                 clean_stale=clean_stale,
                 deploy_minimal=deploy_minimal,
                 profile=profile,
+                write_full_images=write_full_images,
+                tile_batch_rows=tile_batch_rows,
                 progress=advance,
             )
     except (FileNotFoundError, ValueError) as exc:

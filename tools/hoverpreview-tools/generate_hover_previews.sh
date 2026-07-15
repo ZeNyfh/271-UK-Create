@@ -610,6 +610,7 @@ run_preview() {
     --workers "$HOVERPREVIEW_WORKERS"
     --visual-format "$HOVERPREVIEW_VISUAL_FORMAT"
     --renderer "$HOVERPREVIEW_RENDERER"
+    --tile-batch-rows "$HOVERPREVIEW_TILE_BATCH_ROWS"
   )
   if has_task clean; then
     args+=(--clean)
@@ -625,6 +626,9 @@ run_preview() {
   fi
   if is_truthy "$HOVERPREVIEW_PROFILE"; then
     args+=(--profile)
+  fi
+  if is_truthy "$HOVERPREVIEW_WRITE_FULL_IMAGES"; then
+    args+=(--write-full-images)
   fi
   "${HOVER_ENV[@]}" "${args[@]}"
   echo "Wrote hover preview stack to $OUT_DIR"

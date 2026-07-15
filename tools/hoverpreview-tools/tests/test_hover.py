@@ -12,6 +12,7 @@ from hoverpreview_tools.hover_previews import (
     hover_preview_steps,
     hover_preview_scale,
     _minecraft_origin,
+    _resample_visual_to_base_size,
     _river_preview_radii,
     _save_sample_tiles,
     _save_visual_layer,
@@ -247,3 +248,11 @@ def test_export_hover_previews_normalises_renderer_preference(tmp_path):
     hover_manifest = json.loads((out / "hover_manifest.json").read_text(encoding="utf-8"))
     assert hover_manifest["viewer"]["renderer_preference"] == "2d"
     assert hover_manifest["generation"]["renderer"] == "2d"
+
+
+def test_resample_visual_to_base_size_scales_visual_overlay():
+    image = Image.new("RGBA", (16, 16), (255, 0, 0, 150))
+
+    scaled = _resample_visual_to_base_size(image, (64, 32), resampling=Image.Resampling.BILINEAR)
+
+    assert scaled.size == (64, 32)

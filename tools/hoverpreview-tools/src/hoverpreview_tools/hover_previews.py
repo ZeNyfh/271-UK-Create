@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+from dataclasses import dataclass
 import gc
 import json
 import math
 import os
 import shutil
+import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor
 from collections.abc import Callable
@@ -29,7 +31,18 @@ PREVIEW_RIVER_WIDTH_SCALE = 0.18
 PREVIEW_RIVER_MIN_RADIUS = 1
 PREVIEW_RIVER_MAX_RADIUS = 6
 PREVIEW_RIVER_COLOR = (65, 145, 230)
+DEFAULT_TILE_BATCH_ROWS = 4
 _CUPY_MODULE: Any | None | bool = None
+
+
+@dataclass(frozen=True)
+class DiskRaster:
+    path: Path
+    mode: str
+    width: int
+    height: int
+    dtype: Any
+    shape: tuple[int, ...]
 
 
 def _hoverpreview_gpu_mode() -> str:
@@ -80,6 +93,8 @@ def export_hover_previews(
     clean_stale: bool = False,
     deploy_minimal: bool = False,
     profile: bool = False,
+    write_full_images: bool = False,
+    tile_batch_rows: int = DEFAULT_TILE_BATCH_ROWS,
     progress: Callable[[str], None] | None = None,
 ) -> Path:
     manifest = read_manifest(root / "manifest.json")
@@ -90,6 +105,7 @@ def export_hover_previews(
     if visual_format not in SUPPORTED_VISUAL_FORMATS:
         raise ValueError(f"Unsupported visual format {visual_format!r}; expected one of {sorted(SUPPORTED_VISUAL_FORMATS)}")
     renderer = _validate_renderer(renderer)
+    tile_batch_rows = max(1, int(tile_batch_rows))
     scale, tiles_x, tiles_z = hover_preview_scale(manifest, max_size)
     timings: list[tuple[str, float]] = []
 
@@ -116,28 +132,46 @@ def export_hover_previews(
     done = timed("height")
     height_values = _read_height_preview(root, manifest, tiles_x, tiles_z, source_tile_size, scale)
     base_size = (height_values.shape[1], height_values.shape[0])
-    height_mips = _save_visual_layer(
-        out,
-        _height_image(height_values, style).convert("RGB"),
-        _visual_layer_path("layers/height", visual_format),
-        tile_size=preview_tile_size,
-        visual_format=visual_format,
-        workers=encoder_workers,
-        force=force,
-        resampling=Image.Resampling.BILINEAR,
-    )
-    _height_sample_image(height_values).save(out / "samples" / "height_u16.png")
-    height_browser_sample = _height_browser_sample_image(height_values)
-    height_browser_sample.save(out / "samples" / "height_rgb.png")
-    height_sample_tiles = _save_sample_tiles(
-        out,
-        height_browser_sample,
-        "samples/height_rgb.png",
-        tile_size=preview_tile_size,
-        encoding="signed-decimetres-rgb-le-offset-32768",
-        workers=encoder_workers,
-        force=force,
-    )
+    with tempfile.TemporaryDirectory(prefix="hoverpreview-height-", dir=out) as temp_dir_name:
+        temp_dir = Path(temp_dir_name)
+        height_visual = _create_disk_raster(temp_dir / "height.visual.bin", base_size, "RGB")
+        _render_height_visual_raster(height_values, style, height_visual)
+        height_mips = _save_visual_raster_layer(
+            out,
+            height_visual,
+            "layers/height",
+            tile_size=preview_tile_size,
+            visual_format=visual_format,
+            workers=encoder_workers,
+            force=force,
+            resampling=Image.Resampling.BILINEAR,
+            tile_batch_rows=tile_batch_rows,
+            write_full_images=write_full_images,
+        )
+        height_sample_file = None
+        if write_full_images:
+            height_sample = _create_disk_raster(temp_dir / "height.sample.bin", base_size, "I;16")
+            _render_height_sample_raster(height_values, height_sample)
+            height_sample_file = "samples/height_u16.png"
+            _save_disk_raster_image(out / height_sample_file, height_sample, "png", force=force)
+            _delete_disk_raster(height_sample)
+        height_browser_sample = _create_disk_raster(temp_dir / "height.browser.bin", base_size, "RGB")
+        _render_height_browser_sample_raster(height_values, height_browser_sample)
+        height_browser_sample_file = "samples/height_rgb.png" if write_full_images else None
+        if write_full_images and height_browser_sample_file is not None:
+            _save_disk_raster_image(out / height_browser_sample_file, height_browser_sample, "png", force=force)
+        height_sample_tiles = _save_sample_raster_tiles(
+            out,
+            height_browser_sample,
+            "samples/height_rgb.png",
+            tile_size=preview_tile_size,
+            encoding="signed-decimetres-rgb-le-offset-32768",
+            workers=encoder_workers,
+            force=force,
+            tile_batch_rows=tile_batch_rows,
+        )
+        _delete_disk_raster(height_visual)
+        _delete_disk_raster(height_browser_sample)
     del height_values
     gc.collect()
     done()
@@ -146,10 +180,10 @@ def export_hover_previews(
         {
             "name": "height",
             "kind": "base",
-            "file": height_mips[0]["file"],
+            "file": height_mips[0].get("file"),
             "mips": height_mips,
-            "sample_file": "samples/height_u16.png",
-            "browser_sample_file": "samples/height_rgb.png",
+            "sample_file": height_sample_file,
+            "browser_sample_file": height_browser_sample_file,
             "browser_sample_encoding": "signed-decimetres-rgb-le-offset-32768",
             "sample_tiles": height_sample_tiles,
         },
@@ -159,28 +193,48 @@ def export_hover_previews(
         report("surface")
         done = timed("surface")
         values = _read_u8_preview(root, manifest["surface_geology"]["path"], tiles_x, tiles_z, source_tile_size, scale, missing_ok=False)
-        visual = _fit_image(_categorical_overlay_image(values, manifest["surface_geology"].get("classes", {}), alpha=166, transparent_zero=True), base_size)
-        sample = _fit_image(Image.fromarray(values, mode="L"), base_size)
-        mips = _save_visual_layer(
-            out,
-            visual,
-            _visual_layer_path("layers/surface", visual_format),
-            tile_size=preview_tile_size,
-            visual_format=visual_format,
-            workers=encoder_workers,
-            force=force,
-            resampling=Image.Resampling.NEAREST,
-        )
-        sample.save(out / "samples" / "surface_u8.png")
+        with tempfile.TemporaryDirectory(prefix="hoverpreview-surface-", dir=out) as temp_dir_name:
+            temp_dir = Path(temp_dir_name)
+            visual = _create_disk_raster(temp_dir / "surface.visual.bin", base_size, "RGBA")
+            _render_categorical_overlay_raster(values, manifest["surface_geology"].get("classes", {}), alpha=166, transparent_zero=True, raster=visual)
+            sample = _create_disk_raster(temp_dir / "surface.sample.bin", base_size, "L")
+            _render_fitted_u8_sample_raster(values, sample)
+            mips = _save_visual_raster_layer(
+                out,
+                visual,
+                "layers/surface",
+                tile_size=preview_tile_size,
+                visual_format=visual_format,
+                workers=encoder_workers,
+                force=force,
+                resampling=Image.Resampling.NEAREST,
+                tile_batch_rows=tile_batch_rows,
+                write_full_images=write_full_images,
+            )
+            sample_file = "samples/surface_u8.png" if write_full_images else None
+            if write_full_images and sample_file is not None:
+                _save_disk_raster_image(out / sample_file, sample, "png", force=force)
+            sample_tiles = _save_sample_raster_tiles(
+                out,
+                sample,
+                "samples/surface_u8.png",
+                tile_size=preview_tile_size,
+                encoding="u8",
+                workers=encoder_workers,
+                force=force,
+                tile_batch_rows=tile_batch_rows,
+            )
+            _delete_disk_raster(visual)
+            _delete_disk_raster(sample)
         layers.append({
             "name": "surface",
             "kind": "overlay",
-            "file": mips[0]["file"],
+            "file": mips[0].get("file"),
             "mips": mips,
-            "sample_file": "samples/surface_u8.png",
-            "sample_tiles": _save_sample_tiles(out, sample, "samples/surface_u8.png", tile_size=preview_tile_size, encoding="u8", workers=encoder_workers, force=force),
+            "sample_file": sample_file,
+            "sample_tiles": sample_tiles,
         })
-        del values, visual, sample
+        del values
         gc.collect()
         done()
 
@@ -188,28 +242,48 @@ def export_hover_previews(
         report("vegetation")
         done = timed("vegetation")
         values = read_vegetation_preview(root, manifest, scale, missing_ok=False)
-        visual = _fit_image(_categorical_overlay_image(values, manifest["vegetation"].get("classes", {}), alpha=176, transparent_zero=True), base_size)
-        sample = _fit_image(Image.fromarray(values, mode="L"), base_size)
-        mips = _save_visual_layer(
-            out,
-            visual,
-            _visual_layer_path("layers/vegetation", visual_format),
-            tile_size=preview_tile_size,
-            visual_format=visual_format,
-            workers=encoder_workers,
-            force=force,
-            resampling=Image.Resampling.NEAREST,
-        )
-        sample.save(out / "samples" / "vegetation_u8.png")
+        with tempfile.TemporaryDirectory(prefix="hoverpreview-vegetation-", dir=out) as temp_dir_name:
+            temp_dir = Path(temp_dir_name)
+            visual = _create_disk_raster(temp_dir / "vegetation.visual.bin", base_size, "RGBA")
+            _render_categorical_overlay_raster(values, manifest["vegetation"].get("classes", {}), alpha=176, transparent_zero=True, raster=visual)
+            sample = _create_disk_raster(temp_dir / "vegetation.sample.bin", base_size, "L")
+            _render_fitted_u8_sample_raster(values, sample)
+            mips = _save_visual_raster_layer(
+                out,
+                visual,
+                "layers/vegetation",
+                tile_size=preview_tile_size,
+                visual_format=visual_format,
+                workers=encoder_workers,
+                force=force,
+                resampling=Image.Resampling.NEAREST,
+                tile_batch_rows=tile_batch_rows,
+                write_full_images=write_full_images,
+            )
+            sample_file = "samples/vegetation_u8.png" if write_full_images else None
+            if write_full_images and sample_file is not None:
+                _save_disk_raster_image(out / sample_file, sample, "png", force=force)
+            sample_tiles = _save_sample_raster_tiles(
+                out,
+                sample,
+                "samples/vegetation_u8.png",
+                tile_size=preview_tile_size,
+                encoding="u8",
+                workers=encoder_workers,
+                force=force,
+                tile_batch_rows=tile_batch_rows,
+            )
+            _delete_disk_raster(visual)
+            _delete_disk_raster(sample)
         layers.append({
             "name": "vegetation",
             "kind": "overlay",
-            "file": mips[0]["file"],
+            "file": mips[0].get("file"),
             "mips": mips,
-            "sample_file": "samples/vegetation_u8.png",
-            "sample_tiles": _save_sample_tiles(out, sample, "samples/vegetation_u8.png", tile_size=preview_tile_size, encoding="u8", workers=encoder_workers, force=force),
+            "sample_file": sample_file,
+            "sample_tiles": sample_tiles,
         })
-        del values, visual, sample
+        del values
         gc.collect()
         done()
 
@@ -217,29 +291,51 @@ def export_hover_previews(
         report("biome_regions")
         done = timed("biome_regions")
         values = read_cell_u8_preview(root, manifest, "biome_regions", scale, missing_ok=False)
-        visual = _fit_image(_categorical_overlay_image(values, manifest["biome_regions"].get("classes", {}), alpha=150, transparent_zero=True), base_size)
-        sample = _fit_image(Image.fromarray(values, mode="L"), base_size)
-        mips = _save_visual_layer(
-            out,
-            visual,
-            _visual_layer_path("layers/biome_regions", visual_format),
-            tile_size=preview_tile_size,
-            visual_format=visual_format,
-            workers=encoder_workers,
-            force=force,
-            resampling=Image.Resampling.NEAREST,
-        )
-        sample.save(out / "samples" / "biome_regions_u8.png")
+        with tempfile.TemporaryDirectory(prefix="hoverpreview-biome-regions-", dir=out) as temp_dir_name:
+            temp_dir = Path(temp_dir_name)
+            visual_source = _create_disk_raster(temp_dir / "biome_regions.source.bin", (values.shape[1], values.shape[0]), "RGBA")
+            _render_categorical_overlay_raster(values, manifest["biome_regions"].get("classes", {}), alpha=150, transparent_zero=True, raster=visual_source)
+            visual = _resize_disk_raster(visual_source, temp_dir / "biome_regions.visual.bin", base_size, Image.Resampling.BILINEAR)
+            sample = _create_disk_raster(temp_dir / "biome_regions.sample.bin", base_size, "L")
+            _render_fitted_u8_sample_raster(values, sample)
+            mips = _save_visual_raster_layer(
+                out,
+                visual,
+                "layers/biome_regions",
+                tile_size=preview_tile_size,
+                visual_format=visual_format,
+                workers=encoder_workers,
+                force=force,
+                resampling=Image.Resampling.NEAREST,
+                tile_batch_rows=tile_batch_rows,
+                write_full_images=write_full_images,
+            )
+            sample_file = "samples/biome_regions_u8.png" if write_full_images else None
+            if write_full_images and sample_file is not None:
+                _save_disk_raster_image(out / sample_file, sample, "png", force=force)
+            sample_tiles = _save_sample_raster_tiles(
+                out,
+                sample,
+                "samples/biome_regions_u8.png",
+                tile_size=preview_tile_size,
+                encoding="u8",
+                workers=encoder_workers,
+                force=force,
+                tile_batch_rows=tile_batch_rows,
+            )
+            _delete_disk_raster(visual_source)
+            _delete_disk_raster(visual)
+            _delete_disk_raster(sample)
         layers.append({
             "name": "biome_regions",
             "kind": "overlay",
             "label": "Biome Regions",
-            "file": mips[0]["file"],
+            "file": mips[0].get("file"),
             "mips": mips,
-            "sample_file": "samples/biome_regions_u8.png",
-            "sample_tiles": _save_sample_tiles(out, sample, "samples/biome_regions_u8.png", tile_size=preview_tile_size, encoding="u8", workers=encoder_workers, force=force),
+            "sample_file": sample_file,
+            "sample_tiles": sample_tiles,
         })
-        del values, visual, sample
+        del values
         gc.collect()
         done()
 
@@ -248,30 +344,50 @@ def export_hover_previews(
         done = timed("rivers")
         values = _read_u8_preview(root, manifest["rivers"]["path"], tiles_x, tiles_z, source_tile_size, scale, missing_ok=False)
         width_values, width_metadata = _read_river_width_preview(root, manifest, tiles_x, tiles_z, source_tile_size, scale)
-        visual = _fit_image(_river_overlay_image(values, width_values, width_metadata["source"]), base_size)
-        sample = _fit_image(Image.fromarray(values, mode="L"), base_size)
-        mips = _save_visual_layer(
-            out,
-            visual,
-            _visual_layer_path("layers/rivers", visual_format),
-            tile_size=preview_tile_size,
-            visual_format=visual_format,
-            workers=encoder_workers,
-            force=force,
-            resampling=Image.Resampling.BILINEAR,
-        )
-        sample.save(out / "samples" / "rivers_u8.png")
+        with tempfile.TemporaryDirectory(prefix="hoverpreview-rivers-", dir=out) as temp_dir_name:
+            temp_dir = Path(temp_dir_name)
+            visual = _create_disk_raster(temp_dir / "rivers.visual.bin", base_size, "RGBA")
+            _render_river_overlay_raster(values, width_values, width_metadata["source"], visual)
+            sample = _create_disk_raster(temp_dir / "rivers.sample.bin", base_size, "L")
+            _render_fitted_u8_sample_raster(values, sample)
+            mips = _save_visual_raster_layer(
+                out,
+                visual,
+                "layers/rivers",
+                tile_size=preview_tile_size,
+                visual_format=visual_format,
+                workers=encoder_workers,
+                force=force,
+                resampling=Image.Resampling.BILINEAR,
+                tile_batch_rows=tile_batch_rows,
+                write_full_images=write_full_images,
+            )
+            sample_file = "samples/rivers_u8.png" if write_full_images else None
+            if write_full_images and sample_file is not None:
+                _save_disk_raster_image(out / sample_file, sample, "png", force=force)
+            sample_tiles = _save_sample_raster_tiles(
+                out,
+                sample,
+                "samples/rivers_u8.png",
+                tile_size=preview_tile_size,
+                encoding="u8",
+                workers=encoder_workers,
+                force=force,
+                tile_batch_rows=tile_batch_rows,
+            )
+            _delete_disk_raster(visual)
+            _delete_disk_raster(sample)
         layer_entry = {
             "name": "rivers",
             "kind": "overlay",
-            "file": mips[0]["file"],
+            "file": mips[0].get("file"),
             "mips": mips,
-            "sample_file": "samples/rivers_u8.png",
-            "sample_tiles": _save_sample_tiles(out, sample, "samples/rivers_u8.png", tile_size=preview_tile_size, encoding="u8", workers=encoder_workers, force=force),
+            "sample_file": sample_file,
+            "sample_tiles": sample_tiles,
             "preview": width_metadata,
         }
         layers.append(layer_entry)
-        del values, width_values, visual, sample
+        del values, width_values
         gc.collect()
         done()
 
@@ -288,33 +404,51 @@ def export_hover_previews(
         report(f"ore:{ore}")
         done = timed(f"ore:{ore}")
         values = _read_u8_preview(root, layer["path"], tiles_x, tiles_z, source_tile_size, scale, missing_ok=True)
-        visual = _fit_image(_ore_overlay_image(values, ore), base_size)
-        sample = _fit_image(Image.fromarray(values, mode="L"), base_size)
-        sample_path = ore_sample_dir / f"{ore}_u8.png"
-        mips = _save_visual_layer(
-            out,
-            visual,
-            _visual_layer_path(f"layers/ores/{ore}", visual_format),
-            tile_size=preview_tile_size,
-            visual_format=visual_format,
-            workers=encoder_workers,
-            force=force,
-            resampling=Image.Resampling.BILINEAR,
-        )
-        sample.save(sample_path)
-        sample_file = f"samples/ores/{ore}_u8.png"
+        with tempfile.TemporaryDirectory(prefix=f"hoverpreview-ore-{ore}-", dir=out) as temp_dir_name:
+            temp_dir = Path(temp_dir_name)
+            visual = _create_disk_raster(temp_dir / f"{ore}.visual.bin", base_size, "RGBA")
+            _render_ore_overlay_raster(values, ore, visual)
+            sample = _create_disk_raster(temp_dir / f"{ore}.sample.bin", base_size, "L")
+            _render_fitted_u8_sample_raster(values, sample)
+            mips = _save_visual_raster_layer(
+                out,
+                visual,
+                f"layers/ores/{ore}",
+                tile_size=preview_tile_size,
+                visual_format=visual_format,
+                workers=encoder_workers,
+                force=force,
+                resampling=Image.Resampling.BILINEAR,
+                tile_batch_rows=tile_batch_rows,
+                write_full_images=write_full_images,
+            )
+            sample_file = f"samples/ores/{ore}_u8.png" if write_full_images else None
+            if write_full_images and sample_file is not None:
+                _save_disk_raster_image(ore_sample_dir / f"{ore}_u8.png", sample, "png", force=force)
+            sample_tiles = _save_sample_raster_tiles(
+                out,
+                sample,
+                f"samples/ores/{ore}_u8.png",
+                tile_size=preview_tile_size,
+                encoding="u8",
+                workers=encoder_workers,
+                force=force,
+                tile_batch_rows=tile_batch_rows,
+            )
+            _delete_disk_raster(visual)
+            _delete_disk_raster(sample)
         ore_layers.append(
             {
                 "name": f"ore:{ore}",
                 "ore": ore,
                 "kind": "ore",
-                "file": mips[0]["file"],
+                "file": mips[0].get("file"),
                 "mips": mips,
                 "sample_file": sample_file,
-                "sample_tiles": _save_sample_tiles(out, sample, sample_file, tile_size=preview_tile_size, encoding="u8", workers=encoder_workers, force=force),
+                "sample_tiles": sample_tiles,
             }
         )
-        del values, visual, sample
+        del values
         gc.collect()
         done()
     layers.extend(ore_layers)
@@ -365,11 +499,13 @@ def export_hover_previews(
     index["generation"] = {
         "tile_size": preview_tile_size,
         "workers": encoder_workers,
+        "tile_batch_rows": tile_batch_rows,
         "visual_format": visual_format,
         "renderer": renderer,
         "force": force,
         "clean_stale": clean_stale,
         "deploy_minimal": deploy_minimal,
+        "write_full_images": write_full_images,
         "cache_buster": str(time.time_ns()),
     }
     if profile:
@@ -386,6 +522,376 @@ def export_hover_previews(
         for step, seconds in timings:
             print(f"{step}: {seconds:.3f}s")
     return out
+
+
+def _create_disk_raster(path: Path, size: tuple[int, int], mode: str) -> DiskRaster:
+    dtype, channels = _disk_raster_format(mode)
+    width, height = int(size[0]), int(size[1])
+    shape = (height, width) if channels == 1 else (height, width, channels)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    raster = np.memmap(path, dtype=dtype, mode="w+", shape=shape)
+    raster.flush()
+    del raster
+    return DiskRaster(path=path, mode=mode, width=width, height=height, dtype=dtype, shape=shape)
+
+
+def _disk_raster_format(mode: str) -> tuple[Any, int]:
+    if mode == "L":
+        return np.uint8, 1
+    if mode == "RGB":
+        return np.uint8, 3
+    if mode == "RGBA":
+        return np.uint8, 4
+    if mode == "I;16":
+        return np.uint16, 1
+    raise ValueError(f"Unsupported raster mode {mode!r}")
+
+
+def _open_disk_raster(raster: DiskRaster, *, write: bool = False) -> np.memmap:
+    return np.memmap(raster.path, dtype=raster.dtype, mode="r+" if write else "r", shape=raster.shape)
+
+
+def _delete_disk_raster(raster: DiskRaster) -> None:
+    raster.path.unlink(missing_ok=True)
+
+
+def _save_disk_raster_image(path: Path, raster: DiskRaster, image_format: str, *, force: bool) -> None:
+    array = _open_disk_raster(raster)
+    try:
+        image = Image.fromarray(np.asarray(array), mode=raster.mode)
+        _save_image(path, image, image_format, force=force)
+    finally:
+        del array
+
+
+def _resize_disk_raster(source: DiskRaster, path: Path, size: tuple[int, int], resampling: Image.Resampling) -> DiskRaster:
+    out = _create_disk_raster(path, size, source.mode)
+    source_array = _open_disk_raster(source)
+    dest_array = _open_disk_raster(out, write=True)
+    try:
+        source_image = Image.fromarray(np.asarray(source_array), mode=source.mode)
+        resized = source_image.resize((out.width, out.height), resampling)
+        dest_array[...] = np.asarray(resized, dtype=out.dtype)
+        dest_array.flush()
+    finally:
+        del source_array
+        del dest_array
+    return out
+
+
+def _render_height_visual_raster(values: np.ndarray, style: str, raster: DiskRaster) -> None:
+    array = _open_disk_raster(raster, write=True)
+    try:
+        valid = values != HEIGHT_NODATA
+        if not np.any(valid):
+            array[...] = 0
+            array.flush()
+            return
+        metres = values.astype(np.float32) * 0.1
+        valid_values = metres[valid]
+        lo = float(np.percentile(valid_values, 1))
+        hi = float(np.percentile(valid_values, 99))
+        norm = np.clip((metres - lo) / max(1.0, hi - lo), 0.0, 1.0)
+        if style == "gray" and raster.mode == "L":
+            gray = (norm * 255).astype(np.uint8)
+            gray[~valid] = 0
+            array[...] = gray
+        else:
+            array[...] = 0
+            _write_ramp_into_rgb(norm, array)
+            array[~valid] = (16, 24, 32)
+        array.flush()
+    finally:
+        del array
+
+
+def _write_ramp_into_rgb(norm: np.ndarray, out: np.memmap) -> None:
+    stops = [
+        (0.00, (35, 85, 45)),
+        (0.35, (92, 139, 63)),
+        (0.58, (176, 160, 92)),
+        (0.78, (125, 96, 69)),
+        (1.00, (238, 238, 228)),
+    ]
+    for index in range(len(stops) - 1):
+        start_pos, start_color = stops[index]
+        end_pos, end_color = stops[index + 1]
+        mask = (norm >= start_pos) & (norm <= end_pos)
+        if not np.any(mask):
+            continue
+        t = ((norm[mask] - start_pos) / max(0.0001, end_pos - start_pos)).astype(np.float32)
+        start = np.array(start_color, dtype=np.float32)
+        end = np.array(end_color, dtype=np.float32)
+        out[mask] = np.clip(start + (end - start) * t[:, None], 0, 255).astype(np.uint8)
+    out[norm <= stops[0][0]] = stops[0][1]
+    out[norm >= stops[-1][0]] = stops[-1][1]
+
+
+def _render_height_sample_raster(values: np.ndarray, raster: DiskRaster) -> None:
+    array = _open_disk_raster(raster, write=True)
+    try:
+        encoded = values.astype(np.int32) + 32768
+        encoded[values == HEIGHT_NODATA] = 0
+        array[...] = np.clip(encoded, 0, 65535).astype(np.uint16)
+        array.flush()
+    finally:
+        del array
+
+
+def _render_height_browser_sample_raster(values: np.ndarray, raster: DiskRaster) -> None:
+    array = _open_disk_raster(raster, write=True)
+    try:
+        encoded = values.astype(np.int32) + 32768
+        encoded[values == HEIGHT_NODATA] = 0
+        clipped = np.clip(encoded, 0, 65535).astype(np.uint16)
+        array[...] = 0
+        array[:, :, 0] = (clipped & 0xFF).astype(np.uint8)
+        array[:, :, 1] = (clipped >> 8).astype(np.uint8)
+        array.flush()
+    finally:
+        del array
+
+
+def _render_categorical_overlay_raster(
+    values: np.ndarray,
+    classes: dict,
+    *,
+    alpha: int,
+    transparent_zero: bool,
+    raster: DiskRaster,
+) -> None:
+    array = _open_disk_raster(raster, write=True)
+    try:
+        array[...] = 0
+        height = min(values.shape[0], raster.height)
+        width = min(values.shape[1], raster.width)
+        clipped = values[:height, :width]
+        view = array[:height, :width]
+        for raw_id, meta in classes.items():
+            class_id = int(raw_id)
+            if transparent_zero and class_id == 0:
+                continue
+            mask = clipped == class_id
+            if not np.any(mask):
+                continue
+            view[mask, :3] = _hex_color(meta.get("color", "#777777"))
+            view[mask, 3] = alpha
+        array.flush()
+    finally:
+        del array
+
+
+def _render_fitted_u8_sample_raster(values: np.ndarray, raster: DiskRaster) -> None:
+    array = _open_disk_raster(raster, write=True)
+    try:
+        array[...] = 0
+        height = min(values.shape[0], raster.height)
+        width = min(values.shape[1], raster.width)
+        array[:height, :width] = values[:height, :width]
+        array.flush()
+    finally:
+        del array
+
+
+def _render_river_overlay_raster(
+    river_mask: np.ndarray,
+    width_values: np.ndarray | None,
+    width_source: str,
+    raster: DiskRaster,
+) -> None:
+    array = _open_disk_raster(raster, write=True)
+    try:
+        array[...] = 0
+        radii = _river_preview_radii(river_mask, width_values, width_source)
+        if np.any(radii > 0):
+            alpha = _dilate_river_radii(radii)
+            height = min(river_mask.shape[0], raster.height)
+            width = min(river_mask.shape[1], raster.width)
+            view = array[:height, :width]
+            view[:, :, :3] = np.array(PREVIEW_RIVER_COLOR, dtype=np.uint8)
+            view[:, :, 3] = alpha[:height, :width]
+        array.flush()
+    finally:
+        del array
+
+
+def _render_ore_overlay_raster(values: np.ndarray, ore: str, raster: DiskRaster) -> None:
+    array = _open_disk_raster(raster, write=True)
+    try:
+        array[...] = 0
+        height = min(values.shape[0], raster.height)
+        width = min(values.shape[1], raster.width)
+        score = values[:height, :width].astype(np.float32) / 255.0
+        view = array[:height, :width]
+        view[:, :, :3] = np.array(ORE_COLORS.get(ore, (255, 255, 255)), dtype=np.uint8)
+        view[:, :, 3] = np.clip(score * 216, 0, 230).astype(np.uint8)
+        array.flush()
+    finally:
+        del array
+
+
+def _save_visual_raster_layer(
+    root: Path,
+    raster: DiskRaster,
+    relative_stem: str,
+    *,
+    tile_size: int = DEFAULT_TILE_SIZE,
+    visual_format: str = "png",
+    workers: int = 1,
+    force: bool = True,
+    resampling: Image.Resampling = Image.Resampling.BILINEAR,
+    tile_batch_rows: int = DEFAULT_TILE_BATCH_ROWS,
+    write_full_images: bool = False,
+) -> list[dict[str, Any]]:
+    mips: list[dict[str, Any]] = []
+    current = raster
+    factor = 1
+    temp_outputs: list[DiskRaster] = []
+    try:
+        while True:
+            file_path = f"{relative_stem}.{visual_format}" if factor == 1 else f"mips/{factor}/{relative_stem}.{visual_format}"
+            if write_full_images:
+                _save_disk_raster_image(root / file_path, current, visual_format, force=force)
+            tile_template = _save_disk_raster_tiles(
+                root,
+                current,
+                relative_stem,
+                factor,
+                tile_size=tile_size,
+                image_format=visual_format,
+                workers=workers,
+                force=force,
+                tile_batch_rows=tile_batch_rows,
+            )
+            entry: dict[str, Any] = {
+                "factor": factor,
+                "width": current.width,
+                "height": current.height,
+                "tiles": {
+                    "size": tile_size,
+                    "template": tile_template,
+                    "columns": math.ceil(current.width / tile_size),
+                    "rows": math.ceil(current.height / tile_size),
+                    "format": visual_format,
+                },
+            }
+            if write_full_images:
+                entry["file"] = file_path
+            mips.append(entry)
+            if max(current.width, current.height) <= 512:
+                break
+            factor *= 2
+            next_size = (max(1, math.ceil(raster.width / factor)), max(1, math.ceil(raster.height / factor)))
+            next_raster = _resize_disk_raster(
+                current,
+                root / ".hoverpreview_tmp" / f"{relative_stem.replace('/', '_')}.{factor}.bin",
+                next_size,
+                resampling,
+            )
+            temp_outputs.append(next_raster)
+            current = next_raster
+    finally:
+        for temp_raster in temp_outputs:
+            _delete_disk_raster(temp_raster)
+        temp_root = root / ".hoverpreview_tmp"
+        if temp_root.exists():
+            shutil.rmtree(temp_root, ignore_errors=True)
+    return mips
+
+
+def _save_sample_raster_tiles(
+    root: Path,
+    raster: DiskRaster,
+    relative_path: str,
+    *,
+    tile_size: int = DEFAULT_TILE_SIZE,
+    encoding: str = "u8",
+    workers: int = 1,
+    force: bool = True,
+    tile_batch_rows: int = DEFAULT_TILE_BATCH_ROWS,
+) -> dict[str, Any]:
+    path = Path(relative_path)
+    if path.parts and path.parts[0] == "samples":
+        path = Path(*path.parts[1:])
+    stem = str(path.with_suffix(""))
+    template = _save_disk_raster_tiles(
+        root,
+        raster,
+        stem,
+        1,
+        tile_size=tile_size,
+        image_format="png",
+        workers=workers,
+        force=force,
+        tile_batch_rows=tile_batch_rows,
+        sample_tiles=True,
+    )
+    return {
+        "size": tile_size,
+        "template": template,
+        "columns": math.ceil(raster.width / tile_size),
+        "rows": math.ceil(raster.height / tile_size),
+        "encoding": encoding,
+        "format": "png",
+    }
+
+
+def _save_disk_raster_tiles(
+    root: Path,
+    raster: DiskRaster,
+    stem: str,
+    factor: int,
+    *,
+    tile_size: int = DEFAULT_TILE_SIZE,
+    image_format: str = "png",
+    workers: int = 1,
+    force: bool = True,
+    tile_batch_rows: int = DEFAULT_TILE_BATCH_ROWS,
+    sample_tiles: bool = False,
+) -> str:
+    tile_dir = (root / "sample_tiles" / stem) if sample_tiles else (root / "tiles" / str(factor) / stem)
+    tile_dir.mkdir(parents=True, exist_ok=True)
+    total_rows = math.ceil(raster.height / tile_size)
+    jobs = [(row, min(total_rows, row + tile_batch_rows)) for row in range(0, total_rows, tile_batch_rows)]
+    if workers <= 1 or len(jobs) <= 1:
+        for row_start, row_end in jobs:
+            _write_disk_raster_tile_rows(raster, row_start, row_end, tile_dir, tile_size, image_format, force=force)
+    else:
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            list(
+                executor.map(
+                    lambda job: _write_disk_raster_tile_rows(raster, job[0], job[1], tile_dir, tile_size, image_format, force=force),
+                    jobs,
+                )
+            )
+    return (f"sample_tiles/{stem}/{{x}}_{{y}}.png" if sample_tiles else f"tiles/{factor}/{stem}/{{x}}_{{y}}.{image_format}")
+
+
+def _write_disk_raster_tile_rows(
+    raster: DiskRaster,
+    row_start: int,
+    row_end: int,
+    tile_dir: Path,
+    tile_size: int,
+    image_format: str,
+    *,
+    force: bool,
+) -> None:
+    array = _open_disk_raster(raster)
+    try:
+        for tile_z in range(row_start, row_end):
+            top = tile_z * tile_size
+            bottom = min(raster.height, top + tile_size)
+            for tile_x in range(math.ceil(raster.width / tile_size)):
+                left = tile_x * tile_size
+                right = min(raster.width, left + tile_size)
+                path = tile_dir / f"{tile_x}_{tile_z}.{image_format}"
+                if path.exists() and not force:
+                    continue
+                tile = np.asarray(array[top:bottom, left:right])
+                _save_image(path, Image.fromarray(tile, mode=raster.mode), image_format, force=force)
+    finally:
+        del array
 
 
 def _height_sample_image(values: np.ndarray) -> Image.Image:
@@ -685,12 +1191,13 @@ def _save_image(path: Path, image: Image.Image, image_format: str, *, force: boo
 def _write_cache_metadata(out: Path, generation: dict[str, Any], layers: list[dict[str, Any]]) -> None:
     files: list[str] = [HOVER_PREVIEW_INDEX]
     for layer in layers:
-        files.append(layer["file"])
-        files.extend(mip["file"] for mip in layer.get("mips", []))
+        if layer.get("file"):
+            files.append(str(layer["file"]))
+        files.extend(str(mip["file"]) for mip in layer.get("mips", []) if mip.get("file"))
         if layer.get("sample_file"):
-            files.append(layer["sample_file"])
+            files.append(str(layer["sample_file"]))
         if layer.get("browser_sample_file"):
-            files.append(layer["browser_sample_file"])
+            files.append(str(layer["browser_sample_file"]))
     with (out / ".hoverpreview_cache.json").open("w", encoding="utf-8") as fh:
         json.dump({"generation": generation, "files": sorted(set(files))}, fh, indent=2)
         fh.write("\n")
@@ -700,13 +1207,15 @@ def _clean_stale_outputs(out: Path, layers: list[dict[str, Any]]) -> None:
     keep_templates: set[str] = set()
     keep_files: set[Path] = {out / HOVER_PREVIEW_INDEX, out / ".hoverpreview_cache.json"}
     for layer in layers:
-        keep_files.add(out / layer["file"])
+        if layer.get("file"):
+            keep_files.add(out / str(layer["file"]))
         if layer.get("sample_file"):
-            keep_files.add(out / layer["sample_file"])
+            keep_files.add(out / str(layer["sample_file"]))
         if layer.get("browser_sample_file"):
-            keep_files.add(out / layer["browser_sample_file"])
+            keep_files.add(out / str(layer["browser_sample_file"]))
         for mip in layer.get("mips", []):
-            keep_files.add(out / mip["file"])
+            if mip.get("file"):
+                keep_files.add(out / str(mip["file"]))
             if mip.get("tiles", {}).get("template"):
                 keep_templates.add(str(mip["tiles"]["template"]).split("{x}")[0])
         if layer.get("sample_tiles", {}).get("template"):
@@ -735,6 +1244,17 @@ def _fit_image(image: Image.Image, size: tuple[int, int]) -> Image.Image:
     out = Image.new(image.mode, size, 0)
     out.paste(image.crop((0, 0, min(image.width, size[0]), min(image.height, size[1]))), (0, 0))
     return out
+
+
+def _resample_visual_to_base_size(
+    image: Image.Image,
+    size: tuple[int, int],
+    *,
+    resampling: Image.Resampling,
+) -> Image.Image:
+    if image.size == size:
+        return image
+    return image.resize(size, resampling)
 
 
 def _categorical_overlay_image(values: np.ndarray, classes: dict, *, alpha: int, transparent_zero: bool) -> Image.Image:

@@ -31,6 +31,7 @@ SOURCE_FLOW_DIRECTION_FIELDS = ("flow_direction", "FLOW_DIRECTION", "direction")
 THINNER_RIVER_DATASETS = {"epa_river_network_routes_ie", "ni_river_segment"}
 THINNER_RIVER_WIDTH_FACTOR = 0.8
 TOP_ORDER_THINNING_FACTORS = (0.5, 1.0 / 1.5, 1.0 / 1.25, 1.0 / 1.125)
+RIVER_RASTER_BATCH_SIZE = 8000
 
 
 def make_river_tiles(
@@ -64,56 +65,71 @@ def make_river_tiles(
             layer=layer_name,
             bbox=(geo["bng_min_easting"], geo["bng_min_northing"], geo["bng_max_easting"], geo["bng_max_northing"]),
         )
+        arr = np.zeros((depth, width), dtype=np.uint8)
         if frame.empty:
             console.print("[yellow]No river features intersect the manifest extent.[/yellow]")
-            arr = np.zeros((depth, width), dtype=np.uint8)
         order_arr = np.zeros((depth, width), dtype=np.uint8)
         half_width_arr = np.zeros((depth, width), dtype=np.uint8)
         if frame.empty:
-            order_shapes = []
-            variable_shapes = []
+            pass
         else:
             if frame.crs and str(frame.crs).upper() != "EPSG:27700":
                 frame = frame.to_crs("EPSG:27700")
             lines = _extract_lines(frame)
             strahler = _strahler_widths(lines, manifest, manifest_path.parent)
-            order_shapes = []
-            variable_shapes = []
-            shapes = []
-            for edge in strahler.edges:
-                if edge.line.is_empty:
-                    continue
-                half_width = max(1, edge.half_width)
-                buffer_metres = half_width * _cell_metres(geo, width, depth)
-                buffered = edge.line.buffer(buffer_metres, cap_style="round", join_style="round")
-                shapes.append((buffered, 255))
-                variable_shapes.append((buffered, half_width))
-                order_shapes.append((buffered, min(255, max(1, edge.order))))
-            if not shapes:
-                shapes = []
-                variable_shapes = []
-                order_shapes = []
             # Fall back to the old fixed-width raster if graph extraction produced no usable line edges.
-            fallback_fixed = not shapes
-            for geom in tqdm(frame.geometry, desc="buffering rivers"):
-                if geom is None or geom.is_empty:
-                    continue
-                if not isinstance(geom, (LineString, MultiLineString)):
-                    continue
-                if width_metres > 0 and fallback_fixed:
-                    buffered = geom.buffer(width_metres / 2.0, cap_style="round", join_style="round")
-                    shapes.append((buffered, 255))
-                    variable_shapes.append((buffered, max(1, int(round(width_metres / (2.0 * _cell_metres(geo, width, depth)))))))
-                    order_shapes.append((buffered, 1))
-                elif fallback_fixed:
-                    shapes.append((geom, 255))
-                    variable_shapes.append((geom, 1))
-                    order_shapes.append((geom, 1))
-            arr = rasterize(shapes, out_shape=(depth, width), transform=transform, fill=0, dtype=np.uint8, merge_alg=MergeAlg.replace, all_touched=True) if shapes else np.zeros((depth, width), dtype=np.uint8)
-            variable_shapes.sort(key=lambda item: item[1])
-            order_shapes.sort(key=lambda item: item[1])
-            half_width_arr = rasterize(variable_shapes, out_shape=(depth, width), transform=transform, fill=0, dtype=np.uint8, merge_alg=MergeAlg.replace, all_touched=True) if variable_shapes else half_width_arr
-            order_arr = rasterize(order_shapes, out_shape=(depth, width), transform=transform, fill=0, dtype=np.uint8, merge_alg=MergeAlg.replace, all_touched=True) if order_shapes else order_arr
+            fallback_fixed = not strahler.edges
+            cell_metres = _cell_metres(geo, width, depth)
+            if fallback_fixed:
+                cover_shapes: list[tuple[object, int]] = []
+                width_shapes: list[tuple[object, int]] = []
+                order_shapes: list[tuple[object, int]] = []
+                fallback_half_width = max(1, int(round(width_metres / (2.0 * cell_metres)))) if width_metres > 0 else 1
+                for geom in tqdm(frame.geometry, desc="rasterizing fallback rivers"):
+                    if geom is None or geom.is_empty:
+                        continue
+                    if not isinstance(geom, (LineString, MultiLineString)):
+                        continue
+                    if width_metres > 0:
+                        shape = geom.buffer(width_metres / 2.0, cap_style="round", join_style="round")
+                    else:
+                        shape = geom
+                    cover_shapes.append((shape, 255))
+                    width_shapes.append((shape, fallback_half_width))
+                    order_shapes.append((shape, 1))
+                    if len(cover_shapes) >= RIVER_RASTER_BATCH_SIZE:
+                        _rasterize_shape_batches(cover_shapes, arr, transform)
+                        _rasterize_shape_batches(width_shapes, half_width_arr, transform)
+                        _rasterize_shape_batches(order_shapes, order_arr, transform)
+                        cover_shapes.clear()
+                        width_shapes.clear()
+                        order_shapes.clear()
+                _rasterize_shape_batches(cover_shapes, arr, transform)
+                _rasterize_shape_batches(width_shapes, half_width_arr, transform)
+                _rasterize_shape_batches(order_shapes, order_arr, transform)
+            else:
+                cover_shapes = []
+                width_shapes = []
+                order_shapes = []
+                for edge in tqdm(strahler.edges, desc="rasterizing rivers"):
+                    if edge.line.is_empty:
+                        continue
+                    half_width = max(1, edge.half_width)
+                    buffer_metres = half_width * cell_metres
+                    buffered = edge.line.buffer(buffer_metres, cap_style="round", join_style="round")
+                    cover_shapes.append((buffered, 255))
+                    width_shapes.append((buffered, min(255, half_width)))
+                    order_shapes.append((buffered, min(255, max(1, edge.order))))
+                    if len(cover_shapes) >= RIVER_RASTER_BATCH_SIZE:
+                        _rasterize_shape_batches(cover_shapes, arr, transform)
+                        _rasterize_shape_batches(width_shapes, half_width_arr, transform)
+                        _rasterize_shape_batches(order_shapes, order_arr, transform)
+                        cover_shapes.clear()
+                        width_shapes.clear()
+                        order_shapes.clear()
+                _rasterize_shape_batches(cover_shapes, arr, transform)
+                _rasterize_shape_batches(width_shapes, half_width_arr, transform)
+                _rasterize_shape_batches(order_shapes, order_arr, transform)
         root = out / "water" / "rivers"
         _write_tiles(arr, root, tile_size)
         _write_tiles(order_arr, out / "water" / "river_order", tile_size)
@@ -158,6 +174,25 @@ def _write_tiles(arr: np.ndarray, root: Path, tile_size: int) -> None:
                 padded[: tile.shape[0], : tile.shape[1]] = tile
                 tile = padded
             write_u8_tile(root / f"{tile_x:03d}_{tile_z:03d}{u8_extension()}", tile)
+
+
+def _rasterize_shape_batches(
+    shapes: list[tuple[object, int]],
+    out: np.ndarray,
+    transform,
+) -> None:
+    if not shapes:
+        return
+    batch = rasterize(
+        shapes,
+        out_shape=out.shape,
+        transform=transform,
+        fill=0,
+        dtype=np.uint8,
+        merge_alg=MergeAlg.replace,
+        all_touched=True,
+    )
+    np.maximum(out, batch, out=out)
 
 
 def _write_debug(path: Path, arr: np.ndarray, transform) -> None:
@@ -222,6 +257,20 @@ def _coerce_source_order(value) -> int | None:
     return order if order > 0 else None
 
 
+def _coerce_optional_text(value) -> str | None:
+    if value is None:
+        return None
+    try:
+        if np.isnan(value):
+            return None
+    except TypeError:
+        pass
+    text = str(value).strip()
+    if not text or text.lower() == "nan":
+        return None
+    return text
+
+
 def _extract_lines(frame: gpd.GeoDataFrame) -> list[_InputLine]:
     columns = list(frame.columns)
     order_column = _source_order_column(columns)
@@ -245,10 +294,10 @@ def _extract_lines(frame: gpd.GeoDataFrame) -> list[_InputLine]:
         strict=False,
     ):
         source_order = _coerce_source_order(raw_order)
-        source_dataset = str(raw_source_dataset) if raw_source_dataset not in {None, ""} else None
-        source_start_node = str(raw_source_start_node) if raw_source_start_node not in {None, ""} else None
-        source_end_node = str(raw_source_end_node) if raw_source_end_node not in {None, ""} else None
-        source_flow_direction = str(raw_source_flow_direction) if raw_source_flow_direction not in {None, ""} else None
+        source_dataset = _coerce_optional_text(raw_source_dataset)
+        source_start_node = _coerce_optional_text(raw_source_start_node)
+        source_end_node = _coerce_optional_text(raw_source_end_node)
+        source_flow_direction = _coerce_optional_text(raw_source_flow_direction)
         if geom is None or geom.is_empty:
             continue
         if isinstance(geom, LineString):
