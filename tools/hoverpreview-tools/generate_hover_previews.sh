@@ -2,48 +2,16 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-UKGEO_TOOLS_DIR="${UKGEO_TOOLS_DIR:-$SCRIPT_DIR/../ukgeo-tools}"
-REPO_ROOT="$(cd -- "$UKGEO_TOOLS_DIR/../.." && pwd)"
-ROOT="${ROOT:-$UKGEO_TOOLS_DIR/uk_world_data_gb}"
-OUT_DIR=""
-MAX_SIZE="${MAX_SIZE:-12000}"
-STYLE="${STYLE:-auto}"
-HOVERPREVIEW_GPU="${HOVERPREVIEW_GPU:-auto}"
-HOVERPREVIEW_TILE_SIZE="${HOVERPREVIEW_TILE_SIZE:-256}"
-HOVERPREVIEW_WORKERS="${HOVERPREVIEW_WORKERS:-0}"
-HOVERPREVIEW_VISUAL_FORMAT="${HOVERPREVIEW_VISUAL_FORMAT:-png}"
-HOVERPREVIEW_FORCE="${HOVERPREVIEW_FORCE:-0}"
-HOVERPREVIEW_CLEAN_STALE="${HOVERPREVIEW_CLEAN_STALE:-0}"
-HOVERPREVIEW_PROFILE="${HOVERPREVIEW_PROFILE:-0}"
-DATA_DIR="${DATA_DIR:-$REPO_ROOT/data}"
+CONFIG_FILE="$SCRIPT_DIR/config.yml"
+cd "$SCRIPT_DIR"
 
-OS_TERRAIN_ZIP="${OS_TERRAIN_ZIP:-$DATA_DIR/terr50_gagg_gb.zip}"
-BGS_GEOLOGY_ZIP="${BGS_GEOLOGY_ZIP:-$DATA_DIR/BGS_Geology_625k_bedrock_gpkg.zip}"
-COAL_RESOURCES_ZIP="${COAL_RESOURCES_ZIP:-$DATA_DIR/OGC_CoalResourcesForNewTechnologies.zip}"
-GOLD_OCCURRENCES="${GOLD_OCCURRENCES:-$DATA_DIR/bgs_gold_occurrences.geojson}"
-OSNI_DTM_ZIP="${OSNI_DTM_ZIP:-$DATA_DIR/osni_opendata_50m_dtm.zip}"
-COP30_ARCHIVE="${COP30_ARCHIVE:-$DATA_DIR/rasters_COP30.tar.gz}"
-INCLUDE_IRELAND="${INCLUDE_IRELAND:-1}"
-USE_LEGACY_OSNI_HEIGHT="${USE_LEGACY_OSNI_HEIGHT:-0}"
-COP30_TARGET="${COP30_TARGET:-ireland-iom}"
-COP30_SMOOTHING="${COP30_SMOOTHING:-light}"
-COP30_RESAMPLING="${COP30_RESAMPLING:-bilinear}"
-COP30_DETERRACE="${COP30_DETERRACE:-1}"
-COP30_PROTECT_MAINLAND_GB="${COP30_PROTECT_MAINLAND_GB:-1}"
-COP30_MINECRAFT_Y_OFFSET="${COP30_MINECRAFT_Y_OFFSET:-0}"
-COP30_DEBUG_GEOTIFF="${COP30_DEBUG_GEOTIFF:-}"
-COP30_DEBUG_TARGET_MASK_GEOTIFF="${COP30_DEBUG_TARGET_MASK_GEOTIFF:-}"
-COP30_DEBUG_LAND_MASK_GEOTIFF="${COP30_DEBUG_LAND_MASK_GEOTIFF:-}"
-RIVERS_ZIP="${RIVERS_ZIP:-$DATA_DIR/oprvrs_gpkg_gb_ie.zip}"
-LANDCOVER_ZIP="${LANDCOVER_ZIP:-$DATA_DIR/FME_3564346A_1778997494261_5633.zip}"
-IRON_OVERLAY_IMAGE="${IRON_OVERLAY_IMAGE:-$DATA_DIR/uk_iron_ore_reference_overlay.svg}"
-IRON_OVERLAY_SCORE="${IRON_OVERLAY_SCORE:-180}"
-IRON_OVERLAY_FIT="${IRON_OVERLAY_FIT:-outline}"
-IRON_STAMP="${IRON_STAMP:-$ROOT/.iron_ore_inputs.sha256}"
-ORE_RULES="${ORE_RULES:-$UKGEO_TOOLS_DIR/examples/ore_rules_625k.yml}"
-SURFACE_RULES="${SURFACE_RULES:-$UKGEO_TOOLS_DIR/examples/surface_geology_625k.yml}"
-ORE_JOBS="${ORE_JOBS:-1}"
-VEGETATION_JOBS="${VEGETATION_JOBS:-1}"
+eval "$(
+  PYTHONPATH="$SCRIPT_DIR/../ukgeo-tools/src" \
+    python3 -m ukgeo.config --config "$CONFIG_FILE" --section generate --format shell
+)"
+
+REPO_ROOT="$(cd -- "$UKGEO_TOOLS_DIR/../.." && pwd)"
+OUT_DIR=""
 
 REGENERATE_ARG=""
 POSITIONAL=()
@@ -165,10 +133,10 @@ Tasks: preview, height, rivers, vegetation, geology, ores, iron-overlay, clean, 
 Examples:
   ./generate_hover_previews.sh --regenerate preview
   ./generate_hover_previews.sh --regenerate rivers,ores,preview
-  HOVERPREVIEW_TILE_SIZE=256 HOVERPREVIEW_WORKERS=0 ./generate_hover_previews.sh
-  REGENERATE=all ./generate_hover_previews.sh
+  ./generate_hover_previews.sh --tile-size 256 --workers 0
+  ./generate_hover_previews.sh --regenerate all
 
-Interactive menu is shown only when stdin is a TTY and neither --regenerate nor REGENERATE is set.
+Interactive menu is shown only when stdin is a TTY and --regenerate is not set.
 Non-interactive default is preview only. Use --regenerate all for a full data rebuild.
 HELP
       exit 0
@@ -195,15 +163,17 @@ if [[ ${#POSITIONAL[@]} -gt 2 ]]; then
   exit 2
 fi
 OUT_DIR="${OUT_DIR:-$ROOT/hoverpreviews}"
-IRON_STAMP="${IRON_STAMP:-$ROOT/.iron_ore_inputs.sha256}"
+if [[ "$IRON_STAMP" == ../ukgeo-tools/uk_world_data_gb/.iron_ore_inputs.sha256 ]]; then
+  IRON_STAMP="$ROOT/.iron_ore_inputs.sha256"
+fi
 
 if [[ -x "$UKGEO_TOOLS_DIR/.venv/bin/ukgeo" ]]; then
   PYTHON="$UKGEO_TOOLS_DIR/.venv/bin/python"
 else
-  PYTHON="${PYTHON:-python3}"
+  PYTHON="python3"
 fi
 UKGEO_ENV=(env "PYTHONPATH=$UKGEO_TOOLS_DIR/src${PYTHONPATH:+:$PYTHONPATH}")
-HOVER_ENV=(env "PYTHONPATH=$SCRIPT_DIR/src:$UKGEO_TOOLS_DIR/src${PYTHONPATH:+:$PYTHONPATH}" "HOVERPREVIEW_GPU=$HOVERPREVIEW_GPU")
+HOVER_ENV=(env "PYTHONPATH=$SCRIPT_DIR/src:$UKGEO_TOOLS_DIR/src${PYTHONPATH:+:$PYTHONPATH}")
 
 TASKS=()
 TASK_SOURCE=""
@@ -393,7 +363,6 @@ setup_venv_if_needed() {
 }
 
 check_gpu() {
-  export HOVERPREVIEW_GPU
   if [[ "$HOVERPREVIEW_GPU" != "0" && "$HOVERPREVIEW_GPU" != "false" && "$HOVERPREVIEW_GPU" != "off" ]]; then
     if command -v nvidia-smi >/dev/null 2>&1; then
       if "$PYTHON" -c "import cupy" >/dev/null 2>&1; then
@@ -671,34 +640,14 @@ run_clean() {
 if [[ -n "$REGENERATE_ARG" ]]; then
   TASK_SOURCE="--regenerate"
   parse_tasks "$REGENERATE_ARG"
-elif [[ -n "${REGENERATE:-}" ]]; then
-  TASK_SOURCE="REGENERATE"
-  parse_tasks "$REGENERATE"
 elif [[ -t 0 ]]; then
   TASK_SOURCE="interactive"
   prompt_tasks
 else
   TASK_SOURCE="non-interactive default"
   parse_tasks preview
-  echo "No --regenerate or REGENERATE supplied and stdin is not interactive; defaulting to preview only."
-  echo "Use --regenerate all or REGENERATE=all to force a full world-data rebuild."
-fi
-
-# Backward-compatible environment variables. These only imply work when explicitly set.
-if [[ "$SUPPRESS_LEGACY_TASKS" != "1" ]]; then
-  if [[ -n "${REBUILD_ORES:-}" ]] && is_truthy "$REBUILD_ORES"; then add_task ores; fi
-  if [[ -n "${REBUILD_PREVIEW:-}" ]] && is_truthy "$REBUILD_PREVIEW"; then add_task preview; fi
-  if [[ -n "${CLEAN:-}" ]] && is_truthy "$CLEAN"; then add_task clean; fi
-  if [[ -n "${REBUILD_IRON:-}" ]]; then
-    if [[ "$REBUILD_IRON" == "auto" ]]; then
-      AUTO_IRON=1
-      add_task iron-overlay
-    elif is_truthy "$REBUILD_IRON"; then
-      add_task iron-overlay
-    elif is_falsey "$REBUILD_IRON"; then
-      remove_task iron-overlay
-    fi
-  fi
+  echo "No --regenerate supplied and stdin is not interactive; defaulting to preview only."
+  echo "Use --regenerate all to force a full world-data rebuild."
 fi
 
 if [[ "$TASK_SOURCE" == "interactive" ]]; then

@@ -1,0 +1,47 @@
+runtime:
+  HOVERPREVIEW_GPU: auto
+
+generate:
+  UKGEO_TOOLS_DIR: ../ukgeo-tools
+  ROOT: ../ukgeo-tools/uk_world_data_gb
+  MAX_SIZE: 12000
+  STYLE: auto
+  HOVERPREVIEW_GPU: auto
+  HOVERPREVIEW_TILE_SIZE: 256
+  HOVERPREVIEW_WORKERS: 0
+  HOVERPREVIEW_VISUAL_FORMAT: png
+  HOVERPREVIEW_FORCE: false
+  HOVERPREVIEW_CLEAN_STALE: false
+  HOVERPREVIEW_PROFILE: false
+  DATA_DIR: ../../data
+  OS_TERRAIN_ZIP: ../../data/terr50_gagg_gb.zip
+  BGS_GEOLOGY_ZIP: ../../data/BGS_Geology_625k_bedrock_gpkg.zip
+  COAL_RESOURCES_ZIP: ../../data/OGC_CoalResourcesForNewTechnologies.zip
+  GOLD_OCCURRENCES: ../../data/bgs_gold_occurrences.geojson
+  OSNI_DTM_ZIP: ../../data/osni_opendata_50m_dtm.zip
+  COP30_ARCHIVE: ../../data/rasters_COP30.tar.gz
+  INCLUDE_IRELAND: true
+  USE_LEGACY_OSNI_HEIGHT: false
+  COP30_TARGET: ireland-iom
+  COP30_SMOOTHING: light
+  COP30_RESAMPLING: bilinear
+  COP30_DETERRACE: true
+  COP30_PROTECT_MAINLAND_GB: true
+  COP30_MINECRAFT_Y_OFFSET: 0
+  COP30_DEBUG_GEOTIFF: null
+  COP30_DEBUG_TARGET_MASK_GEOTIFF: null
+  COP30_DEBUG_LAND_MASK_GEOTIFF: null
+  RIVERS_ZIP: ../../data/oprvrs_gpkg_gb_ie.zip
+  LANDCOVER_ZIP: ../../data/FME_3564346A_1778997494261_5633.zip
+  IRON_OVERLAY_IMAGE: ../../data/uk_iron_ore_reference_overlay.svg
+  IRON_OVERLAY_SCORE: 180
+  IRON_OVERLAY_FIT: outline
+  IRON_STAMP: ../ukgeo-tools/uk_world_data_gb/.iron_ore_inputs.sha256
+  ORE_RULES: ../ukgeo-tools/examples/ore_rules_625k.yml
+  SURFACE_RULES: ../ukgeo-tools/examples/surface_geology_625k.yml
+  ORE_JOBS: 1
+  VEGETATION_JOBS: 1
+
+local_server:
+  HOST: 127.0.0.1
+  PORT: null

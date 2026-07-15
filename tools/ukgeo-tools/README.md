@@ -11,6 +11,9 @@ python3 -m venv .venv
 .venv/bin/pytest
 ```
 
+User-configurable rebuild and preview defaults now live in
+[config.yml](/home/zenyfh/Documents/GitHub/mapcreator/tools/ukgeo-tools/config.yml).
+
 ## Inspect inputs
 
 ```bash
@@ -23,16 +26,14 @@ python3 -m venv .venv
 
 New datasets default to uncompressed runtime tiles: `height/*.r16` and `*.u8` layers. This uses more disk space than the old `*.r16.gz`/`*.u8.gz` files, but it avoids thousands of small gzip decompressions while Minecraft is generating chunks. The mod and tools remain backward-compatible with existing `.gz` datasets.
 
-To force the legacy gzip output, set:
+To force the legacy gzip output, set `runtime.UKGEO_TILE_COMPRESSION: gzip` in
+`config.yml`.
+
+For faster in-game generation, leave it at:
 
 ```bash
-UKGEO_TILE_COMPRESSION=gzip ./rebuild_uk_world_data_gb.sh
-```
-
-For faster in-game generation, leave it unset or set:
-
-```bash
-UKGEO_TILE_COMPRESSION=none ./rebuild_uk_world_data_gb.sh
+runtime:
+  UKGEO_TILE_COMPRESSION: none
 ```
 
 ## Generate a small test area
@@ -58,7 +59,7 @@ The full GB rebuild script uses the repository defaults, where Minecraft `(0,0)`
 
 For the national BGS 625k GeoPackage, use the 625k rules. These include the normal ore layers plus geology block layers such as granite, limestone, calcite, tuff, and optional Create stone types. For detailed whole-region ironstone belts, prefer the full BGS Geology 50k package with `examples/ore_rules.yml`: the 50k bedrock and linear layers contain named ironstone formations/members and iron-rich lithologies that the more general 625k overview may not retain.
 
-The full GB rebuild also max-merges the checked-in `../../data/uk_iron_ore_reference_overlay.svg` red vector mask into the generated iron ore tiles. By default the overlay is registered from the SVG's blue UK outline to the generated dataset's valid land/height bounds. Set `IRON_OVERLAY_IMAGE=` to disable that overlay.
+The full GB rebuild also max-merges the checked-in `../../data/uk_iron_ore_reference_overlay.svg` red vector mask into the generated iron ore tiles. By default the overlay is registered from the SVG's blue UK outline to the generated dataset's valid land/height bounds. Clear `IRON_OVERLAY_IMAGE` in `config.yml` to disable that overlay.
 
 ```bash
 .venv/bin/ukgeo make-ore-tiles \
@@ -154,10 +155,9 @@ To remake the full checked-out GB dataset into `./uk_world_data_gb`, run:
 ./rebuild_uk_world_data_gb.sh
 ```
 
-By default the rebuild script uses `../../data/rasters_COP30.tar.gz` for Ireland, Northern Ireland, and the Isle of Man, applies no vertical offset, and expands the west edge of the British National Grid extent so western Ireland is not silently clipped. Set `COP30_MINECRAFT_Y_OFFSET` only for manual tuning. Set `INCLUDE_IRELAND=0` to keep the older GB-only extent. Set `USE_LEGACY_OSNI_HEIGHT=1` to use `../../data/osni_opendata_50m_dtm.zip` instead of COP30 for the legacy Northern Ireland-only overlay.
+By default the rebuild script uses `../../data/rasters_COP30.tar.gz` for Ireland, Northern Ireland, and the Isle of Man, applies no vertical offset, and expands the west edge of the British National Grid extent so western Ireland is not silently clipped. Change `COP30_MINECRAFT_Y_OFFSET`, `INCLUDE_IRELAND`, and `USE_LEGACY_OSNI_HEIGHT` in `config.yml` when you want non-default behaviour.
 
-The rebuild script writes to a temporary sibling directory first, validates the result, then moves the previous dataset to a timestamped backup before replacing it.
-Ore and vegetation generation use 4 worker processes by default; lower them on memory-constrained machines with `UKGEO_TILE_COMPRESSION=none ORE_JOBS=2 VEGETATION_JOBS=2 ./rebuild_uk_world_data_gb.sh`.
+The rebuild script writes to a temporary sibling directory first, validates the result, then moves the previous dataset to a timestamped backup before replacing it. Lower `ORE_JOBS` and `VEGETATION_JOBS` in `config.yml` on memory-constrained machines.
 
 ## Generate the default 25k x 50k world
 

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-HOST="${HOVERPREVIEW_HOST:-127.0.0.1}"
+CONFIG_FILE="$ROOT_DIR/tools/hoverpreview-tools/config.yml"
 PREVIEW_ARG="${1:-}"
 
 if ! command -v python3 >/dev/null 2>&1; then
@@ -10,8 +10,14 @@ if ! command -v python3 >/dev/null 2>&1; then
   exit 1
 fi
 
-if [[ -n "${HOVERPREVIEW_PORT:-}" ]]; then
-  PORT="$HOVERPREVIEW_PORT"
+eval "$(
+  PYTHONPATH="$ROOT_DIR/tools/ukgeo-tools/src" \
+    python3 -m ukgeo.config --config "$CONFIG_FILE" --section local_server --format shell
+)"
+
+HOST="${HOST:-127.0.0.1}"
+if [[ -n "${PORT:-}" ]]; then
+  :
 else
   PORT="$(python3 - <<'PY'
 import socket

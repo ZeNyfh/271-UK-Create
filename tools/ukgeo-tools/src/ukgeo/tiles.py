@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 import gzip
-import os
 import numpy as np
 
+from .config import get_config_value
 from .coords import tile_filename
 
 
@@ -19,12 +19,13 @@ def tile_compression() -> str:
     tile reads during chunk generation, where gzip decompression CPU cost tends
     to be more expensive than the extra disk space.
     """
-    value = os.environ.get("UKGEO_TILE_COMPRESSION", "none").strip().lower()
+    config_path = Path(__file__).resolve().parents[2] / "config.yml"
+    value = str(get_config_value(config_path, "runtime.UKGEO_TILE_COMPRESSION", "none")).strip().lower()
     if value in {"", "none", "raw", "uncompressed", "off", "0", "false"}:
         return "none"
     if value in {"gzip", "gz", "compressed", "on", "1", "true"}:
         return "gzip"
-    raise ValueError("UKGEO_TILE_COMPRESSION must be 'none' or 'gzip'")
+    raise ValueError("runtime.UKGEO_TILE_COMPRESSION in config.yml must be 'none' or 'gzip'")
 
 
 def r16_extension(compression: str | None = None) -> str:

@@ -14,6 +14,7 @@ from typing import Any
 import numpy as np
 from PIL import Image
 
+from ukgeo.config import get_config_value
 from ukgeo.manifest import read_manifest
 from ukgeo.preview import ORE_COLORS, _height_image as _cpu_height_image, _hex_color, _read_height_preview, _read_u8_preview, read_cell_u8_preview, read_vegetation_preview
 from ukgeo.tiles import HEIGHT_NODATA
@@ -29,6 +30,11 @@ PREVIEW_RIVER_MIN_RADIUS = 1
 PREVIEW_RIVER_MAX_RADIUS = 6
 PREVIEW_RIVER_COLOR = (65, 145, 230)
 _CUPY_MODULE: Any | None | bool = None
+
+
+def _hoverpreview_gpu_mode() -> str:
+    config_path = Path(__file__).resolve().parents[2] / "config.yml"
+    return str(get_config_value(config_path, "runtime.HOVERPREVIEW_GPU", "auto")).strip().lower()
 
 
 def hover_preview_scale(manifest: dict[str, Any], max_size: int) -> tuple[int, int, int]:
@@ -394,7 +400,7 @@ def _cupy() -> Any | None:
         return None
     if _CUPY_MODULE is not None:
         return _CUPY_MODULE
-    mode = os.environ.get("HOVERPREVIEW_GPU", "auto").strip().lower()
+    mode = _hoverpreview_gpu_mode()
     if mode in {"0", "false", "no", "off", "cpu"}:
         _CUPY_MODULE = False
         return None
@@ -445,7 +451,7 @@ def _height_image(values: np.ndarray, style: str) -> Image.Image:
         rgb[~valid] = cp.asarray((16, 24, 32), dtype=cp.uint8)
         return Image.fromarray(cp.asnumpy(rgb), mode="RGB")
     except Exception:
-        if os.environ.get("HOVERPREVIEW_GPU", "auto").strip().lower() in {"1", "true", "yes", "on", "gpu"}:
+        if _hoverpreview_gpu_mode() in {"1", "true", "yes", "on", "gpu"}:
             raise
         return _cpu_height_image(values, style)
 
@@ -722,7 +728,7 @@ def _categorical_overlay_image(values: np.ndarray, classes: dict, *, alpha: int,
                 rgba[mask, 3] = alpha
             return Image.fromarray(cp.asnumpy(rgba), mode="RGBA")
         except Exception:
-            if os.environ.get("HOVERPREVIEW_GPU", "auto").strip().lower() in {"1", "true", "yes", "on", "gpu"}:
+            if _hoverpreview_gpu_mode() in {"1", "true", "yes", "on", "gpu"}:
                 raise
     rgba = np.zeros((*values.shape, 4), dtype=np.uint8)
     for raw_id, meta in classes.items():
@@ -884,7 +890,7 @@ def _mask_overlay_image(values: np.ndarray, color_value: tuple[int, int, int]) -
             rgba[:, :, 3] = cp.clip(score * 240, 0, 240).astype(cp.uint8)
             return Image.fromarray(cp.asnumpy(rgba), mode="RGBA")
         except Exception:
-            if os.environ.get("HOVERPREVIEW_GPU", "auto").strip().lower() in {"1", "true", "yes", "on", "gpu"}:
+            if _hoverpreview_gpu_mode() in {"1", "true", "yes", "on", "gpu"}:
                 raise
     score = values.astype(np.float32) / 255.0
     rgba = np.zeros((*values.shape, 4), dtype=np.uint8)
@@ -905,7 +911,7 @@ def _ore_overlay_image(values: np.ndarray, ore: str) -> Image.Image:
             rgba[:, :, 3] = cp.clip(score * 216, 0, 230).astype(cp.uint8)
             return Image.fromarray(cp.asnumpy(rgba), mode="RGBA")
         except Exception:
-            if os.environ.get("HOVERPREVIEW_GPU", "auto").strip().lower() in {"1", "true", "yes", "on", "gpu"}:
+            if _hoverpreview_gpu_mode() in {"1", "true", "yes", "on", "gpu"}:
                 raise
     score = values.astype(np.float32) / 255.0
     color = np.array(ORE_COLORS.get(ore, (255, 255, 255)), dtype=np.float32)

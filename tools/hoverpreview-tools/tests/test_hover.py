@@ -142,12 +142,14 @@ def test_surface_overlay_keeps_default_zero_class_transparent():
 
 def test_generate_script_defaults_to_cop30_without_requiring_osni():
     script = (Path(__file__).resolve().parents[1] / "generate_hover_previews.sh").read_text(encoding="utf-8")
+    config = (Path(__file__).resolve().parents[1] / "config.yml").read_text(encoding="utf-8")
     run_height = script[script.index("run_height() {") : script.index("\nrun_vegetation()")]
 
-    assert 'COP30_ARCHIVE="${COP30_ARCHIVE:-$DATA_DIR/rasters_COP30.tar.gz}"' in script
-    assert 'COP30_MINECRAFT_Y_OFFSET="${COP30_MINECRAFT_Y_OFFSET:-0}"' in script
-    assert 'COP30_DEBUG_TARGET_MASK_GEOTIFF="${COP30_DEBUG_TARGET_MASK_GEOTIFF:-}"' in script
-    assert 'COP30_DEBUG_LAND_MASK_GEOTIFF="${COP30_DEBUG_LAND_MASK_GEOTIFF:-}"' in script
+    assert 'python3 -m ukgeo.config --config "$CONFIG_FILE" --section generate --format shell' in script
+    assert "COP30_ARCHIVE: ../../data/rasters_COP30.tar.gz" in config
+    assert "COP30_MINECRAFT_Y_OFFSET: 0" in config
+    assert "COP30_DEBUG_TARGET_MASK_GEOTIFF: null" in config
+    assert "COP30_DEBUG_LAND_MASK_GEOTIFF: null" in config
     assert "add-cop30-height-tiles" in run_height
     assert '--minecraft-y-offset "$COP30_MINECRAFT_Y_OFFSET"' in run_height
     assert '--debug-target-mask-geotiff "$COP30_DEBUG_TARGET_MASK_GEOTIFF"' in run_height

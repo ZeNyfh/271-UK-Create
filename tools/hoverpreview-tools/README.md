@@ -14,6 +14,9 @@ Generate stackable hover preview layers with:
 ./generate_hover_previews.sh
 ```
 
+User-configurable export defaults now live in
+[config.yml](/home/zenyfh/Documents/GitHub/mapcreator/tools/hoverpreview-tools/config.yml).
+
 By default, artifacts are written to `hoverpreviews/` in the current dataset
 directory. The export contains:
 
@@ -47,26 +50,8 @@ hover map. The default height rebuild uses `data/rasters_COP30.tar.gz` for
 Ireland, Northern Ireland, the Isle of Man, and nearby target islands, while
 mainland Great Britain remains protected and based on OS Terrain 50. The old
 OSNI Northern Ireland DTM is available only when explicitly requested. COP30
-heights are written with no vertical offset by default; set
-`COP30_MINECRAFT_Y_OFFSET` only for manual tuning.
-
-Useful height rebuild environment variables:
-
-```bash
-INCLUDE_IRELAND=1
-COP30_ARCHIVE=/path/to/rasters_COP30.tar.gz
-COP30_TARGET=ireland-iom
-COP30_SMOOTHING=light
-COP30_RESAMPLING=bilinear
-COP30_DETERRACE=1
-COP30_PROTECT_MAINLAND_GB=1
-COP30_MINECRAFT_Y_OFFSET=0
-COP30_DEBUG_GEOTIFF=/tmp/cop30_overlay.tif
-COP30_DEBUG_TARGET_MASK_GEOTIFF=/tmp/cop30_target_mask.tif
-COP30_DEBUG_LAND_MASK_GEOTIFF=/tmp/cop30_land_mask.tif
-USE_LEGACY_OSNI_HEIGHT=0
-OSNI_DTM_ZIP=/path/to/osni_opendata_50m_dtm.zip
-```
+heights are written with no vertical offset by default; change
+`COP30_MINECRAFT_Y_OFFSET` in `config.yml` only for manual tuning.
 
 Examples:
 
@@ -78,23 +63,16 @@ Examples:
 ./generate_hover_previews.sh --regenerate all
 
 # Legacy OSNI fallback
-USE_LEGACY_OSNI_HEIGHT=1 ./generate_hover_previews.sh --regenerate height,preview
+# Set USE_LEGACY_OSNI_HEIGHT: true in config.yml first
+./generate_hover_previews.sh --regenerate height,preview
 
 # Disable Ireland/IOM overlay entirely
-INCLUDE_IRELAND=0 ./generate_hover_previews.sh --regenerate height,preview
+# Set INCLUDE_IRELAND: false in config.yml first
+./generate_hover_previews.sh --regenerate height,preview
 
 # Produce debug COP30 overlay GeoTIFF
-COP30_DEBUG_GEOTIFF=/tmp/cop30_overlay.tif ./generate_hover_previews.sh --regenerate height
-```
-
-Equivalent environment defaults are supported by the wrapper:
-
-```bash
-HOVERPREVIEW_TILE_SIZE=256 \
-HOVERPREVIEW_WORKERS=8 \
-HOVERPREVIEW_VISUAL_FORMAT=png \
-HOVERPREVIEW_MAX_SIZE=4096 \
-./generate_hover_previews.sh
+# Set COP30_DEBUG_GEOTIFF in config.yml first
+./generate_hover_previews.sh --regenerate height
 ```
 
 CLI options exposed by `python -m hoverpreview_tools.cli`:
@@ -120,12 +98,12 @@ steps when CuPy is installed:
 
 ```bash
 python -m pip install -e "./tools/hoverpreview-tools[gpu]"
-HOVERPREVIEW_GPU=1 ./tools/hoverpreview-tools/generate_hover_previews.sh
 ```
 
-`HOVERPREVIEW_GPU=auto` is the default. It uses CuPy when available and falls
-back to CPU rendering otherwise. Tile reads and PNG encoding still run on the
-CPU, so the speedup depends on where the local run spends its time.
+Set `runtime.HOVERPREVIEW_GPU: true` in `config.yml` to require GPU rendering.
+The default is `auto`, which uses CuPy when available and falls back to CPU
+rendering otherwise. Tile reads and PNG encoding still run on the CPU, so the
+speedup depends on where the local run spends its time.
 
 ## Publish from the repository root
 
@@ -213,16 +191,12 @@ node --check site/app.js
 To validate a COP30 preview generation path locally:
 
 ```bash
-UKGEO_TOOLS_DIR=../ukgeo-tools \
-COP30_ARCHIVE=../../data/rasters_COP30.tar.gz \
 ./generate_hover_previews.sh --regenerate height,preview --profile
 ```
 
 For a full rebuild:
 
 ```bash
-UKGEO_TOOLS_DIR=../ukgeo-tools \
-COP30_ARCHIVE=../../data/rasters_COP30.tar.gz \
 ./generate_hover_previews.sh --regenerate all --profile
 ```
 

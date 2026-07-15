@@ -1,0 +1,47 @@
+runtime:
+  UKGEO_TILE_COMPRESSION: none
+
+rebuild:
+  DATA_DIR: ../../data
+  GENERATE_PREVIEWS: false
+  MAX_SIZE: 12000
+  LEGEND_SCALE: 20
+  ORE_JOBS: 1
+  VEGETATION_JOBS: 1
+  UKGEO_TILE_COMPRESSION: none
+  INCLUDE_IRELAND: true
+  USE_LEGACY_OSNI_HEIGHT: false
+  COP30_MINECRAFT_Y_OFFSET: 0
+  OS_TERRAIN_ZIP: ../../data/terr50_gagg_gb.zip
+  BGS_GEOLOGY_ZIP: ../../data/BGS_Geology_625k_bedrock_gpkg.zip
+  COAL_RESOURCES_ZIP: ../../data/OGC_CoalResourcesForNewTechnologies.zip
+  GOLD_OCCURRENCES: ../../data/bgs_gold_occurrences.geojson
+  OSNI_DTM_ZIP: ../../data/osni_opendata_50m_dtm.zip
+  COP30_ARCHIVE: ../../data/rasters_COP30.tar.gz
+  RIVERS_ZIP: ../../data/oprvrs_gpkg_gb_ie.zip
+  LANDCOVER_ZIP: ../../data/FME_3564346A_1778997494261_5633.zip
+  IRON_OVERLAY_IMAGE: ../../data/uk_iron_ore_reference_overlay.svg
+  IRON_OVERLAY_SCORE: 180
+  IRON_OVERLAY_FIT: outline
+  ORE_RULES: examples/ore_rules_625k.yml
+  SURFACE_RULES: examples/surface_geology_625k.yml
+  BNG_MIN_EASTING_IRELAND: -220000
+  BNG_MIN_NORTHING_IRELAND: 0
+  BNG_MAX_EASTING: 650000
+  BNG_MAX_NORTHING: 1300000
+  WORLD_WIDTH_IRELAND: 33462
+  WORLD_WIDTH_GB: 25000
+  WORLD_DEPTH: 50000
+
+previews:
+  ROOT: ./uk_world_data_gb
+  MAX_SIZE: 12000
+  LEGEND_SCALE: 20
+  DATA_DIR: ../../data
+  IRON_OVERLAY_IMAGE: ../../data/uk_iron_ore_reference_overlay.svg
+  IRON_OVERLAY_SCORE: 180
+  IRON_OVERLAY_FIT: outline
+  BGS_GEOLOGY_ZIP: ../../data/BGS_Geology_625k_bedrock_gpkg.zip
+  ORE_RULES: examples/ore_rules_625k.yml
+  REBUILD_IRON: auto
+  IRON_STAMP: ./.iron_ore_inputs.sha256

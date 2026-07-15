@@ -3,34 +3,15 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd)"
+CONFIG_FILE="$SCRIPT_DIR/config.yml"
+cd "$SCRIPT_DIR"
+
+eval "$(
+  PYTHONPATH="$SCRIPT_DIR/src" \
+    python3 -m ukgeo.config --config "$CONFIG_FILE" --section rebuild --format shell
+)"
 
 OUT_ROOT="${1:-$SCRIPT_DIR/uk_world_data_gb}"
-DATA_DIR="${DATA_DIR:-$REPO_ROOT/data}"
-GENERATE_PREVIEWS="${GENERATE_PREVIEWS:-0}"
-MAX_SIZE="${MAX_SIZE:-12000}"
-LEGEND_SCALE="${LEGEND_SCALE:-20}"
-ORE_JOBS="${ORE_JOBS:-1}"
-VEGETATION_JOBS="${VEGETATION_JOBS:-1}"
-UKGEO_TILE_COMPRESSION="${UKGEO_TILE_COMPRESSION:-none}"
-export UKGEO_TILE_COMPRESSION
-INCLUDE_IRELAND="${INCLUDE_IRELAND:-1}"
-USE_LEGACY_OSNI_HEIGHT="${USE_LEGACY_OSNI_HEIGHT:-0}"
-COP30_MINECRAFT_Y_OFFSET="${COP30_MINECRAFT_Y_OFFSET:-0}"
-
-OS_TERRAIN_ZIP="${OS_TERRAIN_ZIP:-$DATA_DIR/terr50_gagg_gb.zip}"
-BGS_GEOLOGY_ZIP="${BGS_GEOLOGY_ZIP:-$DATA_DIR/BGS_Geology_625k_bedrock_gpkg.zip}"
-COAL_RESOURCES_ZIP="${COAL_RESOURCES_ZIP:-$DATA_DIR/OGC_CoalResourcesForNewTechnologies.zip}"
-GOLD_OCCURRENCES="${GOLD_OCCURRENCES:-$DATA_DIR/bgs_gold_occurrences.geojson}"
-OSNI_DTM_ZIP="${OSNI_DTM_ZIP:-$DATA_DIR/osni_opendata_50m_dtm.zip}"
-COP30_ARCHIVE="${COP30_ARCHIVE:-$DATA_DIR/rasters_COP30.tar.gz}"
-RIVERS_ZIP="${RIVERS_ZIP:-$DATA_DIR/oprvrs_gpkg_gb_ie.zip}"
-LANDCOVER_ZIP="${LANDCOVER_ZIP:-$DATA_DIR/FME_3564346A_1778997494261_5633.zip}"
-IRON_OVERLAY_IMAGE="${IRON_OVERLAY_IMAGE:-$DATA_DIR/uk_iron_ore_reference_overlay.svg}"
-IRON_OVERLAY_SCORE="${IRON_OVERLAY_SCORE:-180}"
-IRON_OVERLAY_FIT="${IRON_OVERLAY_FIT:-outline}"
-
-ORE_RULES="${ORE_RULES:-$SCRIPT_DIR/examples/ore_rules_625k.yml}"
-SURFACE_RULES="${SURFACE_RULES:-$SCRIPT_DIR/examples/surface_geology_625k.yml}"
 
 require_file() {
   local path="$1"
@@ -43,7 +24,7 @@ require_file() {
 require_file "$OS_TERRAIN_ZIP"
 require_file "$BGS_GEOLOGY_ZIP"
 require_file "$COAL_RESOURCES_ZIP"
-if [[ "$USE_LEGACY_OSNI_HEIGHT" == "1" ]]; then
+if [[ "$USE_LEGACY_OSNI_HEIGHT" == "true" ]]; then
   require_file "$OSNI_DTM_ZIP"
 else
   require_file "$COP30_ARCHIVE"
@@ -56,8 +37,6 @@ if [[ -n "$IRON_OVERLAY_IMAGE" ]]; then
   require_file "$IRON_OVERLAY_IMAGE"
 fi
 
-cd "$SCRIPT_DIR"
-
 if [[ ! -x ".venv/bin/ukgeo" ]]; then
   python3 -m venv .venv
   .venv/bin/python -m pip install -e ".[test]"
@@ -67,23 +46,23 @@ UKGEO="$SCRIPT_DIR/.venv/bin/ukgeo"
 TMP_ROOT="$OUT_ROOT.rebuild.$$"
 BACKUP_ROOT="$OUT_ROOT.backup.$(date +%Y%m%d-%H%M%S)"
 
-if [[ "$INCLUDE_IRELAND" == "1" ]]; then
+if [[ "$INCLUDE_IRELAND" == "true" ]]; then
   # Western Ireland projects to negative British National Grid eastings. Expand
   # westward while preserving the existing 26 m/block scale and the 0..1300000
   # northing range used by the GB dataset.
-  BNG_MIN_EASTING="${BNG_MIN_EASTING:--220000}"
-  BNG_MIN_NORTHING="${BNG_MIN_NORTHING:-0}"
-  BNG_MAX_EASTING="${BNG_MAX_EASTING:-650000}"
-  BNG_MAX_NORTHING="${BNG_MAX_NORTHING:-1300000}"
-  WORLD_DEPTH="${WORLD_DEPTH:-50000}"
-  WORLD_WIDTH="${WORLD_WIDTH:-33462}"
+  BNG_MIN_EASTING="${BNG_MIN_EASTING_IRELAND}"
+  BNG_MIN_NORTHING="${BNG_MIN_NORTHING_IRELAND}"
+  BNG_MAX_EASTING="${BNG_MAX_EASTING}"
+  BNG_MAX_NORTHING="${BNG_MAX_NORTHING}"
+  WORLD_DEPTH="${WORLD_DEPTH}"
+  WORLD_WIDTH="${WORLD_WIDTH_IRELAND}"
 else
-  BNG_MIN_EASTING="${BNG_MIN_EASTING:-0}"
-  BNG_MIN_NORTHING="${BNG_MIN_NORTHING:-0}"
-  BNG_MAX_EASTING="${BNG_MAX_EASTING:-650000}"
-  BNG_MAX_NORTHING="${BNG_MAX_NORTHING:-1300000}"
-  WORLD_WIDTH="${WORLD_WIDTH:-25000}"
-  WORLD_DEPTH="${WORLD_DEPTH:-50000}"
+  BNG_MIN_EASTING="0"
+  BNG_MIN_NORTHING="0"
+  BNG_MAX_EASTING="${BNG_MAX_EASTING}"
+  BNG_MAX_NORTHING="${BNG_MAX_NORTHING}"
+  WORLD_WIDTH="${WORLD_WIDTH_GB}"
+  WORLD_DEPTH="${WORLD_DEPTH}"
 fi
 
 read -r MINECRAFT_MIN_X MINECRAFT_MIN_Z < <("$SCRIPT_DIR/.venv/bin/python" - <<PY
@@ -116,7 +95,7 @@ mkdir -p "$TMP_ROOT"
 echo "Rebuilding GB runtime tiles into: $TMP_ROOT"
 echo "Tile compression: $UKGEO_TILE_COMPRESSION (none writes .r16/.u8; gzip writes .r16.gz/.u8.gz)"
 echo "Height extent: E $BNG_MIN_EASTING..$BNG_MAX_EASTING, N $BNG_MIN_NORTHING..$BNG_MAX_NORTHING, world ${WORLD_WIDTH}x${WORLD_DEPTH}"
-if [[ "$USE_LEGACY_OSNI_HEIGHT" == "1" ]]; then
+if [[ "$USE_LEGACY_OSNI_HEIGHT" == "true" ]]; then
   echo "Height overlay: legacy OSNI DTM"
 else
   echo "Height overlay: COP30 Ireland/Northern Ireland/Isle of Man"
@@ -148,7 +127,7 @@ fi
   --max-height-metres 30 \
   --preserve-height-overlays
 
-if [[ "$USE_LEGACY_OSNI_HEIGHT" == "1" ]]; then
+if [[ "$USE_LEGACY_OSNI_HEIGHT" == "true" ]]; then
   "$UKGEO" add-osni-height-tiles \
     --osni-dtm "$OSNI_DTM_ZIP" \
     --manifest "$TMP_ROOT/manifest.json" \
@@ -219,7 +198,7 @@ fi
 "$UKGEO" validate-tiles "$TMP_ROOT"
 "$UKGEO" stats "$TMP_ROOT"
 
-if [[ "$GENERATE_PREVIEWS" == "1" ]]; then
+if [[ "$GENERATE_PREVIEWS" == "true" ]]; then
   "$SCRIPT_DIR/generate_previews.sh" "$TMP_ROOT" "$TMP_ROOT/previews"
 fi
 

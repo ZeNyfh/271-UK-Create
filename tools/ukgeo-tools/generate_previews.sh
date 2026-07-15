@@ -3,18 +3,17 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd)"
-ROOT="${1:-./uk_world_data_gb}"
+CONFIG_FILE="$SCRIPT_DIR/config.yml"
+cd "$SCRIPT_DIR"
+
+eval "$(
+  PYTHONPATH="$SCRIPT_DIR/src" \
+    python3 -m ukgeo.config --config "$CONFIG_FILE" --section previews --format shell
+)"
+
+ROOT="${1:-$ROOT}"
 OUT_DIR="${2:-$ROOT/previews}"
-MAX_SIZE="${MAX_SIZE:-12000}"
-LEGEND_SCALE="${LEGEND_SCALE:-20}"
-DATA_DIR="${DATA_DIR:-$REPO_ROOT/data}"
-IRON_OVERLAY_IMAGE="${IRON_OVERLAY_IMAGE:-$DATA_DIR/uk_iron_ore_reference_overlay.svg}"
-IRON_OVERLAY_SCORE="${IRON_OVERLAY_SCORE:-180}"
-IRON_OVERLAY_FIT="${IRON_OVERLAY_FIT:-outline}"
-BGS_GEOLOGY_ZIP="${BGS_GEOLOGY_ZIP:-$DATA_DIR/BGS_Geology_625k_bedrock_gpkg.zip}"
-ORE_RULES="${ORE_RULES:-$SCRIPT_DIR/examples/ore_rules_625k.yml}"
-REBUILD_IRON="${REBUILD_IRON:-auto}"
-IRON_STAMP="${IRON_STAMP:-$ROOT/.iron_ore_inputs.sha256}"
+IRON_STAMP="${IRON_STAMP/#.\//$ROOT/}"
 
 if [[ -x "$SCRIPT_DIR/.venv/bin/ukgeo" ]]; then
   UKGEO="$SCRIPT_DIR/.venv/bin/ukgeo"
