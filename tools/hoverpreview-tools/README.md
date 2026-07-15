@@ -86,6 +86,8 @@ CLI options exposed by `python -m hoverpreview_tools.cli`:
 - `--tile-size`: visual and sample tile size in pixels.
 - `--workers`: bounded tile encoder worker count; `0` means auto.
 - `--visual-format png|webp`: visual output format; sample tiles remain PNG.
+- `--renderer auto|webgl|2d`: preferred browser renderer written into the
+  manifest. `auto` tries WebGL and falls back to the existing 2D canvas path.
 - `--force`: rewrite existing generated files.
 - `--clean-stale`: remove tile files no longer referenced by the manifest.
 - `--deploy-minimal`: delete redundant `layers/`, `mips/`, and `samples/`
@@ -112,6 +114,11 @@ Set `runtime.HOVERPREVIEW_GPU: true` in `config.yml` to require GPU rendering.
 The default is `auto`, which uses CuPy when available and falls back to CPU
 rendering otherwise. Tile reads and PNG encoding still run on the CPU, so the
 speedup depends on where the local run spends its time.
+
+For browser rendering, set `generate.HOVERPREVIEW_RENDERER` in
+[config.yml](/home/zenyfh/Documents/GitHub/mapcreator/tools/hoverpreview-tools/config.yml).
+`auto` is the default and prefers WebGL while falling back to the previous 2D
+canvas renderer if WebGL is unavailable or fails at runtime.
 
 ## Publish from the repository root
 

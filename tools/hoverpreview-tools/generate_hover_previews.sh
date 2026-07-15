@@ -609,6 +609,7 @@ run_preview() {
     --tile-size "$HOVERPREVIEW_TILE_SIZE"
     --workers "$HOVERPREVIEW_WORKERS"
     --visual-format "$HOVERPREVIEW_VISUAL_FORMAT"
+    --renderer "$HOVERPREVIEW_RENDERER"
   )
   if has_task clean; then
     args+=(--clean)

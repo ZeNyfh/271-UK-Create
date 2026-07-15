@@ -75,6 +75,7 @@ def export_hover_previews(
     tile_size: int = DEFAULT_TILE_SIZE,
     workers: int | None = None,
     visual_format: str = "png",
+    renderer: str = "auto",
     force: bool = False,
     clean_stale: bool = False,
     deploy_minimal: bool = False,
@@ -88,6 +89,7 @@ def export_hover_previews(
     visual_format = visual_format.lower().strip()
     if visual_format not in SUPPORTED_VISUAL_FORMATS:
         raise ValueError(f"Unsupported visual format {visual_format!r}; expected one of {sorted(SUPPORTED_VISUAL_FORMATS)}")
+    renderer = _validate_renderer(renderer)
     scale, tiles_x, tiles_z = hover_preview_scale(manifest, max_size)
     timings: list[tuple[str, float]] = []
 
@@ -355,12 +357,16 @@ def export_hover_previews(
             "river_min_radius": PREVIEW_RIVER_MIN_RADIUS,
             "river_max_radius": PREVIEW_RIVER_MAX_RADIUS,
         },
+        "viewer": {
+            "renderer_preference": renderer,
+        },
         "layers": layers,
     }
     index["generation"] = {
         "tile_size": preview_tile_size,
         "workers": encoder_workers,
         "visual_format": visual_format,
+        "renderer": renderer,
         "force": force,
         "clean_stale": clean_stale,
         "deploy_minimal": deploy_minimal,
@@ -503,6 +509,15 @@ def _validate_tile_size(value: int) -> int:
     if tile_size <= 0:
         raise ValueError("--tile-size must be positive")
     return tile_size
+
+
+def _validate_renderer(value: str) -> str:
+    renderer = str(value or "auto").strip().lower()
+    if renderer in {"canvas", "2d"}:
+        return "2d"
+    if renderer not in {"auto", "webgl", "2d"}:
+        raise ValueError("--renderer must be one of: auto, webgl, 2d")
+    return renderer
 
 
 def _resolve_workers(value: int | None) -> int:

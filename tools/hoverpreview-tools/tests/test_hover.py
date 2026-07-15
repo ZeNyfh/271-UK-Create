@@ -152,6 +152,7 @@ def test_generate_script_defaults_to_cop30_without_requiring_osni():
     assert "COP30_DEBUG_TARGET_MASK_GEOTIFF: null" in config
     assert "COP30_DEBUG_LAND_MASK_GEOTIFF: null" in config
     assert "HOVERPREVIEW_DEPLOY_MINIMAL: false" in config
+    assert "HOVERPREVIEW_RENDERER: auto" in config
     assert "add-cop30-height-tiles" in run_height
     assert '--minecraft-y-offset "$COP30_MINECRAFT_Y_OFFSET"' in run_height
     assert '--debug-target-mask-geotiff "$COP30_DEBUG_TARGET_MASK_GEOTIFF"' in run_height
@@ -160,6 +161,7 @@ def test_generate_script_defaults_to_cop30_without_requiring_osni():
     assert 'require_file "$COP30_ARCHIVE"' in run_height
     assert 'require_file "$OSNI_DTM_ZIP"' in run_height
     assert '--deploy-minimal' in run_preview
+    assert '--renderer "$HOVERPREVIEW_RENDERER"' in run_preview
     assert 'HOVERPREVIEW_DEPLOY_MINIMAL' in run_preview
     assert run_height.index('require_file "$OSNI_DTM_ZIP"') > run_height.index('if is_truthy "$USE_LEGACY_OSNI_HEIGHT"; then')
 
@@ -206,6 +208,7 @@ def test_export_hover_manifest_preserves_height_overlays_and_manifest_bounds(tmp
     assert hover_manifest["image_width"] == 256
     assert hover_manifest["image_height"] == 256
     assert hover_manifest["height_overlays"] == manifest["height_overlays"]
+    assert hover_manifest["viewer"]["renderer_preference"] == "auto"
 
 
 def test_export_hover_previews_deploy_minimal_keeps_only_manifest_and_tile_pyramids(tmp_path):
@@ -228,3 +231,19 @@ def test_export_hover_previews_deploy_minimal_keeps_only_manifest_and_tile_pyram
 
     hover_manifest = json.loads((out / "hover_manifest.json").read_text(encoding="utf-8"))
     assert hover_manifest["generation"]["deploy_minimal"] is True
+
+
+def test_export_hover_previews_normalises_renderer_preference(tmp_path):
+    root = tmp_path / "world"
+    height_root = root / "height"
+    height_root.mkdir(parents=True)
+    manifest = default_manifest(width=512, depth=512, tile_size=512)
+    write_manifest(root / "manifest.json", manifest)
+    write_r16_tile(height_root / "000_000.r16", np.full((512, 512), 123, dtype="<i2"))
+
+    out = tmp_path / "hoverpreviews"
+    export_hover_previews(root, out, max_size=256, tile_size=128, workers=1, renderer="canvas")
+
+    hover_manifest = json.loads((out / "hover_manifest.json").read_text(encoding="utf-8"))
+    assert hover_manifest["viewer"]["renderer_preference"] == "2d"
+    assert hover_manifest["generation"]["renderer"] == "2d"

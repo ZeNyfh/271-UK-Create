@@ -37,6 +37,7 @@ const PINCH_ZOOM_SENSITIVITY = 1.25;
 const PINCH_ZOOM_DEADZONE = 0.2;
 const PINCH_MIN_DISTANCE = 8;
 const SAMPLE_CROP_SIZE = 512;
+const DEFAULT_RENDERER_PREFERENCE = "auto";
 const BACKGROUND_ORE_ATTEMPT_MULTIPLIER = 0.1;
 const ORE_AREA_ATTEMPT_MULTIPLIER = 3.0;
 // Hover UI displays ore density in player-facing relative density units;
@@ -120,7 +121,11 @@ const state = {
   showAnimals: true,
   measure: null,
   mapCanvas: null,
+  mapRenderer: null,
+  mapRendererMode: "2d",
+  mapRendererFallbackReason: "",
   mapCtx: null,
+  layerTextures: new Map(),
   renderRequest: 0,
   chunkRenderRequest: 0,
   wheelZoomDelta: 0,
@@ -324,6 +329,7 @@ async function loadManifest(url) {
   state.animalsLoaded = false;
   state.animalsLoadError = null;
   clearBitmapCaches();
+  destroyMapRenderer();
   clearMeasurement();
   elements.stack.replaceChildren();
   elements.layerControls.replaceChildren();
@@ -331,9 +337,8 @@ async function loadManifest(url) {
 
   state.mapCanvas = document.createElement("canvas");
   state.mapCanvas.className = "map-canvas";
-  state.mapCtx = state.mapCanvas.getContext("2d", { alpha: false });
-  state.mapCtx.imageSmoothingEnabled = true;
   elements.stack.append(state.mapCanvas);
+  setupMapRenderer(state.mapCanvas, manifest);
 
   for (const layer of manifest.layers || []) {
     addLayer(layer);
@@ -343,8 +348,158 @@ async function loadManifest(url) {
 
   elements.empty.hidden = true;
   fitView();
-  if (elements.loadState) elements.loadState.textContent = `Loaded ${(manifest.layers || []).length} layers`;
+  if (elements.loadState) {
+    const suffix = state.mapRendererMode === "webgl" ? " · WebGL" : state.mapRendererFallbackReason ? " · 2D fallback" : " · 2D";
+    elements.loadState.textContent = `Loaded ${(manifest.layers || []).length} layers${suffix}`;
+  }
   setStatus(START_STATUS);
+}
+
+function rendererPreferenceForManifest(manifest) {
+  const queryRenderer = new URLSearchParams(location.search).get("renderer");
+  return normalizeRendererPreference(queryRenderer || manifest?.viewer?.renderer_preference || DEFAULT_RENDERER_PREFERENCE);
+}
+
+function normalizeRendererPreference(value) {
+  const text = String(value || DEFAULT_RENDERER_PREFERENCE).trim().toLowerCase();
+  if (text === "canvas") return "2d";
+  if (text === "webgl" || text === "2d") return text;
+  return DEFAULT_RENDERER_PREFERENCE;
+}
+
+function setupMapRenderer(canvas, manifest) {
+  state.mapRendererFallbackReason = "";
+  const preference = rendererPreferenceForManifest(manifest);
+  if (preference !== "2d") {
+    try {
+      const renderer = createWebGlRenderer(canvas);
+      if (renderer) {
+        state.mapRenderer = renderer;
+        state.mapRendererMode = "webgl";
+        state.mapCtx = null;
+        return;
+      }
+      state.mapRendererFallbackReason = "webgl-unavailable";
+    } catch (error) {
+      console.warn("[hoverpreview] WebGL renderer setup failed, falling back to 2D", error);
+      state.mapRendererFallbackReason = error?.message || "webgl-unavailable";
+    }
+  }
+  createCanvasRenderer(canvas);
+}
+
+function createCanvasRenderer(canvas) {
+  const ctx = canvas.getContext("2d", { alpha: false });
+  if (!ctx) throw new Error("2D canvas context unavailable");
+  ctx.imageSmoothingEnabled = true;
+  state.mapRenderer = { mode: "2d", canvas, ctx };
+  state.mapRendererMode = "2d";
+  state.mapCtx = ctx;
+}
+
+function createWebGlRenderer(canvas) {
+  const options = { alpha: false, antialias: true, premultipliedAlpha: false, preserveDrawingBuffer: false };
+  const gl = canvas.getContext("webgl2", options) || canvas.getContext("webgl", options) || canvas.getContext("experimental-webgl", options);
+  if (!gl) return null;
+
+  const vertexShader = compileShader(gl, gl.VERTEX_SHADER, `
+    attribute vec2 a_position;
+    attribute vec2 a_texCoord;
+    uniform vec2 u_resolution;
+    varying vec2 v_texCoord;
+    void main() {
+      vec2 zeroToOne = a_position / u_resolution;
+      vec2 clipSpace = zeroToOne * 2.0 - 1.0;
+      gl_Position = vec4(clipSpace * vec2(1.0, -1.0), 0.0, 1.0);
+      v_texCoord = a_texCoord;
+    }
+  `);
+  const fragmentShader = compileShader(gl, gl.FRAGMENT_SHADER, `
+    precision mediump float;
+    uniform sampler2D u_texture;
+    varying vec2 v_texCoord;
+    void main() {
+      gl_FragColor = texture2D(u_texture, v_texCoord);
+    }
+  `);
+  const program = createShaderProgram(gl, vertexShader, fragmentShader);
+  const buffer = gl.createBuffer();
+  if (!buffer) throw new Error("Failed to create WebGL buffer");
+
+  gl.useProgram(program);
+  gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+  gl.enable(gl.BLEND);
+  gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+  gl.disable(gl.DEPTH_TEST);
+  gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+
+  return {
+    mode: "webgl",
+    canvas,
+    gl,
+    program,
+    vertexShader,
+    fragmentShader,
+    buffer,
+    positionLocation: gl.getAttribLocation(program, "a_position"),
+    texCoordLocation: gl.getAttribLocation(program, "a_texCoord"),
+    resolutionLocation: gl.getUniformLocation(program, "u_resolution"),
+    textureLocation: gl.getUniformLocation(program, "u_texture"),
+  };
+}
+
+function compileShader(gl, type, source) {
+  const shader = gl.createShader(type);
+  if (!shader) throw new Error("Failed to create WebGL shader");
+  gl.shaderSource(shader, source);
+  gl.compileShader(shader);
+  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+    const message = gl.getShaderInfoLog(shader) || "unknown shader error";
+    gl.deleteShader(shader);
+    throw new Error(message);
+  }
+  return shader;
+}
+
+function createShaderProgram(gl, vertexShader, fragmentShader) {
+  const program = gl.createProgram();
+  if (!program) throw new Error("Failed to create WebGL program");
+  gl.attachShader(program, vertexShader);
+  gl.attachShader(program, fragmentShader);
+  gl.linkProgram(program);
+  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+    const message = gl.getProgramInfoLog(program) || "unknown program link error";
+    gl.deleteProgram(program);
+    throw new Error(message);
+  }
+  return program;
+}
+
+function destroyMapRenderer({ keepCanvas = false } = {}) {
+  releaseAllLayerTextures();
+  const renderer = state.mapRenderer;
+  if (renderer?.mode === "webgl" && renderer.gl) {
+    const gl = renderer.gl;
+    if (renderer.buffer) gl.deleteBuffer(renderer.buffer);
+    if (renderer.program) gl.deleteProgram(renderer.program);
+    if (renderer.vertexShader) gl.deleteShader(renderer.vertexShader);
+    if (renderer.fragmentShader) gl.deleteShader(renderer.fragmentShader);
+  }
+  state.mapRenderer = null;
+  state.mapRendererMode = "2d";
+  state.mapCtx = null;
+  if (!keepCanvas) state.mapCanvas = null;
+}
+
+function fallbackToCanvasRenderer(error) {
+  if (!state.mapCanvas) return;
+  console.warn("[hoverpreview] Falling back to 2D renderer", error);
+  state.mapRendererFallbackReason = error?.message || String(error || "webgl-runtime-failure");
+  destroyMapRenderer({ keepCanvas: true });
+  createCanvasRenderer(state.mapCanvas);
+  if (elements.loadState && state.manifest) {
+    elements.loadState.textContent = `Loaded ${(state.manifest.layers || []).length} layers · 2D fallback`;
+  }
 }
 
 function addLayer(layer) {
@@ -763,63 +918,96 @@ function scheduleChunkRender() {
 }
 
 function renderViewport() {
-  if (!state.manifest || !state.mapCanvas || !state.mapCtx) return;
-  const rect = elements.viewer.getBoundingClientRect();
-  const dpr = Math.min(MAX_DEVICE_PIXEL_RATIO, window.devicePixelRatio || 1);
-  const canvasWidth = Math.max(1, Math.floor(rect.width * dpr));
-  const canvasHeight = Math.max(1, Math.floor(rect.height * dpr));
-  if (state.mapCanvas.width !== canvasWidth || state.mapCanvas.height !== canvasHeight) {
-    state.mapCanvas.width = canvasWidth;
-    state.mapCanvas.height = canvasHeight;
-    state.mapCanvas.style.width = `${rect.width}px`;
-    state.mapCanvas.style.height = `${rect.height}px`;
-  }
+  if (!state.manifest || !state.mapCanvas || !state.mapRenderer) return;
+  try {
+    const rect = elements.viewer.getBoundingClientRect();
+    const dpr = Math.min(MAX_DEVICE_PIXEL_RATIO, window.devicePixelRatio || 1);
+    const canvasWidth = Math.max(1, Math.floor(rect.width * dpr));
+    const canvasHeight = Math.max(1, Math.floor(rect.height * dpr));
+    if (state.mapCanvas.width !== canvasWidth || state.mapCanvas.height !== canvasHeight) {
+      state.mapCanvas.width = canvasWidth;
+      state.mapCanvas.height = canvasHeight;
+      state.mapCanvas.style.width = `${rect.width}px`;
+      state.mapCanvas.style.height = `${rect.height}px`;
+    }
 
+    prepareRendererFrame(rect, dpr);
+
+    const crop = visibleImageCrop(rect);
+    if (!crop) {
+      state.activeLayerBitmapKeys = new Set();
+      releaseUnusedLayerBitmaps(state.activeLayerBitmapKeys);
+      return;
+    }
+
+    const activeBitmapKeys = new Set();
+    const loadRequests = [];
+    state.activeLayerBitmapKeys = activeBitmapKeys;
+    for (const entry of state.layers.values()) {
+      if (!entry.enabled) continue;
+      const mip = chooseMip(entry.layer);
+      const fallback = fallbackLayerRegion(entry.layer, crop, mip);
+      if (fallback) {
+        activeBitmapKeys.add(fallback.key);
+        drawLayerBitmap(fallback, crop, dpr);
+      }
+      for (const region of layerDecodeRegions(crop, mip)) {
+        const desiredKey = layerRegionCacheKey(entry.layer, mip, region);
+        activeBitmapKeys.add(desiredKey);
+        const decoded = state.layerBitmaps.get(desiredKey);
+        if (decoded) {
+          drawLayerBitmap(decoded, crop, dpr);
+        } else {
+          loadRequests.push({
+            layer: entry.layer,
+            mip,
+            region,
+            key: desiredKey,
+            priority: layerLoadPriority(entry.layer, mip, region, crop),
+          });
+        }
+      }
+    }
+    releaseUnusedLayerBitmaps(activeBitmapKeys);
+    pruneStaleBitmapLoads();
+    loadRequests.sort((a, b) => a.priority - b.priority);
+    scheduleLayerLoadRequests(loadRequests);
+  } catch (error) {
+    if (state.mapRendererMode === "webgl") {
+      fallbackToCanvasRenderer(error);
+      return renderViewport();
+    }
+    throw error;
+  }
+}
+
+function prepareRendererFrame(rect, dpr) {
+  if (state.mapRendererMode === "webgl") {
+    prepareWebGlFrame(rect, dpr);
+    return;
+  }
+  prepareCanvasFrame(rect, dpr);
+}
+
+function prepareCanvasFrame(rect, dpr) {
   const ctx = state.mapCtx;
+  if (!ctx) throw new Error("2D canvas context unavailable");
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, rect.width, rect.height);
   ctx.fillStyle = "#222222";
   ctx.fillRect(0, 0, rect.width, rect.height);
+}
 
-  const crop = visibleImageCrop(rect);
-  if (!crop) {
-    state.activeLayerBitmapKeys = new Set();
-    releaseUnusedLayerBitmaps(state.activeLayerBitmapKeys);
-    return;
-  }
-
-  const activeBitmapKeys = new Set();
-  const loadRequests = [];
-  state.activeLayerBitmapKeys = activeBitmapKeys;
-  for (const entry of state.layers.values()) {
-    if (!entry.enabled) continue;
-    const mip = chooseMip(entry.layer);
-    const fallback = fallbackLayerRegion(entry.layer, crop, mip);
-    if (fallback) {
-      activeBitmapKeys.add(fallback.key);
-      drawLayerBitmap(ctx, fallback, crop);
-    }
-    for (const region of layerDecodeRegions(crop, mip)) {
-      const desiredKey = layerRegionCacheKey(entry.layer, mip, region);
-      activeBitmapKeys.add(desiredKey);
-      const decoded = state.layerBitmaps.get(desiredKey);
-      if (decoded) {
-        drawLayerBitmap(ctx, decoded, crop);
-      } else {
-        loadRequests.push({
-          layer: entry.layer,
-          mip,
-          region,
-          key: desiredKey,
-          priority: layerLoadPriority(entry.layer, mip, region, crop),
-        });
-      }
-    }
-  }
-  releaseUnusedLayerBitmaps(activeBitmapKeys);
-  pruneStaleBitmapLoads();
-  loadRequests.sort((a, b) => a.priority - b.priority);
-  scheduleLayerLoadRequests(loadRequests);
+function prepareWebGlFrame(rect, dpr) {
+  const renderer = state.mapRenderer;
+  if (!renderer || renderer.mode !== "webgl") throw new Error("WebGL renderer unavailable");
+  const gl = renderer.gl;
+  gl.viewport(0, 0, state.mapCanvas.width, state.mapCanvas.height);
+  gl.clearColor(34 / 255, 34 / 255, 34 / 255, 1);
+  gl.clear(gl.COLOR_BUFFER_BIT);
+  gl.useProgram(renderer.program);
+  gl.bindBuffer(gl.ARRAY_BUFFER, renderer.buffer);
+  gl.uniform2f(renderer.resolutionLocation, rect.width * dpr, rect.height * dpr);
 }
 
 function visibleImageCrop(rect) {
@@ -1017,7 +1205,17 @@ async function fetchBlob(url) {
   return response.blob();
 }
 
-function drawLayerBitmap(ctx, decoded, crop) {
+function drawLayerBitmap(decoded, crop, dpr) {
+  if (state.mapRendererMode === "webgl") {
+    drawLayerBitmapWebGl(decoded, crop, dpr);
+    return;
+  }
+  drawLayerBitmap2d(decoded, crop);
+}
+
+function drawLayerBitmap2d(decoded, crop) {
+  const ctx = state.mapCtx;
+  if (!ctx) return;
   const drawCrop = intersectImageCrop(crop, decoded);
   if (!drawCrop) return;
   decoded.lastUsed = performance.now();
@@ -1034,9 +1232,104 @@ function drawLayerBitmap(ctx, decoded, crop) {
   ctx.drawImage(decoded.bitmap, sx, sy, sw, sh, dx, dy, dw, dh);
 }
 
+function drawLayerBitmapWebGl(decoded, crop, dpr) {
+  const renderer = state.mapRenderer;
+  if (!renderer || renderer.mode !== "webgl") return;
+  const drawCrop = intersectImageCrop(crop, decoded);
+  if (!drawCrop) return;
+  decoded.lastUsed = performance.now();
+  const factor = Number(decoded.mip.factor) || 1;
+  const sx = drawCrop.left / factor - decoded.region.left;
+  const sy = drawCrop.top / factor - decoded.region.top;
+  const sw = (drawCrop.right - drawCrop.left) / factor;
+  const sh = (drawCrop.bottom - drawCrop.top) / factor;
+  const dx = (state.offsetX + drawCrop.left * state.zoom) * dpr;
+  const dy = (state.offsetY + drawCrop.top * state.zoom) * dpr;
+  const dw = (drawCrop.right - drawCrop.left) * state.zoom * dpr;
+  const dh = (drawCrop.bottom - drawCrop.top) * state.zoom * dpr;
+  const textureInfo = ensureWebGlTexture(decoded);
+  const gl = renderer.gl;
+  const smoothing = !(Number(decoded.mip.factor) === 1 && state.zoom >= 1);
+  configureTextureFiltering(gl, textureInfo, smoothing);
+
+  const u1 = sx / decoded.bitmap.width;
+  const v1 = sy / decoded.bitmap.height;
+  const u2 = (sx + sw) / decoded.bitmap.width;
+  const v2 = (sy + sh) / decoded.bitmap.height;
+  const x1 = dx;
+  const y1 = dy;
+  const x2 = dx + dw;
+  const y2 = dy + dh;
+  const vertices = new Float32Array([
+    x1, y1, u1, v1,
+    x2, y1, u2, v1,
+    x1, y2, u1, v2,
+    x1, y2, u1, v2,
+    x2, y1, u2, v1,
+    x2, y2, u2, v2,
+  ]);
+
+  gl.bindTexture(gl.TEXTURE_2D, textureInfo.texture);
+  gl.bindBuffer(gl.ARRAY_BUFFER, renderer.buffer);
+  gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STREAM_DRAW);
+  gl.enableVertexAttribArray(renderer.positionLocation);
+  gl.vertexAttribPointer(renderer.positionLocation, 2, gl.FLOAT, false, 16, 0);
+  gl.enableVertexAttribArray(renderer.texCoordLocation);
+  gl.vertexAttribPointer(renderer.texCoordLocation, 2, gl.FLOAT, false, 16, 8);
+  gl.uniform1i(renderer.textureLocation, 0);
+  gl.drawArrays(gl.TRIANGLES, 0, 6);
+}
+
+function ensureWebGlTexture(decoded) {
+  const renderer = state.mapRenderer;
+  if (!renderer || renderer.mode !== "webgl") throw new Error("WebGL renderer unavailable");
+  const existing = state.layerTextures.get(decoded.key);
+  if (existing) {
+    existing.lastUsed = performance.now();
+    return existing;
+  }
+  const gl = renderer.gl;
+  const texture = gl.createTexture();
+  if (!texture) throw new Error("Failed to create WebGL texture");
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, decoded.bitmap);
+  const textureInfo = { key: decoded.key, gl, texture, smoothing: true, lastUsed: performance.now() };
+  state.layerTextures.set(decoded.key, textureInfo);
+  return textureInfo;
+}
+
+function configureTextureFiltering(gl, textureInfo, smoothing) {
+  if (textureInfo.smoothing === smoothing) return;
+  gl.bindTexture(gl.TEXTURE_2D, textureInfo.texture);
+  const filter = smoothing ? gl.LINEAR : gl.NEAREST;
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter);
+  textureInfo.smoothing = smoothing;
+}
+
+function deleteLayerTexture(key) {
+  const textureInfo = state.layerTextures.get(key);
+  if (!textureInfo) return;
+  textureInfo.gl.deleteTexture(textureInfo.texture);
+  state.layerTextures.delete(key);
+}
+
+function releaseAllLayerTextures() {
+  for (const textureInfo of state.layerTextures.values()) {
+    textureInfo.gl.deleteTexture(textureInfo.texture);
+  }
+  state.layerTextures.clear();
+}
+
 function releaseLayerBitmaps(layerName) {
   for (const [key, decoded] of state.layerBitmaps) {
     if (!key.startsWith(`${layerName}\n`)) continue;
+    deleteLayerTexture(key);
     if (typeof decoded.bitmap.close === "function") decoded.bitmap.close();
     state.layerBitmaps.delete(key);
   }
@@ -1055,12 +1348,14 @@ function pruneLayerBitmapCache(activeKeys = new Set()) {
 
   for (const [key, decoded] of candidates) {
     if (state.layerBitmaps.size <= MAX_TILE_BITMAPS) break;
+    deleteLayerTexture(key);
     if (typeof decoded.bitmap.close === "function") decoded.bitmap.close();
     state.layerBitmaps.delete(key);
   }
 }
 
 function clearBitmapCaches() {
+  releaseAllLayerTextures();
   for (const decoded of state.layerBitmaps.values()) {
     if (typeof decoded.bitmap.close === "function") decoded.bitmap.close();
   }
