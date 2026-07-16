@@ -25,6 +25,8 @@ public final class VanillaAdjustConfig {
     public static final ModConfigSpec.BooleanValue DISABLE_ELYTRA_ROCKET_BOOST_SEND_MESSAGE;
     public static final ModConfigSpec.BooleanValue DEATH_TIMER_DISPLAY_ENABLED;
     public static final ModConfigSpec.IntValue DEATH_TIMER_TEXT_COLOR;
+    public static final ModConfigSpec.BooleanValue BENEFICIAL_EFFECT_HUNGER_DRAIN_ENABLED;
+    public static final ModConfigSpec.DoubleValue BENEFICIAL_EFFECT_HUNGER_EXHAUSTION_PER_SECOND_PER_STRENGTH;
 
     static {
         ModConfigSpec.Builder builder = new ModConfigSpec.Builder();
@@ -104,6 +106,15 @@ public final class VanillaAdjustConfig {
         DEATH_TIMER_TEXT_COLOR = builder
                 .comment("RGB text colour for the death screen respawn countdown.")
                 .defineInRange("deathTimerTextColor", 0xFFFFFF, 0x000000, 0xFFFFFF);
+        builder.pop();
+
+        builder.push("beneficialEffectHunger");
+        BENEFICIAL_EFFECT_HUNGER_DRAIN_ENABLED = builder
+                .comment("When true, active beneficial potion/status effects make player hunger drain faster. Harmful effects are ignored.")
+                .define("beneficialEffectHungerDrainEnabled", true);
+        BENEFICIAL_EFFECT_HUNGER_EXHAUSTION_PER_SECOND_PER_STRENGTH = builder
+                .comment("Extra exhaustion added each second for each point of beneficial effect strength. Effect strength is the sum of amplifier + 1 across all active beneficial effects.")
+                .defineInRange("beneficialEffectHungerExhaustionPerSecondPerStrength", 0.05D, 0.0D, 4.0D);
         builder.pop();
         SERVER_SPEC = builder.build();
     }

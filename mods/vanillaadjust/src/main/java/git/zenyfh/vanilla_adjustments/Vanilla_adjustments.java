@@ -24,6 +24,7 @@ public class Vanilla_adjustments {
         modContainer.registerConfig(ModConfig.Type.SERVER, VanillaAdjustConfig.SERVER_SPEC);
         NeoForge.EVENT_BUS.register(this);
         NeoForge.EVENT_BUS.register(new EnderPearlRadiusLimiter());
+        NeoForge.EVENT_BUS.register(new BeneficialEffectHungerHandler());
         NeoForge.EVENT_BUS.register(new DeepslateFluidGeneratorHandler());
         NeoForge.EVENT_BUS.register(new WaterIceOriginEventHandler());
         NeoForge.EVENT_BUS.register(new ContraptionWaterSourceConversionHandler());
