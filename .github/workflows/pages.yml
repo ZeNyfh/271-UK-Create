@@ -26,6 +26,16 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          filter: blob:none
+          sparse-checkout: |
+            .nojekyll
+            index.html
+            tools/hoverpreview-tools/site
+            tools/ukgeo-tools/uk_world_data_gb/hoverpreviews
+            .github/workflows/pages.yml
+          sparse-checkout-cone-mode: true
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
