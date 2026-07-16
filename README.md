@@ -1,96 +1,242 @@
 # 271 UK Create
 
-This repository contains two related projects:
+Repository for the 271 UK Create world data pipeline, hover preview site, and supporting NeoForge/KubeJS subprojects.
 
-1. `tools/ukgeo-tools`: Python preprocessing tools for OS Terrain 50 ASCII Grid and BGS GeoPackage geology.
-2. `mods/ukgeo`: a NeoForge 1.21.1 mod that reads simplified runtime raster tiles on demand.
+Quick links:
 
-The Minecraft runtime reads only `.r16.gz` height tiles, `.u8.gz` score/class tiles, and `manifest.json`. It does not parse GeoPackage, Shapefile, GeoTIFF, or OS ASCII Grid files.
+- [Published hover map](https://zenyfh.github.io/271-UK-Create/)
+- [UKGeo tool README](tools/ukgeo-tools/README.md)
+- [Data notes](data/README.md)
 
-## Pipeline
+## What is in this repository
 
-1. Download OS Terrain 50 ASCII Grid data, for example `terr50_gagg_gb.zip`.
-2. Download BGS Geology 50K GeoPackage data.
-3. Inspect the inputs:
+This is not a single mod. It is a workspace with data tools, a static map site, and several gameplay/runtime subprojects.
+
+### Tools
+
+| Path                       | Purpose                                                                                                       |
+|----------------------------|---------------------------------------------------------------------------------------------------------------|
+| `tools/ukgeo-tools`        | Python preprocessing pipeline for height, ores, rivers, vegetation, animal habitats, and manifest generation. |
+| `tools/hoverpreview-tools` | Hoverpreview exporter and static site assets for the published map.                                           |
+
+### Mods and runtime content
+
+| Path                       | Purpose                                                                           |
+|----------------------------|-----------------------------------------------------------------------------------|
+| `mods/ukgeo`               | Main worldgen/runtime mod for the 271 UK Create map.                              |
+| `mods/ukgeo-animals`       | Animal habitat integration for UKGeo/WilderNature spawning.                       |
+| `mods/animalhunger`        | Persistent animal hunger, trough feeding, grazing, and optional Jade integration. |
+| `mods/foodspoilage`        | Dynamic food spoilage.                                                            |
+| `mods/pollution`           | Chunk-level machine pollution with visual effects.                                |
+| `mods/vanillaadjust`       | Miscellaneous vanilla balance and behaviour adjustments.                          |
+| `mods/createenginebalance` | Create Diesel Generators engine fuel-balance changes.                             |
+| `mods/kubejs`              | KubeJS scripts for recipes and server-side customisations.                        |
+
+## Required local setup
+
+Before running the rebuild/build scripts, assume these requirements:
+
+- Python 3.11+
+- JDK 21
+- A writable `data/` directory with the external source archives referenced by the config files
+
+Use JDK 21 specifically. Several module build scripts already try to prefer:
+
+- `$HOME/.jdks/temurin-21.0.11`
+
+If your local Java is newer, Gradle/userdev tasks may fail. Set `JAVA_HOME` explicitly if needed.
+
+## Configuration model
+
+The current defaults live in:
+
+- [tools/ukgeo-tools/config.yml](tools/ukgeo-tools/config.yml)
+- [tools/hoverpreview-tools/config.yml](tools/hoverpreview-tools/config.yml)
+
+Important sections:
+
+- `tools/ukgeo-tools/config.yml`
+  - `runtime`: runtime tile format defaults
+  - `rebuild`: full dataset rebuild inputs and world sizing
+  - `previews`: PNG preview generation defaults
+- `tools/hoverpreview-tools/config.yml`
+  - `generate`: hoverpreview export defaults
+  - `local_server`: host/port for local preview serving
+
+If you need to change dataset inputs, Ireland inclusion, scale, preview size, worker counts, or local server settings, change the YAML files first rather than exporting ad-hoc shell variables.
+
+## Core workflows
+
+### 1. Install the Python tool environments
 
 ```bash
 cd tools/ukgeo-tools
 python3 -m venv .venv
 .venv/bin/python -m pip install -e ".[test]"
-.venv/bin/ukgeo inspect-os ../../data/terr50_gagg_gb.zip
-.venv/bin/ukgeo inspect-bgs ../../data/BGS_Geology_50k_GeoPackage_SAMPLE.zip
+
+cd ../hoverpreview-tools
+python3 -m venv .venv
+.venv/bin/python -m pip install -e ".[test]"
 ```
 
-4. Choose a British National Grid extent.
-5. Generate height and ore tiles:
+### 2. Rebuild the main UK dataset
+
+Default rebuild script:
 
 ```bash
-.venv/bin/ukgeo make-height-tiles --os-zip ../../data/terr50_gagg_gb.zip --out ./uk_world_data \
-  --bng-min-easting 430000 --bng-min-northing 110000 \
-  --bng-max-easting 440000 --bng-max-northing 130000 \
-  --world-width 1024 --world-depth 2048
-
-.venv/bin/ukgeo make-ore-tiles --bgs ../../data/BGS_Geology_50k_GeoPackage_SAMPLE.zip \
-  --rules examples/ore_rules.yml --manifest ./uk_world_data/manifest.json --out ./uk_world_data
+cd tools/ukgeo-tools
+./rebuild_uk_world_data_gb.sh
 ```
 
-For the full GB rebuild path, the default Minecraft origin is centred on the Nottingham area, so a new UKGeo world spawns around Nottingham instead of Scotland. The default rebuild overlays COP30 elevation for Ireland, Northern Ireland, and the Isle of Man while protecting mainland Great Britain height generated from OS Terrain 50. Use `USE_LEGACY_OSNI_HEIGHT=1` only when you explicitly want the old Northern Ireland OSNI DTM overlay, or `INCLUDE_IRELAND=0` to keep the older GB-only west edge.
+This script reads `config.yml` section `rebuild` and rebuilds the default dataset into:
 
-For the full BGS 625k GeoPackage, use:
+- `tools/ukgeo-tools/uk_world_data_gb`
+
+It currently covers height, BGS ores, coal, gold, surface geology, rivers, vegetation, animal habitats, and the Republic of Ireland ore SVG overlay.
+
+### 3. Generate normal PNG previews
 
 ```bash
-.venv/bin/ukgeo make-ore-tiles --bgs ../../data/BGS_Geology_625k_bedrock_gpkg.zip \
-  --rules examples/ore_rules_625k.yml --manifest ./uk_world_data/manifest.json --out ./uk_world_data --jobs 4
-
-.venv/bin/ukgeo make-coal-resource-tiles --coal-resources ../../data/OGC_CoalResourcesForNewTechnologies.zip \
-  --manifest ./uk_world_data/manifest.json --out ./uk_world_data
-
-.venv/bin/ukgeo make-surface-geology-tiles --bgs ../../data/BGS_Geology_625k_bedrock_gpkg.zip \
-  --rules examples/surface_geology_625k.yml --manifest ./uk_world_data/manifest.json --out ./uk_world_data
-
-.venv/bin/ukgeo add-cop30-height-tiles --cop30 ../../data/rasters_COP30.tar.gz \
-  --manifest ./uk_world_data/manifest.json --out ./uk_world_data \
-  --resampling bilinear --smoothing light --height-deterrace \
-  --target ireland-iom --protect-mainland-gb
-
-.venv/bin/ukgeo make-river-tiles --rivers ../../data/oprvrs_gpkg_gb.zip \
-  --manifest ./uk_world_data/manifest.json --out ./uk_world_data --width-metres 220
-
-.venv/bin/ukgeo make-vegetation-tiles --landcover ../../data/FME_3564346A_1778997494261_5633.zip \
-  --manifest ./uk_world_data/manifest.json --out ./uk_world_data --jobs 4
+cd tools/ukgeo-tools
+./generate_previews.sh
 ```
 
-6. Validate and sample:
+This reads `config.yml` section `previews`.
+
+### 4. Generate hoverpreview site data
+
+Default hoverpreview export:
 
 ```bash
-.venv/bin/ukgeo validate-tiles ./uk_world_data
-.venv/bin/ukgeo stats ./uk_world_data
-.venv/bin/ukgeo preview ./uk_world_data --layer height --out height_preview.png
-.venv/bin/ukgeo preview ./uk_world_data --layer surface --out surface_geology.png
-.venv/bin/ukgeo preview ./uk_world_data --layer vegetation --out vegetation.png
-.venv/bin/ukgeo preview ./uk_world_data --layer rivers --out rivers_preview.png
-.venv/bin/ukgeo preview ./uk_world_data --layer ore:zinc --out zinc_preview.png
-.venv/bin/ukgeo preview ./uk_world_data --layer ore:coal --style overlay --max-size 12000 --out coal_on_height.png
-.venv/bin/ukgeo preview ./uk_world_data --layer ores --max-size 12000 --out ores_all.png
-.venv/bin/ukgeo preview ./uk_world_data --layer ore:granite --out granite_preview.png
-.venv/bin/ukgeo preview ./uk_world_data --layer height --max-size 12000 --out height_large.png
-../hoverpreview-tools/generate_hover_previews.sh ./uk_world_data ./hoverpreviews
-../../hoverpreview-local ./hoverpreviews
-.venv/bin/ukgeo sample ./uk_world_data --x 0 --z 0
+cd tools/hoverpreview-tools
+./generate_hover_previews.sh --regenerate preview
 ```
 
-`hoverpreview-tools/generate_hover_previews.sh` writes stackable PNG layers and downsampled `mips/` into `hoverpreviews`. `../../hoverpreview-local ./hoverpreviews` starts a local web server from the repository root and opens the browser preview for that generated preview folder. Mouse wheel zooms around the cursor, middle/right drag pans, and moving the mouse over the map shows Minecraft `x/z`, height, tile/cell, and British National Grid easting/northing. Left click copies the Minecraft `x z` pair to the clipboard.
+Useful variants:
 
-7. Copy `uk_world_data` to the Minecraft client/server root, or configure the mod to point at that directory.
-8. Launch NeoForge 1.21.1 with the `ukgeo` mod and create/select the `ukgeo:uk_geological_create` world preset.
-9. Optionally use Chunky to pre-generate selected areas only. Full pre-generation is not required.
+```bash
+./generate_hover_previews.sh --regenerate all
+./generate_hover_previews.sh --regenerate ores,animals,preview
+./generate_hover_previews.sh --workers 1 --tile-size 256
+```
 
-## Build and test
+This reads `tools/hoverpreview-tools/config.yml` section `generate`.
+
+By default it writes hover data into:
+
+- `tools/ukgeo-tools/uk_world_data_gb/hoverpreviews`
+
+That directory is what the published site expects to load.
+
+### 5. Serve the hover map locally
+
+From the repository root:
+
+```bash
+./hoverpreview-local.sh tools/ukgeo-tools/uk_world_data_gb/hoverpreviews
+```
+
+This uses `tools/hoverpreview-tools/config.yml` section `local_server` and serves the repository root over HTTP so the site can load preview assets with the same relative paths it uses on GitHub Pages.
+
+## Published site
+
+The published map at:
+
+- `https://zenyfh.github.io/271-UK-Create/`
+
+loads committed hoverpreview assets from the repository, not from a server-side rebuild step.
+
+In practice that means:
+
+1. rebuild dataset locally
+2. regenerate hoverpreviews locally
+3. commit the generated preview/data files that the site needs
+
+If the site is missing layers, the problem is usually missing or stale committed assets under:
+
+- `tools/ukgeo-tools/uk_world_data_gb/hoverpreviews`
+
+## Building mods
+
+Most compiled NeoForge subprojects include a local `build.sh`.
+
+Typical usage:
+
+```bash
+cd mods/ukgeo
+./build.sh
+```
+
+or:
+
+```bash
+cd mods/animalhunger
+./build.sh
+```
+
+The per-mod build scripts generally do two things:
+
+1. run the Gradle build
+2. copy the produced jar into a local Minecraft instance `mods/` folder
+
+These scripts are machine-specific because they hardcode a local mod directory, typically:
+
+- `/media/zenyfh/GoodHDD/Games/Minecraft/Instances/UK Create (1)/mods`
+
+If your local instance path differs, edit each relevant `build.sh` before using it.
+
+The root-level [build.sh](build.sh) is narrower: it builds `mods/ukgeo` and copies only that jar.
+
+## Notes by subproject
+
+- `tools/ukgeo-tools`
+  - main data rebuild pipeline
+  - uses config-driven defaults
+  - owns the checked-out runtime dataset
+- `tools/hoverpreview-tools`
+  - exports site layers, mips, tiles, and hover sample data
+  - local preview serving is done from the repo root via `hoverpreview-local.sh`
+- `mods/kubejs`
+  - not a Gradle-built Java mod
+  - contains KubeJS scripts such as server recipe overrides
+- `mods/ukgeo-animals`
+  - depends on `ukgeo`
+  - integrates habitat data with spawning
+- `mods/createenginebalance`
+  - depends on Create + Create Diesel Generators
+
+## Recommended order for a full local refresh
+
+```bash
+cd tools/ukgeo-tools
+./rebuild_uk_world_data_gb.sh
+
+cd ../hoverpreview-tools
+./generate_hover_previews.sh --regenerate all --workers 1
+
+cd ../..
+./hoverpreview-local.sh tools/ukgeo-tools/uk_world_data_gb/hoverpreviews
+```
+
+Then, if you changed runtime mods, build the relevant mod subprojects with their local `build.sh` scripts.
+
+## Testing
+
+For the Python tooling:
 
 ```bash
 cd tools/ukgeo-tools
 .venv/bin/pytest
 
-cd ../../mods/ukgeo
-./gradlew build
+cd ../hoverpreview-tools
+.venv/bin/pytest
 ```
+
+For Java/NeoForge modules, use Gradle from inside the module directory:
+
+```bash
+cd mods/vanillaadjust
+JAVA_HOME="$HOME/.jdks/temurin-21.0.11" PATH="$HOME/.jdks/temurin-21.0.11/bin:$PATH" ./gradlew compileJava
+```
+
+Use the same JDK 21 pattern for the other Java mod subprojects if your shell defaults to a newer JVM.
