@@ -23,7 +23,7 @@ public final class AnimalHungerConfig {
         builder.push("hunger");
         HUNGER_ENABLED = builder.comment("When true, supported passive animals lose hunger over time and can starve.").define("hungerEnabled", true);
         MAX_HUNGER = builder.comment("Maximum hunger value for animals.").defineInRange("maxHunger", 20, 1, 100);
-        STARVATION_DAYS = builder.comment("Minecraft days for a full animal to starve without food. One day is 24000 ticks.").defineInRange("starvationDays", 3.0D, 0.1D, 100.0D);
+        STARVATION_DAYS = builder.comment("Minecraft days for a full animal to starve without food. One day is 24000 ticks, so 1.5 days is about 30 real minutes.").defineInRange("starvationDays", 1.5D, 0.1D, 100.0D);
         builder.pop();
 
         builder.push("feeding");
