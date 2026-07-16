@@ -90,3 +90,15 @@ test("measurement drag uses client coordinates and no longer depends on removed 
   assert.match(stylesCss, /position:\s*fixed;/);
   assert.match(stylesCss, /safe-area-inset-bottom/);
 });
+
+test("published root page includes the current hover map shell", () => {
+  const rootIndexHtml = fs.readFileSync(path.join(__dirname, "../../../index.html"), "utf8");
+  const appJs = fs.readFileSync(path.join(__dirname, "../site/app.js"), "utf8");
+
+  assert.match(rootIndexHtml, /viewport-fit=cover/);
+  assert.match(rootIndexHtml, /id="animal-controls"/);
+  assert.match(rootIndexHtml, /render_math\.js/);
+  assert.doesNotMatch(rootIndexHtml, /scrollbar scrollbar-[xy]/);
+  assert.match(rootIndexHtml, /Left drag measures distance/);
+  assert.match(appJs, /if \(!controls\) \{/);
+});

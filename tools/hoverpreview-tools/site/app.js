@@ -474,6 +474,10 @@ function addLayer(layer) {
     : layer.kind === "animal"
       ? elements.animalControls
       : elements.layerControls;
+  if (!controls) {
+    console.warn("[hoverpreview] Missing layer control container for layer", layer.name, layer.kind);
+    return;
+  }
   controls.append(toggleFor(layer, enabled));
 }
 
