@@ -118,7 +118,6 @@ const state = {
   animals: new Map(),
   animalsLoaded: false,
   animalsLoadError: null,
-  animalFilters: new Map(),
   measure: null,
   mapCanvas: null,
   mapRenderer: null,
@@ -287,7 +286,6 @@ async function loadManifest(url) {
   state.animals.clear();
   state.animalsLoaded = false;
   state.animalsLoadError = null;
-  state.animalFilters.clear();
   clearBitmapCaches();
   destroyMapRenderer();
   clearMeasurement();
@@ -471,13 +469,18 @@ function addLayer(layer) {
   const enabled = isLayerVisibleByDefault(layer);
   state.layers.set(layer.name, { layer, enabled });
   if (layer.name === "biome_regions") return;
-  const controls = layer.kind === "ore" ? elements.oreControls : elements.layerControls;
+  const controls = layer.kind === "ore"
+    ? elements.oreControls
+    : layer.kind === "animal"
+      ? elements.animalControls
+      : elements.layerControls;
   controls.append(toggleFor(layer, enabled));
 }
 
 function isLayerVisibleByDefault(layer) {
   if (layer.kind === "base") return true;
   if (layer.kind === "ore") return DEFAULT_VISIBLE_ORES.has(layer.ore || labelFor(layer.name));
+  if (layer.kind === "animal") return false;
   return DEFAULT_VISIBLE_OVERLAYS.has(layer.name);
 }
 
@@ -498,7 +501,7 @@ function toggleFor(layer, checked) {
     refreshStatus();
   });
   const name = document.createElement("span");
-  name.textContent = layer.ore || labelFor(layer.name);
+  name.textContent = layer.label || layer.ore || labelFor(layer.name);
   label.append(input, name);
   return label;
 }
@@ -1562,6 +1565,8 @@ function statusDetails(sample) {
       if (!entry.enabled) continue;
       const oreText = oreAmountText(entry.layer.ore, value);
       if (oreText) ores.push(`${entry.layer.ore}: ${oreText}`);
+    } else if (entry.layer.kind === "animal") {
+      continue;
     } else {
       const label = classLabel(entry.layer.name, value);
       if (entry.enabled) overlays.push(`${labelFor(entry.layer.name)}: ${label}`);
@@ -1722,7 +1727,6 @@ async function loadAnimalsList(manifest) {
   state.animals = parseAnimalsList(DEFAULT_ANIMALS_TEXT);
   state.animalsLoaded = state.animals.size > 0;
   state.animalsLoadError = null;
-  populateAnimalControls();
 
   const urls = animalsListUrls(manifest);
   let lastError = null;
@@ -1736,7 +1740,6 @@ async function loadAnimalsList(manifest) {
       state.animals = new Map([...parseAnimalsList(DEFAULT_ANIMALS_TEXT), ...fetchedAnimals]);
       state.animalsLoaded = state.animals.size > 0;
       state.animalsLoadError = null;
-      populateAnimalControls();
       console.info(`[hoverpreview] Loaded ${fetchedAnimals.size} animal keys from ${url.href} (${state.animals.size} keys including built-in aliases)`);
       refreshStatus();
       return;
@@ -1748,41 +1751,7 @@ async function loadAnimalsList(manifest) {
 
   state.animalsLoadError = lastError;
   console.warn(`[hoverpreview] Could not load animal list from any candidate; using built-in animal list`, urls.map((url) => url.href), lastError);
-  populateAnimalControls();
   refreshStatus();
-}
-
-function populateAnimalControls() {
-  if (!elements.animalControls) return;
-  const known = new Set(state.animalFilters.keys());
-  for (const value of state.animals.values()) {
-    for (const animal of parseAnimalNames(value)) {
-      if (animal) known.add(animal);
-    }
-  }
-  const names = Array.from(known).sort((a, b) => a.localeCompare(b));
-  for (const name of names) {
-    if (!state.animalFilters.has(name)) state.animalFilters.set(name, true);
-  }
-  for (const name of Array.from(state.animalFilters.keys())) {
-    if (!known.has(name)) state.animalFilters.delete(name);
-  }
-  elements.animalControls.replaceChildren();
-  for (const name of names) {
-    const label = document.createElement("label");
-    label.className = "layer-toggle";
-    const input = document.createElement("input");
-    input.type = "checkbox";
-    input.checked = state.animalFilters.get(name) !== false;
-    input.addEventListener("change", () => {
-      state.animalFilters.set(name, input.checked);
-      refreshStatus();
-    });
-    const text = document.createElement("span");
-    text.textContent = name;
-    label.append(input, text);
-    elements.animalControls.append(label);
-  }
 }
 
 function parseAnimalsList(text) {
@@ -1810,13 +1779,6 @@ function parseAnimalsList(text) {
   }
 
   return rules;
-}
-
-function parseAnimalNames(value) {
-  return String(value || "")
-    .split(",")
-    .map((part) => part.trim())
-    .filter((part) => part && part !== "—");
 }
 
 function animalsForSample(sample, candidates = []) {
@@ -1854,20 +1816,13 @@ function animalsForSample(sample, candidates = []) {
       const animals = state.animals.get(key);
       if (animals) {
         debugAnimals("Matched animals", { candidate, key, animals });
-        return filterAnimalText(animals);
+        return animals;
       }
     }
   }
 
   debugAnimals("No animals match", { candidates: allCandidates, keys: allCandidates.flatMap(animalKeyVariants), loadedKeys: Array.from(state.animals.keys()) });
   return "—";
-}
-
-function filterAnimalText(value) {
-  const names = parseAnimalNames(value);
-  if (!names.length) return "—";
-  const filtered = names.filter((name) => state.animalFilters.get(name) !== false);
-  return filtered.length ? filtered.join(", ") : "—";
 }
 
 function animalSourcePriority(layer) {

@@ -17,6 +17,8 @@ console = Console()
 def _progress_label(step: str) -> str:
     if step.startswith("ore:"):
         return f"Generating ore layer: {step.removeprefix('ore:')}"
+    if step.startswith("animal:"):
+        return f"Generating animal layer: {step.removeprefix('animal:')}"
     labels = {
         "height": "Generating height layer",
         "surface": "Generating surface layer",

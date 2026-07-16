@@ -129,10 +129,10 @@ while [[ $# -gt 0 ]]; do
       cat <<'HELP'
 Usage: generate_hover_previews.sh [ROOT] [OUT_DIR] [--regenerate TASKS]
 
-Tasks: preview, height, rivers, vegetation, geology, ores, iron-overlay, clean, all, none
+Tasks: preview, height, rivers, vegetation, geology, ores, animals, iron-overlay, clean, all, none
 Examples:
   ./generate_hover_previews.sh --regenerate preview
-  ./generate_hover_previews.sh --regenerate rivers,ores,preview
+  ./generate_hover_previews.sh --regenerate rivers,ores,animals,preview
   ./generate_hover_previews.sh --tile-size 256 --workers 0
   ./generate_hover_previews.sh --regenerate all
 
@@ -230,9 +230,10 @@ normalize_task() {
     4|vegetation|biomes|vegetation-biomes|vegetation/biomes) printf 'vegetation' ;;
     5|geology|surface|surface-layers|surface-geology) printf 'geology' ;;
     6|ore|ores) printf 'ores' ;;
-    7|iron|iron-overlay|ironoverlay) printf 'iron-overlay' ;;
-    8|all|everything) printf 'all' ;;
-    9|clean|clean-output|cache) printf 'clean' ;;
+    7|animal|animals|animal-habitats|habitats) printf 'animals' ;;
+    8|iron|iron-overlay|ironoverlay) printf 'iron-overlay' ;;
+    9|all|everything) printf 'all' ;;
+    10|clean|clean-output|cache) printf 'clean' ;;
     *) return 1 ;;
   esac
 }
@@ -245,7 +246,7 @@ parse_tasks() {
     [[ -z "${part// /}" ]] && continue
     if ! task="$(normalize_task "$part")"; then
       echo "Unknown regenerate task: $part" >&2
-      echo "Known tasks: preview, height, rivers, vegetation, geology, ores, iron-overlay, clean, all, none" >&2
+      echo "Known tasks: preview, height, rivers, vegetation, geology, ores, animals, iron-overlay, clean, all, none" >&2
       exit 2
     fi
     if [[ "$task" == "none" ]]; then
@@ -261,6 +262,7 @@ parse_tasks() {
       add_task geology
       add_task rivers
       add_task ores
+      add_task animals
       add_task iron-overlay
       add_task preview
       continue
@@ -292,9 +294,10 @@ What do you want to regenerate?
 [4] Vegetation / biome tiles
 [5] Geology / surface layers
 [6] Ores
-[7] Iron overlay only
-[8] All world data
-[9] Clean output/cache
+[7] Animal habitat tiles
+[8] Iron overlay only
+[9] All world data
+[10] Clean output/cache
 [0] Exit
 
 You can choose multiple, e.g. 1,3,6: 
@@ -312,6 +315,7 @@ task_label() {
     geology) printf 'Geology / surface layers' ;;
     rivers) printf 'Rivers / river order / river widths' ;;
     ores) printf 'Ores' ;;
+    animals) printf 'Animal habitat tiles' ;;
     iron-overlay) printf 'Iron overlay only' ;;
     preview) printf 'Hover preview' ;;
     *) printf '%s' "$1" ;;
@@ -319,7 +323,7 @@ task_label() {
 }
 
 ordered_tasks() {
-  local order=(clean height vegetation geology rivers ores iron-overlay preview)
+  local order=(clean height vegetation geology rivers ores animals iron-overlay preview)
   local task
   for task in "${order[@]}"; do
     has_task "$task" && printf '%s\n' "$task"
@@ -585,6 +589,16 @@ run_ores() {
   fi
 }
 
+run_animals() {
+  require_manifest
+  require_file "$ANIMALS_SVG"
+  "${UKGEO_ENV[@]}" "$PYTHON" -m ukgeo.cli make-animal-habitat-tiles \
+    --image "$ANIMALS_SVG" \
+    --fit full-frame \
+    --manifest "$ROOT/manifest.json" \
+    --out "$ROOT"
+}
+
 run_iron_overlay() {
   require_manifest
   require_file "$BGS_GEOLOGY_ZIP"
@@ -683,7 +697,7 @@ if [[ "$TASK_SOURCE" == "interactive" ]]; then
       add_task ores
     fi
   fi
-  if { has_task height || has_task rivers || has_task vegetation || has_task geology || has_task ores || has_task iron-overlay; } && ! has_task preview; then
+  if { has_task height || has_task rivers || has_task vegetation || has_task geology || has_task ores || has_task animals || has_task iron-overlay; } && ! has_task preview; then
     if prompt_yes_no "Selected data changes affect the hover preview. Render hover preview afterward? [Y/n] " "y"; then
       add_task preview
     fi
@@ -692,7 +706,7 @@ else
   if has_task geology && ! has_task ores; then
     echo "Warning: geology selected without ores; ore tiles may be stale. Add ores to regenerate them."
   fi
-  if { has_task height || has_task rivers || has_task vegetation || has_task geology || has_task ores || has_task iron-overlay; } && ! has_task preview; then
+  if { has_task height || has_task rivers || has_task vegetation || has_task geology || has_task ores || has_task animals || has_task iron-overlay; } && ! has_task preview; then
     echo "Warning: selected data changes affect hover previews, but preview was not selected. Add preview to rerender."
   fi
 fi
@@ -720,6 +734,7 @@ while IFS= read -r task; do
     geology) run_geology ;;
     rivers) run_rivers ;;
     ores) run_ores ;;
+    animals) run_animals ;;
     iron-overlay) run_iron_overlay ;;
     preview) run_preview ;;
   esac

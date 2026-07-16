@@ -33,6 +33,23 @@ PREVIEW_RIVER_MAX_RADIUS = 6
 PREVIEW_RIVER_COLOR = (65, 145, 230)
 DEFAULT_TILE_BATCH_ROWS = 4
 _CUPY_MODULE: Any | None | bool = None
+ANIMAL_LAYER_COLORS: dict[str, tuple[int, int, int]] = {
+    "wildernature:deer": (121, 76, 46),
+    "wildernature:bison": (88, 55, 34),
+    "wildernature:boar": (142, 92, 58),
+    "wildernature:hedgehog": (120, 92, 70),
+    "wildernature:minisheep": (194, 194, 201),
+    "wildernature:owl": (156, 116, 61),
+    "wildernature:squirrel": (114, 46, 38),
+    "minecraft:bat": (120, 110, 105),
+    "minecraft:cow": (178, 112, 52),
+    "minecraft:sheep": (214, 202, 196),
+    "minecraft:pig": (188, 114, 76),
+    "minecraft:chicken": (232, 190, 109),
+    "minecraft:rabbit": (66, 120, 78),
+    "minecraft:wolf": (108, 116, 116),
+    "minecraft:fox": (191, 72, 49),
+}
 
 
 @dataclass(frozen=True)
@@ -75,6 +92,9 @@ def hover_preview_steps(root: Path, manifest: dict[str, Any]) -> list[str]:
             continue
         if (root / layer["path"]).exists():
             steps.append(f"ore:{ore}")
+    for entity_id, layer in manifest.get("animal_habitats", {}).get("entities", {}).items():
+        if (root / layer["path"]).exists():
+            steps.append(f"animal:{entity_id}")
     steps.append("manifest")
     return steps
 
@@ -454,6 +474,69 @@ def export_hover_previews(
         done()
     layers.extend(ore_layers)
 
+    animal_dir = out / "layers" / "animals"
+    animal_sample_dir = out / "samples" / "animals"
+    animal_dir.mkdir(parents=True, exist_ok=True)
+    animal_sample_dir.mkdir(parents=True, exist_ok=True)
+    animal_layers: list[dict[str, Any]] = []
+    for entity_id, layer in manifest.get("animal_habitats", {}).get("entities", {}).items():
+        layer_path = layer.get("path")
+        if not layer_path or not (root / layer_path).exists():
+            continue
+        report(f"animal:{entity_id}")
+        done = timed(f"animal:{entity_id}")
+        values = _read_u8_preview(root, layer_path, tiles_x, tiles_z, source_tile_size, scale, missing_ok=True)
+        with tempfile.TemporaryDirectory(prefix=f"hoverpreview-animal-{entity_id.replace(':', '_')}-", dir=out) as temp_dir_name:
+            temp_dir = Path(temp_dir_name)
+            visual = _create_disk_raster(temp_dir / f"{entity_id.replace(':', '_')}.visual.bin", base_size, "RGBA")
+            _render_animal_overlay_raster(values, entity_id, visual)
+            sample = _create_disk_raster(temp_dir / f"{entity_id.replace(':', '_')}.sample.bin", base_size, "L")
+            _render_fitted_u8_sample_raster(values, sample)
+            relative_stem = f"layers/animals/{entity_id.replace(':', '__')}"
+            mips = _save_visual_raster_layer(
+                out,
+                visual,
+                relative_stem,
+                tile_size=preview_tile_size,
+                visual_format=visual_format,
+                workers=encoder_workers,
+                force=force,
+                resampling=Image.Resampling.BILINEAR,
+                tile_batch_rows=tile_batch_rows,
+                write_full_images=write_full_images,
+            )
+            sample_file = f"samples/animals/{entity_id.replace(':', '__')}_u8.png" if write_full_images else None
+            if write_full_images and sample_file is not None:
+                _save_disk_raster_image(animal_sample_dir / f"{entity_id.replace(':', '__')}_u8.png", sample, "png", force=force)
+            sample_tiles = _save_sample_raster_tiles(
+                out,
+                sample,
+                f"samples/animals/{entity_id.replace(':', '__')}_u8.png",
+                tile_size=preview_tile_size,
+                encoding="u8",
+                workers=encoder_workers,
+                force=force,
+                tile_batch_rows=tile_batch_rows,
+            )
+            _delete_disk_raster(visual)
+            _delete_disk_raster(sample)
+        animal_layers.append(
+            {
+                "name": f"animal:{entity_id}",
+                "kind": "animal",
+                "entity_id": entity_id,
+                "label": _animal_label(entity_id),
+                "file": mips[0].get("file"),
+                "mips": mips,
+                "sample_file": sample_file,
+                "sample_tiles": sample_tiles,
+            }
+        )
+        del values
+        gc.collect()
+        done()
+    layers.extend(animal_layers)
+
     report("manifest")
     world = manifest["world"]
     geo = manifest.get("georeferencing", {})
@@ -487,6 +570,7 @@ def export_hover_previews(
         "surface_geology": manifest.get("surface_geology", {}),
         "vegetation": manifest.get("vegetation", {}),
         "biome_regions": manifest.get("biome_regions", {}),
+        "animal_habitats": manifest.get("animal_habitats", {}),
         "preview": {
             "river_width_source": next((layer["preview"]["source"] for layer in layers if layer["name"] == "rivers"), None),
             "river_width_scale": PREVIEW_RIVER_WIDTH_SCALE,
@@ -733,6 +817,38 @@ def _render_ore_overlay_raster(values: np.ndarray, ore: str, raster: DiskRaster)
         array.flush()
     finally:
         del array
+
+
+def _render_animal_overlay_raster(values: np.ndarray, entity_id: str, raster: DiskRaster) -> None:
+    array = _open_disk_raster(raster, write=True)
+    try:
+        array[...] = 0
+        height = min(values.shape[0], raster.height)
+        width = min(values.shape[1], raster.width)
+        score = values[:height, :width].astype(np.float32) / 255.0
+        view = array[:height, :width]
+        view[:, :, :3] = np.array(_animal_overlay_color(entity_id), dtype=np.uint8)
+        view[:, :, 3] = np.clip(score * 168, 0, 196).astype(np.uint8)
+        array.flush()
+    finally:
+        del array
+
+
+def _animal_overlay_color(entity_id: str) -> tuple[int, int, int]:
+    color = ANIMAL_LAYER_COLORS.get(entity_id)
+    if color is not None:
+        return color
+    seed = sum(ord(ch) * (idx + 1) for idx, ch in enumerate(entity_id))
+    return (
+        64 + seed % 160,
+        64 + (seed * 3) % 160,
+        64 + (seed * 7) % 160,
+    )
+
+
+def _animal_label(entity_id: str) -> str:
+    label = entity_id.split(":", 1)[-1].replace("_", " ").replace("-", " ").strip()
+    return label.title()
 
 
 def _save_visual_raster_layer(

@@ -18,7 +18,7 @@ from hoverpreview_tools.hover_previews import (
     _save_visual_layer,
 )
 from ukgeo.manifest import default_manifest, write_manifest
-from ukgeo.tiles import write_r16_tile
+from ukgeo.tiles import write_r16_tile, write_u8_tile
 
 def test_hover_preview_index_origin_metadata_uses_nottingham_zero_zero():
     manifest = {
@@ -128,6 +128,23 @@ def test_hover_preview_steps_include_biome_regions(tmp_path):
     assert "biome_regions" in steps
 
 
+def test_hover_preview_steps_include_animal_habitats(tmp_path):
+    root = tmp_path
+    (root / "animals" / "habitats" / "minecraft" / "fox").mkdir(parents=True)
+    manifest = {
+        "height": {"path": "height"},
+        "animal_habitats": {
+            "entities": {
+                "minecraft:fox": {"path": "animals/habitats/minecraft/fox"}
+            }
+        },
+    }
+
+    steps = hover_preview_steps(root, manifest)
+
+    assert "animal:minecraft:fox" in steps
+
+
 def test_surface_overlay_keeps_default_zero_class_transparent():
     values = np.array([[0, 1]], dtype=np.uint8)
     classes = {
@@ -211,6 +228,35 @@ def test_export_hover_manifest_preserves_height_overlays_and_manifest_bounds(tmp
     assert hover_manifest["height_overlays"] == manifest["height_overlays"]
     assert hover_manifest["content_bounds"]["height"] == {"left": 0, "top": 0, "right": 256, "bottom": 256}
     assert hover_manifest["viewer"]["renderer_preference"] == "auto"
+
+
+def test_export_hover_previews_includes_animal_layers(tmp_path):
+    root = tmp_path / "world"
+    height_root = root / "height"
+    animal_root = root / "animals" / "habitats" / "minecraft" / "fox"
+    height_root.mkdir(parents=True)
+    animal_root.mkdir(parents=True)
+    manifest = default_manifest(width=512, depth=512, tile_size=512)
+    manifest["animal_habitats"] = {
+        "entities": {
+            "minecraft:fox": {
+                "path": "animals/habitats/minecraft/fox",
+                "extension": ".u8.gz",
+            }
+        }
+    }
+    write_manifest(root / "manifest.json", manifest)
+    write_r16_tile(height_root / "000_000.r16", np.full((512, 512), 123, dtype="<i2"))
+    write_u8_tile(animal_root / "000_000.u8.gz", np.full((512, 512), 255, dtype=np.uint8), 512)
+
+    out = tmp_path / "hoverpreviews"
+    export_hover_previews(root, out, max_size=256, tile_size=128, workers=1)
+
+    hover_manifest = json.loads((out / "hover_manifest.json").read_text(encoding="utf-8"))
+    animal_layers = [layer for layer in hover_manifest["layers"] if layer["kind"] == "animal"]
+    assert len(animal_layers) == 1
+    assert animal_layers[0]["entity_id"] == "minecraft:fox"
+    assert animal_layers[0]["label"] == "Fox"
 
 
 def test_export_hover_previews_deploy_minimal_keeps_only_manifest_and_tile_pyramids(tmp_path):
