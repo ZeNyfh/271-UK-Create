@@ -106,7 +106,7 @@ def apply_named_svg_ore_overlays(
         shared_source_bbox = None
         fit_mode = "outline"
     elif fit == "ireland-reference":
-        shared_source_bbox = _svg_embedded_image_land_bbox(image)
+        shared_source_bbox = _svg_embedded_image_land_bbox(image, component="ireland")
         target_bbox = _ireland_target_bbox(out, manifest)
         fit_mode = "outline"
         if shared_source_bbox is None or target_bbox is None:
@@ -483,7 +483,12 @@ def _full_target_bbox(manifest: dict) -> BBox:
     return 0.0, 0.0, float(int(world["width"]) - 1), float(int(world["depth"]) - 1)
 
 
-def _svg_embedded_image_land_bbox(path: Path, *, background_tolerance: int = 8) -> BBox | None:
+def _svg_embedded_image_land_bbox(
+    path: Path,
+    *,
+    background_tolerance: int = 8,
+    component: str | None = None,
+) -> BBox | None:
     root = ET.parse(path).getroot()
     for element in root.iter():
         if not element.tag.endswith("image"):
@@ -513,6 +518,14 @@ def _svg_embedded_image_land_bbox(path: Path, *, background_tolerance: int = 8) 
         mask = np.any(np.abs(pixels[:, :, :3].astype(np.int16) - background[None, None, :]) > background_tolerance, axis=2)
         if not np.any(mask):
             continue
+        if component == "ireland":
+            ireland_bbox = _largest_mask_component_bbox(
+                mask,
+                coarse_cell=8,
+                select="western",
+            )
+            if ireland_bbox is not None:
+                return ireland_bbox
         ys, xs = np.where(mask)
         return float(int(xs.min())), float(int(ys.min())), float(int(xs.max())), float(int(ys.max()))
     return None
@@ -557,46 +570,73 @@ def _ireland_target_bbox(root: Path, manifest: dict, *, coarse_cell: int = 64) -
     if not np.any(occupancy):
         return None
 
-    visited = np.zeros_like(occupancy, dtype=bool)
+    bbox = _largest_mask_component_bbox(occupancy.astype(bool), coarse_cell=1, select="western")
+    if bbox is None:
+        return None
+    min_x, min_z, max_x, max_z = bbox
+    world_min_x = int(min_x) * coarse_cell
+    world_min_z = int(min_z) * coarse_cell
+    world_max_x = min(width - 1, (int(max_x) + 1) * coarse_cell - 1)
+    world_max_z = min(depth - 1, (int(max_z) + 1) * coarse_cell - 1)
+    return float(world_min_x), float(world_min_z), float(world_max_x), float(world_max_z)
+
+
+def _largest_mask_component_bbox(mask: np.ndarray, *, coarse_cell: int, select: str | None = None) -> BBox | None:
+    coarse = max(1, int(coarse_cell))
+    full_height, full_width = mask.shape
+    if coarse > 1:
+        height = math.ceil(full_height / coarse)
+        width = math.ceil(full_width / coarse)
+        reduced = np.zeros((height, width), dtype=bool)
+        for y in range(height):
+            row = mask[y * coarse:min(full_height, (y + 1) * coarse)]
+            for x in range(width):
+                if np.any(row[:, x * coarse:min(full_width, (x + 1) * coarse)]):
+                    reduced[y, x] = True
+        mask = reduced
+    height, width = mask.shape
+    visited = np.zeros_like(mask, dtype=bool)
     components: list[tuple[int, int, int, int, int]] = []
-    for coarse_z in range(coarse_depth):
-        for coarse_x in range(coarse_width):
-            if occupancy[coarse_z, coarse_x] == 0 or visited[coarse_z, coarse_x]:
+    for y in range(height):
+        for x in range(width):
+            if not mask[y, x] or visited[y, x]:
                 continue
-            queue = deque([(coarse_x, coarse_z)])
-            visited[coarse_z, coarse_x] = True
+            queue = deque([(x, y)])
+            visited[y, x] = True
             size = 0
-            min_x = max_x = coarse_x
-            min_z = max_z = coarse_z
+            min_x = max_x = x
+            min_y = max_y = y
             while queue:
-                cell_x, cell_z = queue.popleft()
+                cell_x, cell_y = queue.popleft()
                 size += 1
                 min_x = min(min_x, cell_x)
                 max_x = max(max_x, cell_x)
-                min_z = min(min_z, cell_z)
-                max_z = max(max_z, cell_z)
-                for next_z in range(max(0, cell_z - 1), min(coarse_depth, cell_z + 2)):
-                    for next_x in range(max(0, cell_x - 1), min(coarse_width, cell_x + 2)):
-                        if occupancy[next_z, next_x] == 0 or visited[next_z, next_x]:
+                min_y = min(min_y, cell_y)
+                max_y = max(max_y, cell_y)
+                for next_y in range(max(0, cell_y - 1), min(height, cell_y + 2)):
+                    for next_x in range(max(0, cell_x - 1), min(width, cell_x + 2)):
+                        if not mask[next_y, next_x] or visited[next_y, next_x]:
                             continue
-                        visited[next_z, next_x] = True
-                        queue.append((next_x, next_z))
-            components.append((size, min_x, min_z, max_x, max_z))
+                        visited[next_y, next_x] = True
+                        queue.append((next_x, next_y))
+            components.append((size, min_x, min_y, max_x, max_y))
     if not components:
         return None
-
-    west_half_limit = max(1, int(math.floor(width * 0.55 / coarse_cell)))
-    candidates = [component for component in components if component[3] <= west_half_limit]
-    if not candidates:
-        candidates = components
-    size, min_x, min_z, max_x, max_z = max(candidates, key=lambda component: component[0])
+    candidates = components
+    if select == "western":
+        west_limit = max(1, int(math.floor(width * 0.55)))
+        western = [component for component in components if component[3] <= west_limit]
+        if western:
+            candidates = western
+    size, min_x, min_y, max_x, max_y = max(candidates, key=lambda item: item[0])
     if size <= 0:
         return None
-    world_min_x = min_x * coarse_cell
-    world_min_z = min_z * coarse_cell
-    world_max_x = min(width - 1, (max_x + 1) * coarse_cell - 1)
-    world_max_z = min(depth - 1, (max_z + 1) * coarse_cell - 1)
-    return float(world_min_x), float(world_min_z), float(world_max_x), float(world_max_z)
+    return (
+        float(min_x * coarse),
+        float(min_y * coarse),
+        float(min((max_x + 1) * coarse - 1, full_width - 1)),
+        float(min((max_y + 1) * coarse - 1, full_height - 1)),
+    )
 
 
 # Exact local targets from in-game Minecraft X/Z boxes supplied for the checked

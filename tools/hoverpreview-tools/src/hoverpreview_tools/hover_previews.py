@@ -439,7 +439,7 @@ def export_hover_previews(
                 visual_format=visual_format,
                 workers=encoder_workers,
                 force=force,
-                resampling=Image.Resampling.BILINEAR,
+                resampling=Image.Resampling.NEAREST,
                 tile_batch_rows=tile_batch_rows,
                 write_full_images=write_full_images,
             )
