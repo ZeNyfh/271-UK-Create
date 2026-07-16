@@ -724,15 +724,23 @@ function clampAxisOffset(offset, viewportSize, scaledImageSize) {
 }
 
 function viewerFitBounds() {
+  return { left: 0, top: 0, right: state.imageWidth, bottom: state.imageHeight };
+}
+
+function heightDataBounds() {
   const bounds = state.manifest?.content_bounds?.height;
-  if (!bounds) {
-    return { left: 0, top: 0, right: state.imageWidth, bottom: state.imageHeight };
-  }
+  if (!bounds) return null;
   const left = Math.max(0, Math.min(state.imageWidth, Number(bounds.left) || 0));
   const top = Math.max(0, Math.min(state.imageHeight, Number(bounds.top) || 0));
   const right = Math.max(left + 1, Math.min(state.imageWidth, Number(bounds.right) || state.imageWidth));
   const bottom = Math.max(top + 1, Math.min(state.imageHeight, Number(bounds.bottom) || state.imageHeight));
   return { left, top, right, bottom };
+}
+
+function isInsideHeightDataBounds(imageX, imageY) {
+  const bounds = heightDataBounds();
+  if (!bounds) return true;
+  return imageX >= bounds.left && imageY >= bounds.top && imageX < bounds.right && imageY < bounds.bottom;
 }
 
 function displayZoomPercent() {
@@ -1422,6 +1430,13 @@ function sampleFromEvent(event) {
   };
   if (image.x < 0 || image.y < 0 || image.x >= state.imageWidth || image.y >= state.imageHeight) {
     return samplePoint;
+  }
+  if (!isInsideHeightDataBounds(image.x, image.y)) {
+    return {
+      ...samplePoint,
+      height: null,
+      minecraftHeight: 62,
+    };
   }
   const scale = Number(state.manifest.scale || 1);
   const height = samplePixel("height", image.x, image.y);

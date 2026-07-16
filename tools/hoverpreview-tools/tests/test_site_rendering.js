@@ -102,3 +102,18 @@ test("published root page includes the current hover map shell", () => {
   assert.match(rootIndexHtml, /Left drag measures distance/);
   assert.match(appJs, /if \(!controls\) \{/);
 });
+
+test("site fit view uses the full exported image and treats outside-height ocean as y=62", () => {
+  const appJs = fs.readFileSync(path.join(__dirname, "../site/app.js"), "utf8");
+
+  assert.match(
+    appJs,
+    /function viewerFitBounds\(\)\s*\{\s*return \{ left: 0, top: 0, right: state\.imageWidth, bottom: state\.imageHeight \};\s*\}/,
+  );
+  assert.match(appJs, /function heightDataBounds\(\)/);
+  assert.match(appJs, /function isInsideHeightDataBounds\(imageX, imageY\)/);
+  assert.match(
+    appJs,
+    /if \(!isInsideHeightDataBounds\(image\.x, image\.y\)\) \{\s*return \{\s*\.\.\.samplePoint,\s*height: null,\s*minecraftHeight: 62,\s*\};\s*\}/,
+  );
+});
