@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import base64
+import io
+from collections import deque
 from pathlib import Path
 from collections.abc import Mapping
 import math
@@ -95,15 +98,31 @@ def apply_named_svg_ore_overlays(
     overlays_by_path: dict[str, list[tuple[str, int]]] = {}
     for ore, (path_id, score) in overlays.items():
         overlays_by_path.setdefault(path_id, []).append((ore, score))
-    target_bbox = _full_target_bbox(manifest) if fit == "full-frame" else None
-    fit_mode = "outline" if fit == "full-frame" else fit
+    target_bbox = None
+    shared_source_bbox = None
+    fit_mode = fit
+    if fit == "full-frame":
+        target_bbox = _full_target_bbox(manifest)
+        shared_source_bbox = None
+        fit_mode = "outline"
+    elif fit == "ireland-reference":
+        shared_source_bbox = _svg_embedded_image_land_bbox(image)
+        target_bbox = _ireland_target_bbox(out, manifest)
+        fit_mode = "outline"
+        if shared_source_bbox is None or target_bbox is None:
+            console.print(
+                f"[yellow]Could not derive Ireland reference placement from {image}; "
+                "falling back to full-frame placement.[/yellow]"
+            )
+            target_bbox = _full_target_bbox(manifest)
+            shared_source_bbox = None
     overlay_entries = [
         item for item in manifest.setdefault("ore_image_overlays", [])
         if item.get("source") != str(image) or item.get("kind") != "named_svg_paths"
     ]
     for path_id, ore_specs in overlays_by_path.items():
         mask = _read_named_svg_mask(image, path_id=path_id, svg_raster_scale=svg_raster_scale)
-        source_bbox = _full_source_bbox(mask)
+        source_bbox = shared_source_bbox if shared_source_bbox is not None else _full_source_bbox(mask)
         for ore, raw_score in ore_specs:
             manifest.setdefault("ore_layers", {}).setdefault(ore, default_u8_layer(f"ores/{ore}"))
             layer = manifest["ore_layers"][ore]
@@ -462,6 +481,122 @@ def _full_source_bbox(mask: np.ndarray) -> BBox:
 def _full_target_bbox(manifest: dict) -> BBox:
     world = manifest["world"]
     return 0.0, 0.0, float(int(world["width"]) - 1), float(int(world["depth"]) - 1)
+
+
+def _svg_embedded_image_land_bbox(path: Path, *, background_tolerance: int = 8) -> BBox | None:
+    root = ET.parse(path).getroot()
+    for element in root.iter():
+        if not element.tag.endswith("image"):
+            continue
+        href = element.attrib.get("{http://www.w3.org/1999/xlink}href") or element.attrib.get("href")
+        if not href or not href.startswith("data:image/png;base64,"):
+            continue
+        try:
+            payload = href.split(",", 1)[1]
+            png_bytes = base64.b64decode("".join(payload.split()))
+            image = Image.open(io.BytesIO(png_bytes)).convert("RGBA")
+        except Exception:
+            continue
+        pixels = np.asarray(image, dtype=np.uint8)
+        if pixels.size == 0:
+            continue
+        corners = np.asarray(
+            [
+                pixels[0, 0, :3],
+                pixels[0, -1, :3],
+                pixels[-1, 0, :3],
+                pixels[-1, -1, :3],
+            ],
+            dtype=np.int16,
+        )
+        background = np.median(corners, axis=0).astype(np.int16)
+        mask = np.any(np.abs(pixels[:, :, :3].astype(np.int16) - background[None, None, :]) > background_tolerance, axis=2)
+        if not np.any(mask):
+            continue
+        ys, xs = np.where(mask)
+        return float(int(xs.min())), float(int(ys.min())), float(int(xs.max())), float(int(ys.max()))
+    return None
+
+
+def _ireland_target_bbox(root: Path, manifest: dict, *, coarse_cell: int = 64) -> BBox | None:
+    height = manifest.get("height")
+    if not height:
+        return None
+    tile_size = int(manifest["tile_size"])
+    world = manifest["world"]
+    width = int(world["width"])
+    depth = int(world["depth"])
+    padded_width = int(world["padded_width"])
+    padded_depth = int(world["padded_depth"])
+    coarse_width = math.ceil(padded_width / coarse_cell)
+    coarse_depth = math.ceil(padded_depth / coarse_cell)
+    occupancy = np.zeros((coarse_depth, coarse_width), dtype=np.uint8)
+    height_root = root / height["path"]
+    for path in list(height_root.glob("*.r16")) + list(height_root.glob("*.r16.gz")):
+        try:
+            name = path.name
+            if name.endswith(".gz"):
+                name = name[:-3]
+            tile_x, tile_z = (int(part) for part in name.removesuffix(".r16").split("_"))
+            arr = read_r16_tile(path, tile_size)
+        except Exception:
+            continue
+        valid = arr != HEIGHT_NODATA
+        if not np.any(valid):
+            continue
+        world_x0 = tile_x * tile_size
+        world_z0 = tile_z * tile_size
+        for local_z in range(0, tile_size, coarse_cell):
+            for local_x in range(0, tile_size, coarse_cell):
+                if not np.any(valid[local_z:local_z + coarse_cell, local_x:local_x + coarse_cell]):
+                    continue
+                coarse_x = (world_x0 + local_x) // coarse_cell
+                coarse_z = (world_z0 + local_z) // coarse_cell
+                if 0 <= coarse_x < coarse_width and 0 <= coarse_z < coarse_depth:
+                    occupancy[coarse_z, coarse_x] = 1
+    if not np.any(occupancy):
+        return None
+
+    visited = np.zeros_like(occupancy, dtype=bool)
+    components: list[tuple[int, int, int, int, int]] = []
+    for coarse_z in range(coarse_depth):
+        for coarse_x in range(coarse_width):
+            if occupancy[coarse_z, coarse_x] == 0 or visited[coarse_z, coarse_x]:
+                continue
+            queue = deque([(coarse_x, coarse_z)])
+            visited[coarse_z, coarse_x] = True
+            size = 0
+            min_x = max_x = coarse_x
+            min_z = max_z = coarse_z
+            while queue:
+                cell_x, cell_z = queue.popleft()
+                size += 1
+                min_x = min(min_x, cell_x)
+                max_x = max(max_x, cell_x)
+                min_z = min(min_z, cell_z)
+                max_z = max(max_z, cell_z)
+                for next_z in range(max(0, cell_z - 1), min(coarse_depth, cell_z + 2)):
+                    for next_x in range(max(0, cell_x - 1), min(coarse_width, cell_x + 2)):
+                        if occupancy[next_z, next_x] == 0 or visited[next_z, next_x]:
+                            continue
+                        visited[next_z, next_x] = True
+                        queue.append((next_x, next_z))
+            components.append((size, min_x, min_z, max_x, max_z))
+    if not components:
+        return None
+
+    west_half_limit = max(1, int(math.floor(width * 0.55 / coarse_cell)))
+    candidates = [component for component in components if component[3] <= west_half_limit]
+    if not candidates:
+        candidates = components
+    size, min_x, min_z, max_x, max_z = max(candidates, key=lambda component: component[0])
+    if size <= 0:
+        return None
+    world_min_x = min_x * coarse_cell
+    world_min_z = min_z * coarse_cell
+    world_max_x = min(width - 1, (max_x + 1) * coarse_cell - 1)
+    world_max_z = min(depth - 1, (max_z + 1) * coarse_cell - 1)
+    return float(world_min_x), float(world_min_z), float(world_max_x), float(world_max_z)
 
 
 # Exact local targets from in-game Minecraft X/Z boxes supplied for the checked

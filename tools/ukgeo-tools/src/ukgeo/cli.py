@@ -167,7 +167,7 @@ def apply_named_svg_ore_overlays(
     manifest: Path = typer.Option(..., "--manifest"),
     out: Path = typer.Option(..., "--out"),
     overlay: list[str] = typer.Option(..., "--overlay", help="Repeat as ore=SvgPathId:score, for example --overlay copper=Copper:180"),
-    fit: str = typer.Option("full-frame", "--fit", help="Placement: full-frame, outline, cover, or contain."),
+    fit: str = typer.Option("full-frame", "--fit", help="Placement: full-frame, ireland-reference, outline, cover, or contain."),
     svg_raster_scale: int = typer.Option(1, "--svg-raster-scale"),
 ) -> None:
     overlays: dict[str, tuple[str, int]] = {}

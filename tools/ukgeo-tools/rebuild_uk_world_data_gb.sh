@@ -195,7 +195,7 @@ if [[ -n "$ROI_ORES_SVG" ]]; then
     --overlay "coal=Coal:$ROI_ORE_OVERLAY_SCORE" \
     --overlay "zinc=Zinc:$ROI_ORE_OVERLAY_SCORE" \
     --overlay "copper=Copper:$ROI_ORE_OVERLAY_SCORE" \
-    --fit full-frame \
+    --fit ireland-reference \
     --manifest "$TMP_ROOT/manifest.json" \
     --out "$TMP_ROOT"
 fi

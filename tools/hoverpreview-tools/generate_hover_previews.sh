@@ -583,7 +583,7 @@ run_ores() {
       --overlay "coal=Coal:$ROI_ORE_OVERLAY_SCORE" \
       --overlay "zinc=Zinc:$ROI_ORE_OVERLAY_SCORE" \
       --overlay "copper=Copper:$ROI_ORE_OVERLAY_SCORE" \
-      --fit full-frame \
+      --fit ireland-reference \
       --manifest "$ROOT/manifest.json" \
       --out "$ROOT"
   fi
