@@ -19,7 +19,7 @@ from PIL import Image
 from ukgeo.config import get_config_value
 from ukgeo.manifest import read_manifest
 from ukgeo.preview import ORE_COLORS, _height_image as _cpu_height_image, _hex_color, _read_height_preview, _read_u8_preview, read_cell_u8_preview, read_vegetation_preview
-from ukgeo.tiles import HEIGHT_NODATA
+from ukgeo.tiles import HEIGHT_NODATA, river_u8_layer
 from .weather_overlay import DEFAULT_OPEN_METEO_BASE_URL, build_weather_overlay_grid
 
 
@@ -237,10 +237,10 @@ def export_hover_previews(
         },
     ]
 
-    if "surface_geology" in manifest and (root / manifest["surface_geology"]["path"]).exists():
+    if "surface_geology" in manifest:
         report("surface")
         done = timed("surface")
-        values = _read_u8_preview(root, manifest["surface_geology"]["path"], tiles_x, tiles_z, source_tile_size, scale, missing_ok=False)
+        values = _read_u8_preview(root, manifest["surface_geology"], tiles_x, tiles_z, source_tile_size, scale, missing_ok=False)
         with tempfile.TemporaryDirectory(prefix="hoverpreview-surface-", dir=out) as temp_dir_name:
             temp_dir = Path(temp_dir_name)
             visual = _create_disk_raster(temp_dir / "surface.visual.bin", base_size, "RGBA")
@@ -286,7 +286,7 @@ def export_hover_previews(
         gc.collect()
         done()
 
-    if "vegetation" in manifest and (root / manifest["vegetation"]["path"]).exists():
+    if "vegetation" in manifest:
         report("vegetation")
         done = timed("vegetation")
         values = read_vegetation_preview(root, manifest, scale, missing_ok=False)
@@ -335,7 +335,7 @@ def export_hover_previews(
         gc.collect()
         done()
 
-    if "biome_regions" in manifest and (root / manifest["biome_regions"]["path"]).exists():
+    if "biome_regions" in manifest:
         report("biome_regions")
         done = timed("biome_regions")
         values = read_cell_u8_preview(root, manifest, "biome_regions", scale, missing_ok=False)
@@ -387,10 +387,10 @@ def export_hover_previews(
         gc.collect()
         done()
 
-    if "rivers" in manifest and (root / manifest["rivers"]["path"]).exists():
+    if "rivers" in manifest:
         report("rivers")
         done = timed("rivers")
-        values = _read_u8_preview(root, manifest["rivers"]["path"], tiles_x, tiles_z, source_tile_size, scale, missing_ok=False)
+        values = _read_u8_preview(root, river_u8_layer(manifest["rivers"]), tiles_x, tiles_z, source_tile_size, scale, missing_ok=False)
         width_values, width_metadata = _read_river_width_preview(root, manifest, tiles_x, tiles_z, source_tile_size, scale)
         with tempfile.TemporaryDirectory(prefix="hoverpreview-rivers-", dir=out) as temp_dir_name:
             temp_dir = Path(temp_dir_name)
@@ -450,11 +450,13 @@ def export_hover_previews(
     for ore, layer in manifest.get("ore_layers", {}).items():
         if ore == "tin":
             continue
-        if not (root / layer["path"]).exists():
-            continue
         report(f"ore:{ore}")
         done = timed(f"ore:{ore}")
-        values = _read_u8_preview(root, layer["path"], tiles_x, tiles_z, source_tile_size, scale, missing_ok=True)
+        values = _read_u8_preview(root, layer, tiles_x, tiles_z, source_tile_size, scale, missing_ok=True)
+        if not np.any(values):
+            del values
+            done()
+            continue
         with tempfile.TemporaryDirectory(prefix=f"hoverpreview-ore-{ore}-", dir=out) as temp_dir_name:
             temp_dir = Path(temp_dir_name)
             visual = _create_disk_raster(temp_dir / f"{ore}.visual.bin", base_size, "RGBA")
@@ -511,11 +513,15 @@ def export_hover_previews(
     animal_layers: list[dict[str, Any]] = []
     for entity_id, layer in manifest.get("animal_habitats", {}).get("entities", {}).items():
         layer_path = layer.get("path")
-        if not layer_path or not (root / layer_path).exists():
+        if not layer_path:
             continue
         report(f"animal:{entity_id}")
         done = timed(f"animal:{entity_id}")
-        values = _read_u8_preview(root, layer_path, tiles_x, tiles_z, source_tile_size, scale, missing_ok=True)
+        values = _read_u8_preview(root, layer, tiles_x, tiles_z, source_tile_size, scale, missing_ok=True)
+        if not np.any(values):
+            del values
+            done()
+            continue
         with tempfile.TemporaryDirectory(prefix=f"hoverpreview-animal-{entity_id.replace(':', '_')}-", dir=out) as temp_dir_name:
             temp_dir = Path(temp_dir_name)
             visual = _create_disk_raster(temp_dir / f"{entity_id.replace(':', '_')}.visual.bin", base_size, "RGBA")
@@ -1683,9 +1689,9 @@ def _read_river_width_preview(
 ) -> tuple[np.ndarray | None, dict[str, Any]]:
     rivers = manifest.get("rivers", {})
     candidates = (
-        ("river_preview_radius", rivers.get("preview_radius_path") or rivers.get("preview_radii_path")),
-        ("river_half_width", rivers.get("half_width_path") or rivers.get("river_half_width_path")),
-        ("river_order", rivers.get("order_path") or rivers.get("river_order_path")),
+        ("river_preview_radius", "preview_radius_path" if rivers.get("preview_radius_path") else "preview_radii_path", "preview_radius"),
+        ("river_half_width", "half_width_path" if rivers.get("half_width_path") else "river_half_width_path", "half_width"),
+        ("river_order", "order_path" if rivers.get("order_path") else "river_order_path", "order"),
     )
     metadata: dict[str, Any] = {
         "source": "river_mask",
@@ -1696,11 +1702,13 @@ def _read_river_width_preview(
         "river_min_radius": PREVIEW_RIVER_MIN_RADIUS,
         "river_max_radius": PREVIEW_RIVER_MAX_RADIUS,
     }
-    available_layers: list[tuple[str, str]] = []
-    for source, layer_path in candidates:
+    available_layers: list[tuple[str, dict[str, Any]]] = []
+    for source, path_key, prefix in candidates:
+        layer_path = rivers.get(path_key)
         if not layer_path:
             continue
-        available = (root / str(layer_path)).exists()
+        layer = river_u8_layer(rivers, path_key, prefix)
+        available = (root / str(layer_path)).exists() or str(layer.get("storage", "tiles")).lower() == "regions"
         if source == "river_half_width":
             metadata["river_half_width_available"] = available
         elif source == "river_preview_radius":
@@ -1709,12 +1717,12 @@ def _read_river_width_preview(
             metadata["river_order_available"] = available
         if not available:
             continue
-        available_layers.append((source, str(layer_path)))
+        available_layers.append((source, layer))
     if available_layers:
-        source, layer_path = available_layers[0]
-        values = _read_u8_preview(root, layer_path, tiles_x, tiles_z, tile_size, scale, missing_ok=True)
+        source, layer = available_layers[0]
+        values = _read_u8_preview(root, layer, tiles_x, tiles_z, tile_size, scale, missing_ok=True)
         metadata["source"] = source
-        metadata["path"] = layer_path
+        metadata["path"] = layer["path"]
         metadata["max_value"] = int(values.max()) if values.size else 0
         return values, metadata
     return None, metadata

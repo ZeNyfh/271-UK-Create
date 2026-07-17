@@ -11,8 +11,9 @@ uk_world_data*/
 # Keep the generated hover preview website data publishable on GitHub Pages.
 !uk_world_data_gb/
 uk_world_data_gb/*
-!*manifest.json
-!*height
-!*ores
+!uk_world_data_gb/manifest.json
+!uk_world_data_gb/**/
+!uk_world_data_gb/**/*.u8rg
+!uk_world_data_gb/**/*.r16rg
 !uk_world_data_gb/hoverpreviews/
 !uk_world_data_gb/hoverpreviews/**

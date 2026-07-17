@@ -66,8 +66,17 @@ public final class R16HeightTileLayer {
         if (!isValidTile(coord)) {
             return nodataTile();
         }
-        Path path = manifest.root.resolve(manifest.heightPath).resolve(coord.fileStem() + manifest.heightExtension);
-        byte[] data = readTileBytes(path, manifest.tileSize * manifest.tileSize * 2);
+        byte[] data;
+        if (manifest.heightStorage.usesRegions()) {
+            data = PackedRegionTileReader.readTile(manifest.root, manifest.heightStorage, manifest.tileSize, coord.tileX(), coord.tileZ(), 2, NODATA);
+        } else {
+            Path path = manifest.root.resolve(manifest.heightPath).resolve(coord.fileStem() + manifest.heightExtension);
+            Path resolved = resolveTilePath(path);
+            if (!Files.exists(resolved)) {
+                return nodataTile();
+            }
+            data = readTileBytes(resolved, manifest.tileSize * manifest.tileSize * 2);
+        }
         short[] values = new short[manifest.tileSize * manifest.tileSize];
         ByteBuffer buffer = ByteBuffer.wrap(data).order(ByteOrder.LITTLE_ENDIAN);
         for (int i = 0; i < values.length; i++) {

@@ -33,8 +33,10 @@ public final class TileManifest {
     public final int seaLevelY;
     public final String heightPath;
     public final String heightExtension;
+    public final LayerStorage heightStorage;
     public final Map<String, String> orePaths;
     public final Map<String, String> oreExtensions;
+    public final Map<String, LayerStorage> u8Storages;
     public final String surfaceGeologyPath;
     public final String surfaceGeologyExtension;
     public final Map<Integer, SurfaceGeologyClass> surfaceGeologyClasses;
@@ -74,11 +76,14 @@ public final class TileManifest {
         this.seaLevelY = height.get("sea_level_y").getAsInt();
         this.heightPath = height.get("path").getAsString();
         this.heightExtension = extension(height, DEFAULT_HEIGHT_EXTENSION);
+        this.heightStorage = LayerStorage.fromLayer(height, this.heightPath, this.heightExtension, ".r16rg", -32768);
+        this.u8Storages = new LinkedHashMap<>();
         this.surfaceGeologyClasses = new LinkedHashMap<>();
         JsonObject surface = json.getAsJsonObject("surface_geology");
         if (surface != null) {
             this.surfaceGeologyPath = surface.get("path").getAsString();
             this.surfaceGeologyExtension = extension(surface, DEFAULT_U8_EXTENSION);
+            this.u8Storages.put("surface_geology", LayerStorage.fromLayer(surface, this.surfaceGeologyPath, this.surfaceGeologyExtension, ".u8rg", 0));
             JsonObject classes = surface.getAsJsonObject("classes");
             if (classes != null) {
                 for (Map.Entry<String, JsonElement> entry : classes.entrySet()) {
@@ -99,6 +104,7 @@ public final class TileManifest {
         if (vegetation != null) {
             this.vegetationPath = vegetation.get("path").getAsString();
             this.vegetationExtension = extension(vegetation, DEFAULT_U8_EXTENSION);
+            this.u8Storages.put("vegetation", LayerStorage.fromLayer(vegetation, this.vegetationPath, this.vegetationExtension, ".u8rg", 0));
             this.vegetationCellBlocks = vegetation.has("cell_blocks") ? Math.max(1, vegetation.get("cell_blocks").getAsInt()) : 1;
             this.vegetationClasses.putAll(parseVegetationClasses(vegetation));
         } else {
@@ -111,6 +117,7 @@ public final class TileManifest {
         if (biomeRegions != null) {
             this.biomeRegionsPath = biomeRegions.get("path").getAsString();
             this.biomeRegionsExtension = extension(biomeRegions, DEFAULT_U8_EXTENSION);
+            this.u8Storages.put("biome_regions", LayerStorage.fromLayer(biomeRegions, this.biomeRegionsPath, this.biomeRegionsExtension, ".u8rg", 0));
             this.biomeRegionsCellBlocks = biomeRegions.has("cell_blocks") ? Math.max(1, biomeRegions.get("cell_blocks").getAsInt()) : this.vegetationCellBlocks;
             this.biomeRegionClasses.putAll(parseVegetationClasses(biomeRegions));
         } else {
@@ -128,8 +135,15 @@ public final class TileManifest {
         } else {
             this.riversPath = rivers.get("path").getAsString();
             this.riversExtension = extension(rivers, DEFAULT_U8_EXTENSION);
+            this.u8Storages.put("rivers", LayerStorage.fromRiver(rivers, "path", null, this.riversPath, this.riversExtension, ".u8rg", 0));
             this.riverOrderPath = rivers.has("order_path") ? rivers.get("order_path").getAsString() : null;
             this.riverHalfWidthPath = rivers.has("half_width_path") ? rivers.get("half_width_path").getAsString() : null;
+            if (this.riverOrderPath != null) {
+                this.u8Storages.put("river_order", LayerStorage.fromRiver(rivers, "order_path", "order", this.riverOrderPath, this.riversExtension, ".u8rg", 0));
+            }
+            if (this.riverHalfWidthPath != null) {
+                this.u8Storages.put("river_half_width", LayerStorage.fromRiver(rivers, "half_width_path", "half_width", this.riverHalfWidthPath, this.riversExtension, ".u8rg", 0));
+            }
             this.maxRiverHalfWidth = rivers.has("max_half_width") ? Math.max(0, rivers.get("max_half_width").getAsInt()) : 0;
         }
         this.orePaths = new LinkedHashMap<>();
@@ -138,8 +152,11 @@ public final class TileManifest {
         if (ores != null) {
             for (Map.Entry<String, JsonElement> entry : ores.entrySet()) {
                 JsonObject value = entry.getValue().getAsJsonObject();
-                this.orePaths.put(entry.getKey(), value.get("path").getAsString());
-                this.oreExtensions.put(entry.getKey(), extension(value, DEFAULT_U8_EXTENSION));
+                String orePath = value.get("path").getAsString();
+                String oreExtension = extension(value, DEFAULT_U8_EXTENSION);
+                this.orePaths.put(entry.getKey(), orePath);
+                this.oreExtensions.put(entry.getKey(), oreExtension);
+                this.u8Storages.put(entry.getKey(), LayerStorage.fromLayer(value, orePath, oreExtension, ".u8rg", 0));
             }
         }
     }
@@ -171,6 +188,10 @@ public final class TileManifest {
             case "rivers", "river_order", "river_half_width" -> riversExtension;
             default -> oreExtensions.getOrDefault(layerName, DEFAULT_U8_EXTENSION);
         };
+    }
+
+    public LayerStorage u8StorageFor(String layerName, String path, String extension) {
+        return u8Storages.getOrDefault(layerName, LayerStorage.tiles(path, extension, 0));
     }
 
     public String originSummary() {
@@ -208,6 +229,21 @@ public final class TileManifest {
         return value == null || value.isBlank() ? fallback : value;
     }
 
+    private static String optionalString(JsonObject object, String key, String fallback) {
+        if (object == null || !object.has(key) || object.get(key).isJsonNull()) {
+            return fallback;
+        }
+        String value = object.get(key).getAsString();
+        return value == null || value.isBlank() ? fallback : value;
+    }
+
+    private static int optionalInt(JsonObject object, String key, int fallback) {
+        if (object == null || !object.has(key) || object.get(key).isJsonNull()) {
+            return fallback;
+        }
+        return object.get(key).getAsInt();
+    }
+
     private static double optionalDouble(JsonObject object, String key) {
         if (object == null || !object.has(key) || object.get(key).isJsonNull()) {
             return Double.NaN;
@@ -228,5 +264,50 @@ public final class TileManifest {
             }
         }
         return result;
+    }
+
+    public record LayerStorage(
+            String path,
+            String extension,
+            String storage,
+            String regionPath,
+            String regionExtension,
+            int regionTiles,
+            int missingTile
+    ) {
+        public static LayerStorage tiles(String path, String extension, int missingTile) {
+            return new LayerStorage(path, extension, "tiles", path + "/regions", ".u8rg", 8, missingTile);
+        }
+
+        public static LayerStorage fromLayer(JsonObject layer, String path, String extension, String defaultRegionExtension, int defaultMissingTile) {
+            return new LayerStorage(
+                    path,
+                    extension,
+                    optionalString(layer, "storage", "tiles"),
+                    optionalString(layer, "region_path", path + "/regions"),
+                    optionalString(layer, "region_extension", defaultRegionExtension),
+                    Math.max(1, optionalInt(layer, "region_tiles", 8)),
+                    optionalInt(layer, "missing_tile", defaultMissingTile)
+            );
+        }
+
+        public static LayerStorage fromRiver(JsonObject rivers, String pathKey, String prefix, String path, String extension, String defaultRegionExtension, int defaultMissingTile) {
+            if (prefix == null) {
+                return fromLayer(rivers, path, extension, defaultRegionExtension, defaultMissingTile);
+            }
+            return new LayerStorage(
+                    path,
+                    extension,
+                    optionalString(rivers, prefix + "_storage", "tiles"),
+                    optionalString(rivers, prefix + "_region_path", path + "/regions"),
+                    optionalString(rivers, prefix + "_region_extension", defaultRegionExtension),
+                    Math.max(1, optionalInt(rivers, prefix + "_region_tiles", 8)),
+                    optionalInt(rivers, prefix + "_missing_tile", defaultMissingTile)
+            );
+        }
+
+        public boolean usesRegions() {
+            return "regions".equalsIgnoreCase(storage);
+        }
     }
 }

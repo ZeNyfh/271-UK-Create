@@ -7,7 +7,7 @@ from typing import Any
 import numpy as np
 
 from .manifest import read_manifest, validate_manifest
-from .tiles import read_r16_tile, read_u8_tile, resolve_existing_tile, r16_extension, u8_extension
+from .tiles import read_layer_tile, river_u8_layer
 
 
 def validate_tiles(root: Path) -> list[str]:
@@ -20,51 +20,50 @@ def validate_tiles(root: Path) -> list[str]:
     tiles_x = math.ceil(manifest["world"]["padded_width"] / tile_size)
     tiles_z = math.ceil(manifest["world"]["padded_depth"] / tile_size)
     height = manifest["height"]
-    errors.extend(_check_layer(root / height["path"], height.get("extension", r16_extension()), tiles_x, tiles_z, tile_size * tile_size * 2))
+    errors.extend(_check_layer(root, height, tiles_x, tiles_z, tile_size))
     if "surface_geology" in manifest:
         surface = manifest["surface_geology"]
-        errors.extend(_check_layer(root / surface["path"], surface.get("extension", u8_extension()), tiles_x, tiles_z, tile_size * tile_size))
+        errors.extend(_check_layer(root, surface, tiles_x, tiles_z, tile_size))
     if "rivers" in manifest:
         rivers = manifest["rivers"]
-        extension = rivers.get("extension", u8_extension())
-        errors.extend(_check_layer(root / rivers["path"], extension, tiles_x, tiles_z, tile_size * tile_size))
+        errors.extend(_check_layer(root, river_u8_layer(rivers), tiles_x, tiles_z, tile_size))
         if "order_path" in rivers:
-            errors.extend(_check_layer(root / rivers["order_path"], extension, tiles_x, tiles_z, tile_size * tile_size))
+            errors.extend(_check_layer(root, river_u8_layer(rivers, "order_path", "order"), tiles_x, tiles_z, tile_size))
         if "half_width_path" in rivers:
-            errors.extend(_check_layer(root / rivers["half_width_path"], extension, tiles_x, tiles_z, tile_size * tile_size))
+            errors.extend(_check_layer(root, river_u8_layer(rivers, "half_width_path", "half_width"), tiles_x, tiles_z, tile_size))
+        if "preview_radius_path" in rivers:
+            errors.extend(_check_layer(root, river_u8_layer(rivers, "preview_radius_path", "preview_radius"), tiles_x, tiles_z, tile_size))
     if "vegetation" in manifest:
         vegetation = manifest["vegetation"]
         cell_blocks = int(vegetation.get("cell_blocks", 1))
         veg_tiles_x = math.ceil(manifest["world"]["padded_width"] / (tile_size * cell_blocks))
         veg_tiles_z = math.ceil(manifest["world"]["padded_depth"] / (tile_size * cell_blocks))
-        errors.extend(_check_layer(root / vegetation["path"], vegetation.get("extension", u8_extension()), veg_tiles_x, veg_tiles_z, tile_size * tile_size))
+        errors.extend(_check_layer(root, vegetation, veg_tiles_x, veg_tiles_z, tile_size))
     if "biome_regions" in manifest:
         biome_regions = manifest["biome_regions"]
         cell_blocks = int(biome_regions.get("cell_blocks", 1))
         biome_tiles_x = math.ceil(manifest["world"]["padded_width"] / (tile_size * cell_blocks))
         biome_tiles_z = math.ceil(manifest["world"]["padded_depth"] / (tile_size * cell_blocks))
-        errors.extend(_check_layer(root / biome_regions["path"], biome_regions.get("extension", u8_extension()), biome_tiles_x, biome_tiles_z, tile_size * tile_size))
+        errors.extend(_check_layer(root, biome_regions, biome_tiles_x, biome_tiles_z, tile_size))
     for layer in manifest.get("ore_layers", {}).values():
-        errors.extend(_check_layer(root / layer["path"], layer.get("extension", u8_extension()), tiles_x, tiles_z, tile_size * tile_size))
+        errors.extend(_check_layer(root, layer, tiles_x, tiles_z, tile_size))
+    for layer in manifest.get("animal_habitats", {}).get("entities", {}).values():
+        errors.extend(_check_layer(root, layer, tiles_x, tiles_z, tile_size))
     return errors
 
 
-def _check_layer(path: Path, extension: str, tiles_x: int, tiles_z: int, expected_size: int) -> list[str]:
+def _check_layer(root: Path, layer: dict[str, Any], tiles_x: int, tiles_z: int, tile_size: int) -> list[str]:
     errors: list[str] = []
     for z in range(tiles_z):
         for x in range(tiles_x):
-            requested = path / f"{x:03d}_{z:03d}{extension}"
-            tile = resolve_existing_tile(requested)
-            if not tile.exists():
-                errors.append(f"Missing tile {requested}")
-                continue
             try:
-                size = len(read_r16_tile(tile, int(math.sqrt(expected_size // 2))).tobytes()) if expected_size % 2 == 0 and extension.startswith(".r16") else len(read_u8_tile(tile, int(math.sqrt(expected_size))).tobytes())
+                arr = read_layer_tile(root, layer, x, z, tile_size)
             except Exception as exc:
-                errors.append(f"{tile}: {exc}")
+                errors.append(f"{layer.get('path')} {x:03d}_{z:03d}: {exc}")
                 continue
-            if size != expected_size:
-                errors.append(f"{tile} raw size {size}, expected {expected_size}")
+            expected_shape = (tile_size, tile_size)
+            if arr.shape != expected_shape:
+                errors.append(f"{layer.get('path')} {x:03d}_{z:03d} shape {arr.shape}, expected {expected_shape}")
     return errors
 
 
@@ -79,38 +78,37 @@ def tile_summary(root: Path) -> dict[str, Any]:
         "tile_size": tile_size,
         "tiles_x": tiles_x,
         "tiles_z": tiles_z,
-        "height": _height_summary(root / manifest["height"]["path"], tiles_x, tiles_z, tile_size, int(manifest["height"]["nodata"]), manifest["height"].get("extension", r16_extension())),
+        "height": _height_summary(root, manifest["height"], tiles_x, tiles_z, tile_size, int(manifest["height"]["nodata"])),
         "ores": {},
     }
     if "surface_geology" in manifest:
         surface = manifest["surface_geology"]
-        summary["surface"] = _categorical_summary(root / surface["path"], tiles_x, tiles_z, tile_size, surface.get("classes", {}), surface.get("extension", u8_extension()))
+        summary["surface"] = _categorical_summary(root, surface, tiles_x, tiles_z, tile_size, surface.get("classes", {}))
     if "rivers" in manifest:
         rivers = manifest["rivers"]
-        extension = rivers.get("extension", u8_extension())
-        summary["rivers"] = _u8_summary(root / rivers["path"], tiles_x, tiles_z, tile_size, extension)
+        summary["rivers"] = _u8_summary(root, river_u8_layer(rivers), tiles_x, tiles_z, tile_size)
         if "order_path" in rivers:
-            summary["river_order"] = _u8_summary(root / rivers["order_path"], tiles_x, tiles_z, tile_size, extension)
+            summary["river_order"] = _u8_summary(root, river_u8_layer(rivers, "order_path", "order"), tiles_x, tiles_z, tile_size)
         if "half_width_path" in rivers:
-            summary["river_half_width"] = _u8_summary(root / rivers["half_width_path"], tiles_x, tiles_z, tile_size, extension)
+            summary["river_half_width"] = _u8_summary(root, river_u8_layer(rivers, "half_width_path", "half_width"), tiles_x, tiles_z, tile_size)
     if "vegetation" in manifest:
         vegetation = manifest["vegetation"]
         cell_blocks = int(vegetation.get("cell_blocks", 1))
         veg_tiles_x = math.ceil(manifest["world"]["padded_width"] / (tile_size * cell_blocks))
         veg_tiles_z = math.ceil(manifest["world"]["padded_depth"] / (tile_size * cell_blocks))
-        summary["vegetation"] = _categorical_summary(root / vegetation["path"], veg_tiles_x, veg_tiles_z, tile_size, vegetation.get("classes", {}), vegetation.get("extension", u8_extension()))
+        summary["vegetation"] = _categorical_summary(root, vegetation, veg_tiles_x, veg_tiles_z, tile_size, vegetation.get("classes", {}))
     if "biome_regions" in manifest:
         biome_regions = manifest["biome_regions"]
         cell_blocks = int(biome_regions.get("cell_blocks", 1))
         br_tiles_x = math.ceil(manifest["world"]["padded_width"] / (tile_size * cell_blocks))
         br_tiles_z = math.ceil(manifest["world"]["padded_depth"] / (tile_size * cell_blocks))
-        summary["biome_regions"] = _categorical_summary(root / biome_regions["path"], br_tiles_x, br_tiles_z, tile_size, biome_regions.get("classes", {}), biome_regions.get("extension", u8_extension()))
+        summary["biome_regions"] = _categorical_summary(root, biome_regions, br_tiles_x, br_tiles_z, tile_size, biome_regions.get("classes", {}))
     for name, layer in manifest.get("ore_layers", {}).items():
-        summary["ores"][name] = _u8_summary(root / layer["path"], tiles_x, tiles_z, tile_size, layer.get("extension", u8_extension()))
+        summary["ores"][name] = _u8_summary(root, layer, tiles_x, tiles_z, tile_size)
     return summary
 
 
-def _height_summary(path: Path, tiles_x: int, tiles_z: int, tile_size: int, nodata: int, extension: str) -> dict[str, Any]:
+def _height_summary(root: Path, layer: dict[str, Any], tiles_x: int, tiles_z: int, tile_size: int, nodata: int) -> dict[str, Any]:
     total = 0
     nodata_count = 0
     valid_count = 0
@@ -119,10 +117,7 @@ def _height_summary(path: Path, tiles_x: int, tiles_z: int, tile_size: int, noda
     total_value = 0
     for z in range(tiles_z):
         for x in range(tiles_x):
-            tile = resolve_existing_tile(path / f"{x:03d}_{z:03d}{extension}")
-            if not tile.exists():
-                continue
-            arr = read_r16_tile(tile, tile_size).reshape(-1)
+            arr = read_layer_tile(root, layer, x, z, tile_size).reshape(-1)
             total += arr.size
             valid = arr[arr != nodata].astype(np.int64)
             nodata_count += arr.size - valid.size
@@ -144,16 +139,13 @@ def _height_summary(path: Path, tiles_x: int, tiles_z: int, tile_size: int, noda
     }
 
 
-def _u8_summary(path: Path, tiles_x: int, tiles_z: int, tile_size: int, extension: str) -> dict[str, Any]:
+def _u8_summary(root: Path, layer: dict[str, Any], tiles_x: int, tiles_z: int, tile_size: int) -> dict[str, Any]:
     total = 0
     nonzero = 0
     max_value = 0
     for z in range(tiles_z):
         for x in range(tiles_x):
-            tile = resolve_existing_tile(path / f"{x:03d}_{z:03d}{extension}")
-            if not tile.exists():
-                continue
-            arr = read_u8_tile(tile, tile_size).reshape(-1)
+            arr = read_layer_tile(root, layer, x, z, tile_size).reshape(-1)
             total += arr.size
             nonzero += int((arr > 0).sum())
             if arr.size:
@@ -166,15 +158,12 @@ def _u8_summary(path: Path, tiles_x: int, tiles_z: int, tile_size: int, extensio
     }
 
 
-def _categorical_summary(path: Path, tiles_x: int, tiles_z: int, tile_size: int, classes: dict[str, Any], extension: str) -> dict[str, Any]:
+def _categorical_summary(root: Path, layer: dict[str, Any], tiles_x: int, tiles_z: int, tile_size: int, classes: dict[str, Any]) -> dict[str, Any]:
     total = 0
     counts: dict[int, int] = {}
     for z in range(tiles_z):
         for x in range(tiles_x):
-            tile = resolve_existing_tile(path / f"{x:03d}_{z:03d}{extension}")
-            if not tile.exists():
-                continue
-            arr = read_u8_tile(tile, tile_size).reshape(-1)
+            arr = read_layer_tile(root, layer, x, z, tile_size).reshape(-1)
             total += arr.size
             values, value_counts = np.unique(arr, return_counts=True)
             for value, count in zip(values, value_counts, strict=True):

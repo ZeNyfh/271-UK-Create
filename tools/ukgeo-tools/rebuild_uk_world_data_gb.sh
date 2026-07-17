@@ -226,6 +226,16 @@ fi
   --manifest "$TMP_ROOT/manifest.json" \
   --out "$TMP_ROOT"
 
+if [[ "$PACK_TILE_REGIONS" == "true" ]]; then
+  pack_args=(pack-tile-regions "$TMP_ROOT" --region-tiles "$PACK_REGION_TILES")
+  if [[ "$PACK_DELETE_RAW" == "true" ]]; then
+    pack_args+=(--delete-raw)
+  else
+    pack_args+=(--keep-raw)
+  fi
+  "$UKGEO" "${pack_args[@]}"
+fi
+
 "$UKGEO" validate-tiles "$TMP_ROOT"
 "$UKGEO" stats "$TMP_ROOT"
 

@@ -1,6 +1,7 @@
 package com.ukgeo.worldgen;
 
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.OptionalInt;
 
@@ -9,6 +10,7 @@ public final class U8OreTileLayer {
     private final String oreName;
     private final String path;
     private final String extension;
+    private final TileManifest.LayerStorage storage;
     private final TileGrid grid;
     private final int cellBlocks;
     private final int paddedWidth;
@@ -24,6 +26,7 @@ public final class U8OreTileLayer {
         this.oreName = oreName;
         this.path = path;
         this.extension = manifest.u8ExtensionFor(oreName);
+        this.storage = manifest.u8StorageFor(oreName, path, this.extension);
         this.grid = new TileGrid(manifest);
         this.cellBlocks = Math.max(1, cellBlocks);
         this.paddedWidth = paddedWidth;
@@ -55,8 +58,15 @@ public final class U8OreTileLayer {
     }
 
     private byte[] load(TileCoord coord) throws IOException {
+        if (storage.usesRegions()) {
+            return PackedRegionTileReader.readTile(manifest.root, storage, manifest.tileSize, coord.tileX(), coord.tileZ(), 1, 0);
+        }
         Path tilePath = manifest.root.resolve(path).resolve(coord.fileStem() + extension);
-        return R16HeightTileLayer.readTileBytes(tilePath, manifest.tileSize * manifest.tileSize);
+        Path resolved = R16HeightTileLayer.resolveTilePath(tilePath);
+        if (!Files.exists(resolved)) {
+            return new byte[manifest.tileSize * manifest.tileSize];
+        }
+        return R16HeightTileLayer.readTileBytes(resolved, manifest.tileSize * manifest.tileSize);
     }
 
     public String cacheStats() {

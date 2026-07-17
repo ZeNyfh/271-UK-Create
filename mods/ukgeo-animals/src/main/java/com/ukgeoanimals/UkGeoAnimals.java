@@ -6,15 +6,20 @@ import com.google.gson.JsonParser;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.Reader;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.LongAdder;
+import java.util.zip.DataFormatException;
 import java.util.zip.GZIPInputStream;
+import java.util.zip.Inflater;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceKey;
@@ -350,7 +355,12 @@ public final class UkGeoAnimals {
                 String layerPath = layer.get("path").getAsString();
                 String extension = layer.has("extension") ? layer.get("extension").getAsString() : ".u8";
                 int cellBlocks = layer.has("cell_blocks") ? Math.max(1, layer.get("cell_blocks").getAsInt()) : 1;
-                layers.put(entityId, new HabitatLayer(dataRoot, layerPath, extension, tileSize, minecraftMinX, minecraftMinZ, paddedWidth, paddedDepth, cellBlocks));
+                String storage = layer.has("storage") ? layer.get("storage").getAsString() : "tiles";
+                String regionPath = layer.has("region_path") ? layer.get("region_path").getAsString() : layerPath + "/regions";
+                String regionExtension = layer.has("region_extension") ? layer.get("region_extension").getAsString() : ".u8rg";
+                int regionTiles = layer.has("region_tiles") ? Math.max(1, layer.get("region_tiles").getAsInt()) : 8;
+                int missingTile = layer.has("missing_tile") ? layer.get("missing_tile").getAsInt() : 0;
+                layers.put(entityId, new HabitatLayer(dataRoot, layerPath, extension, storage, regionPath, regionExtension, regionTiles, missingTile, tileSize, minecraftMinX, minecraftMinZ, paddedWidth, paddedDepth, cellBlocks));
             }
             LOGGER.info("UKGeo Animals loaded {} SVG habitat masks from {}", layers.size(), manifestPath);
             return new AnimalHabitatRuntime(layers);
@@ -387,6 +397,11 @@ public final class UkGeoAnimals {
         private final Path root;
         private final String path;
         private final String extension;
+        private final String storage;
+        private final String regionPath;
+        private final String regionExtension;
+        private final int regionTiles;
+        private final int missingTile;
         private final int tileSize;
         private final int minecraftMinX;
         private final int minecraftMinZ;
@@ -400,10 +415,15 @@ public final class UkGeoAnimals {
             }
         });
 
-        private HabitatLayer(Path root, String path, String extension, int tileSize, int minecraftMinX, int minecraftMinZ, int paddedWidth, int paddedDepth, int cellBlocks) {
+        private HabitatLayer(Path root, String path, String extension, String storage, String regionPath, String regionExtension, int regionTiles, int missingTile, int tileSize, int minecraftMinX, int minecraftMinZ, int paddedWidth, int paddedDepth, int cellBlocks) {
             this.root = root;
             this.path = path;
             this.extension = extension == null || extension.isBlank() ? ".u8" : extension;
+            this.storage = storage == null || storage.isBlank() ? "tiles" : storage;
+            this.regionPath = regionPath == null || regionPath.isBlank() ? path + "/regions" : regionPath;
+            this.regionExtension = regionExtension == null || regionExtension.isBlank() ? ".u8rg" : regionExtension;
+            this.regionTiles = Math.max(1, regionTiles);
+            this.missingTile = missingTile;
             this.tileSize = tileSize;
             this.minecraftMinX = minecraftMinX;
             this.minecraftMinZ = minecraftMinZ;
@@ -438,6 +458,11 @@ public final class UkGeoAnimals {
             if (cached != null) {
                 return cached;
             }
+            if ("regions".equalsIgnoreCase(storage)) {
+                byte[] data = readPackedTile(root, regionPath, regionExtension, regionTiles, tileSize, tileX, tileZ, missingTile);
+                cache.put(key, data);
+                return data;
+            }
             Path tilePath = root.resolve(path).resolve("%03d_%03d%s".formatted(tileX, tileZ, extension));
             byte[] data = readTileBytes(tilePath, tileSize * tileSize);
             cache.put(key, data);
@@ -445,6 +470,7 @@ public final class UkGeoAnimals {
         }
 
         private static byte[] readTileBytes(Path tilePath, int expectedSize) throws IOException {
+            tilePath = resolveTilePath(tilePath);
             if (!Files.exists(tilePath)) {
                 return new byte[expectedSize];
             }
@@ -457,6 +483,94 @@ public final class UkGeoAnimals {
                     return padded;
                 }
                 return data;
+            }
+        }
+
+        private static Path resolveTilePath(Path path) {
+            if (Files.exists(path)) {
+                return path;
+            }
+            String fileName = path.getFileName().toString();
+            Path parent = path.getParent();
+            if (fileName.endsWith(".gz")) {
+                Path raw = parent == null ? Path.of(fileName.substring(0, fileName.length() - 3)) : parent.resolve(fileName.substring(0, fileName.length() - 3));
+                return Files.exists(raw) ? raw : path;
+            }
+            Path gzip = parent == null ? Path.of(fileName + ".gz") : parent.resolve(fileName + ".gz");
+            return Files.exists(gzip) ? gzip : path;
+        }
+
+        private static byte[] readPackedTile(Path root, String regionPath, String regionExtension, int regionTiles, int tileSize, int tileX, int tileZ, int missingTile) throws IOException {
+            int regionX = Math.floorDiv(tileX, regionTiles);
+            int regionZ = Math.floorDiv(tileZ, regionTiles);
+            int localX = Math.floorMod(tileX, regionTiles);
+            int localZ = Math.floorMod(tileZ, regionTiles);
+            int index = localZ * regionTiles + localX;
+            int tileBytes = tileSize * tileSize;
+            Path path = root.resolve(regionPath).resolve("%03d_%03d%s".formatted(regionX, regionZ, regionExtension));
+            if (!Files.exists(path)) {
+                return defaultTile(tileBytes, missingTile);
+            }
+            byte[] file = Files.readAllBytes(path);
+            if (file.length < 28) {
+                throw new IOException(path + " is too small to be a UKGeo packed region");
+            }
+            ByteBuffer buffer = ByteBuffer.wrap(file).order(ByteOrder.LITTLE_ENDIAN);
+            if (buffer.get() != 'U' || buffer.get() != 'K' || buffer.get() != 'R' || buffer.get() != 'G') {
+                throw new IOException(path + " is not a UKGeo packed region");
+            }
+            int version = buffer.getInt();
+            int storedTileSize = buffer.getInt();
+            int storedRegionTiles = buffer.getInt();
+            int storedTileBytes = buffer.getInt();
+            int storedDefault = buffer.getInt();
+            int entryCount = buffer.getInt();
+            if (version != 1 || storedTileSize != tileSize || storedRegionTiles != regionTiles || storedTileBytes != tileBytes) {
+                throw new IOException(path + " packed region metadata does not match manifest");
+            }
+            if (index >= entryCount) {
+                return defaultTile(tileBytes, storedDefault);
+            }
+            int entryOffset = 28 + index * 12;
+            if (file.length < entryOffset + 12) {
+                throw new IOException(path + " packed region entry table is truncated");
+            }
+            buffer.position(entryOffset);
+            long payloadOffset = buffer.getLong();
+            int payloadSize = buffer.getInt();
+            if (payloadOffset == 0L || payloadSize == 0) {
+                return defaultTile(tileBytes, storedDefault);
+            }
+            if (payloadSize <= 0 || payloadOffset < 0 || payloadOffset + payloadSize > file.length) {
+                throw new IOException(path + " packed region payload is invalid");
+            }
+            byte[] payload = Arrays.copyOfRange(file, (int) payloadOffset, (int) payloadOffset + payloadSize);
+            if (payloadSize == tileBytes) {
+                return payload;
+            }
+            return inflate(path, payload, tileBytes);
+        }
+
+        private static byte[] defaultTile(int tileBytes, int value) {
+            byte[] data = new byte[tileBytes];
+            Arrays.fill(data, (byte) (value & 0xff));
+            return data;
+        }
+
+        private static byte[] inflate(Path path, byte[] payload, int expectedSize) throws IOException {
+            Inflater inflater = new Inflater();
+            try {
+                inflater.setInput(payload);
+                byte[] data = new byte[expectedSize];
+                int length = inflater.inflate(data);
+                if (length != expectedSize || !inflater.finished()) {
+                    throw new IOException(path + " packed region payload decompressed to " + length + " bytes, expected " + expectedSize);
+                }
+                return data;
+            } catch (DataFormatException ex) {
+                throw new IOException(path + " packed region payload is not valid deflate data", ex);
+            } finally {
+                inflater.end();
             }
         }
     }

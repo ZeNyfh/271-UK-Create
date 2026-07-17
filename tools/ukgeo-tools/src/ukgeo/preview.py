@@ -7,7 +7,7 @@ import numpy as np
 from PIL import Image, ImageDraw
 
 from .manifest import read_manifest
-from .tiles import HEIGHT_NODATA, read_r16_tile, read_u8_tile, resolve_existing_tile, r16_extension, u8_extension
+from .tiles import HEIGHT_NODATA, read_layer_tile, river_u8_layer, u8_extension
 
 def u8_layer_grid(manifest: dict, layer: str) -> tuple[int, int, int, int, int]:
     """Return tiles_x, tiles_z, data_width, data_depth, cell_blocks for a u8 tile layer."""
@@ -38,7 +38,7 @@ def read_cell_u8_preview(root: Path, manifest: dict, layer: str, scale: int, *, 
     tiles_x, tiles_z, width_cells, depth_cells, cell_blocks = u8_layer_grid(manifest, layer)
     values = _read_u8_preview(
         root,
-        metadata["path"],
+        metadata,
         tiles_x,
         tiles_z,
         int(manifest["tile_size"]),
@@ -93,12 +93,12 @@ def make_preview(root: Path, layer: str, out: Path, max_size: int = 4096, style:
     elif layer == "surface":
         if "surface_geology" not in manifest:
             raise FileNotFoundError("No surface geology layer is present. Run ukgeo make-surface-geology-tiles first.")
-        values = _read_u8_preview(root, manifest["surface_geology"]["path"], tiles_x, tiles_z, tile_size, scale, missing_ok=False)
+        values = _read_u8_preview(root, manifest["surface_geology"], tiles_x, tiles_z, tile_size, scale, missing_ok=False)
         output = _surface_image(values, manifest["surface_geology"].get("classes", {}), legend_scale)
     elif layer == "rivers":
         if "rivers" not in manifest:
             raise FileNotFoundError("No river layer is present. Run ukgeo make-river-tiles first.")
-        values = _read_u8_preview(root, manifest["rivers"]["path"], tiles_x, tiles_z, tile_size, scale, missing_ok=False)
+        values = _read_u8_preview(root, river_u8_layer(manifest["rivers"]), tiles_x, tiles_z, tile_size, scale, missing_ok=False)
         height = _read_height_preview(root, manifest, tiles_x, tiles_z, tile_size, scale)
         output = _single_mask_overlay(height, values, "rivers", (65, 145, 230), legend_scale)
     elif layer == "vegetation":
@@ -118,7 +118,7 @@ def make_preview(root: Path, layer: str, out: Path, max_size: int = 4096, style:
         ore = layer.split(":", 1)[1]
         if ore not in manifest.get("ore_layers", {}):
             raise ValueError(f"Unknown ore layer {ore!r}")
-        values = _read_u8_preview(root, manifest["ore_layers"][ore]["path"], tiles_x, tiles_z, tile_size, scale, missing_ok=False)
+        values = _read_u8_preview(root, manifest["ore_layers"][ore], tiles_x, tiles_z, tile_size, scale, missing_ok=False)
         if style == "overlay":
             height = _read_height_preview(root, manifest, tiles_x, tiles_z, tile_size, scale)
             output = _single_ore_overlay(height, values, ore, legend_scale)
@@ -131,11 +131,10 @@ def make_preview(root: Path, layer: str, out: Path, max_size: int = 4096, style:
 
 
 def _read_height_preview(root: Path, manifest: dict, tiles_x: int, tiles_z: int, tile_size: int, scale: int) -> np.ndarray:
-    base = root / manifest["height"]["path"]
     image = np.full((math.ceil(tiles_z * tile_size / scale), math.ceil(tiles_x * tile_size / scale)), HEIGHT_NODATA, dtype=np.int16)
     for tz in range(tiles_z):
         for tx in range(tiles_x):
-            arr = read_r16_tile(base / f"{tx:03d}_{tz:03d}{manifest['height'].get('extension', r16_extension())}", tile_size)
+            arr = read_layer_tile(root, manifest["height"], tx, tz, tile_size)
             y0, y1, x0, x1, local_y, local_x = _tile_preview_window(tx, tz, tile_size, scale)
             image[y0:y1, x0:x1] = arr[np.ix_(local_y, local_x)]
     return image
@@ -143,7 +142,7 @@ def _read_height_preview(root: Path, manifest: dict, tiles_x: int, tiles_z: int,
 
 def _read_u8_preview(
     root: Path,
-    layer_path: str,
+    layer: str | dict,
     tiles_x: int,
     tiles_z: int,
     tile_size: int,
@@ -153,22 +152,18 @@ def _read_u8_preview(
     data_width: int | None = None,
     data_depth: int | None = None,
 ) -> np.ndarray:
-    base = root / layer_path
+    layer_meta = {"path": layer, "extension": u8_extension(), "dtype": "uint8"} if isinstance(layer, str) else dict(layer)
+    base = root / str(layer_meta["path"])
     width = data_width if data_width is not None else tiles_x * tile_size
     depth = data_depth if data_depth is not None else tiles_z * tile_size
-    if not base.exists():
+    if not base.exists() and not isinstance(layer, dict):
         if missing_ok:
             return np.zeros((math.ceil(depth / scale), math.ceil(width / scale)), dtype=np.uint8)
-        raise FileNotFoundError(f"Tile directory is missing: {base}")
+        return np.zeros((math.ceil(depth / scale), math.ceil(width / scale)), dtype=np.uint8)
     image = np.zeros((math.ceil(depth / scale), math.ceil(width / scale)), dtype=np.uint8)
     for tz in range(tiles_z):
         for tx in range(tiles_x):
-            tile_path = resolve_existing_tile(base / f"{tx:03d}_{tz:03d}{u8_extension()}")
-            if not tile_path.exists():
-                if missing_ok:
-                    continue
-                raise FileNotFoundError(f"Tile is missing: {tile_path}")
-            arr = read_u8_tile(tile_path, tile_size)
+            arr = read_layer_tile(root, layer_meta, tx, tz, tile_size)
             if scale > 1:
                 non_zero = np.argwhere(arr > 0)
                 if non_zero.size > 0:
@@ -231,13 +226,8 @@ def _all_ores_image(root: Path, manifest: dict, tiles_x: int, tiles_z: int, tile
     weighted_color = np.zeros_like(background, dtype=np.float32)
     weights = np.zeros(height.shape, dtype=np.float32)
     present: list[tuple[str, tuple[int, int, int], int]] = []
-    missing_layers: list[str] = []
     for ore, layer in manifest.get("ore_layers", {}).items():
-        layer_root = root / layer["path"]
-        if not layer_root.exists():
-            missing_layers.append(ore)
-            continue
-        values = _read_u8_preview(root, layer["path"], tiles_x, tiles_z, tile_size, scale, missing_ok=True)
+        values = _read_u8_preview(root, layer, tiles_x, tiles_z, tile_size, scale, missing_ok=True)
         score = values.astype(np.float32) / 255.0
         color = np.array(ORE_COLORS.get(ore, (255, 255, 255)), dtype=np.float32)
         weighted_color += score[:, :, None] * color
@@ -245,10 +235,6 @@ def _all_ores_image(root: Path, manifest: dict, tiles_x: int, tiles_z: int, tile
         max_score = int(values.max()) if values.size else 0
         if max_score > 0:
             present.append((ore, tuple(int(c) for c in color), max_score))
-    if not present and missing_layers:
-        raise FileNotFoundError(
-            "No ore tile data is present. Run ukgeo make-ore-tiles before previewing --layer ores."
-        )
     ore_rgb = np.divide(weighted_color, weights[:, :, None], out=np.zeros_like(weighted_color), where=weights[:, :, None] > 0)
     alpha = np.clip(weights * 0.85, 0.0, 0.9)[:, :, None]
     output = background * (1.0 - alpha) + ore_rgb * alpha

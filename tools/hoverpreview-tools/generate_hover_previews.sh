@@ -631,8 +631,23 @@ run_iron_overlay() {
   printf '%s\n' "$current_iron_hash" > "$IRON_STAMP"
 }
 
+run_pack_regions() {
+  require_manifest
+  if ! is_truthy "$PACK_TILE_REGIONS"; then
+    return
+  fi
+  local args=(pack-tile-regions "$ROOT" --region-tiles "$PACK_REGION_TILES")
+  if is_truthy "$PACK_DELETE_RAW"; then
+    args+=(--delete-raw)
+  else
+    args+=(--keep-raw)
+  fi
+  "${UKGEO_ENV[@]}" "$PYTHON" -m ukgeo.cli "${args[@]}"
+}
+
 run_preview() {
   require_manifest
+  run_pack_regions
   check_gpu
   local args=(
     "$PYTHON" -m hoverpreview_tools.cli "$ROOT"
@@ -739,3 +754,7 @@ while IFS= read -r task; do
     preview) run_preview ;;
   esac
 done < <(ordered_tasks)
+
+if ! has_task preview && { has_task height || has_task rivers || has_task vegetation || has_task geology || has_task ores || has_task animals || has_task iron-overlay; }; then
+  run_pack_regions
+fi

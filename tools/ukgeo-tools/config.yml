@@ -4,6 +4,9 @@ runtime:
 rebuild:
   DATA_DIR: ../../data
   GENERATE_PREVIEWS: false
+  PACK_TILE_REGIONS: true
+  PACK_REGION_TILES: 8
+  PACK_DELETE_RAW: true
   MAX_SIZE: 12000
   LEGEND_SCALE: 20
   ORE_JOBS: 1

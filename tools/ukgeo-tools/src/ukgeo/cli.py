@@ -24,7 +24,7 @@ from .height import make_height_tiles as make_height_tiles_impl
 from .gold import harvest_gold_occurrences as harvest_gold_occurrences_impl
 from .gold import make_gold_occurrence_tiles as make_gold_occurrence_tiles_impl
 from .landmask import mask_height_to_bgs_land as mask_height_to_bgs_land_impl
-from .manifest import read_manifest
+from .manifest import read_manifest, write_manifest
 from .ore_image_overlay import apply_named_svg_ore_overlays as apply_named_svg_ore_overlays_impl
 from .ore_image_overlay import apply_ore_image_overlay as apply_ore_image_overlay_impl
 from .ores import make_ore_tiles as make_ore_tiles_impl
@@ -33,7 +33,7 @@ from .rivers import make_river_tiles as make_river_tiles_impl
 from .surface import make_surface_geology_tiles as make_surface_geology_tiles_impl
 from .ni_height import add_osni_height_tiles as add_osni_height_tiles_impl
 from .vegetation import make_vegetation_tiles as make_vegetation_tiles_impl
-from .tiles import HEIGHT_NODATA, read_r16_tile, read_u8_tile, r16_extension, u8_extension
+from .tiles import HEIGHT_NODATA, pack_manifest_regions, read_layer_tile, river_u8_layer
 from .validate import tile_summary, validate_tiles
 
 app = typer.Typer(no_args_is_help=True)
@@ -428,6 +428,19 @@ def stats_cmd(root: Path) -> None:
         console.print(vegetation_table)
 
 
+@app.command("pack-tile-regions")
+def pack_tile_regions_cmd(
+    root: Path,
+    region_tiles: int = typer.Option(8, "--region-tiles", min=1, help="Square region size in source tiles."),
+    delete_raw: bool = typer.Option(True, "--delete-raw/--keep-raw", help="Delete raw .u8/.r16 tiles after successful packing."),
+) -> None:
+    manifest_path = root / "manifest.json"
+    manifest = read_manifest(manifest_path)
+    pack_manifest_regions(root, manifest, region_tiles=region_tiles, delete_raw=delete_raw)
+    write_manifest(manifest_path, manifest)
+    console.print(f"[green]Packed tile layers into {region_tiles}x{region_tiles} binary regions.[/green]")
+
+
 @app.command("preview")
 def preview_cmd(
     root: Path,
@@ -471,58 +484,43 @@ def sample(root: Path, x: int = typer.Option(..., "--x"), z: int = typer.Option(
             f"z {world['minecraft_min_z']}..{world['minecraft_max_z']}"
         )
         raise typer.Exit(1) from exc
-    height_path = root / manifest["height"]["path"] / f"{tx:03d}_{tz:03d}{manifest['height'].get('extension', r16_extension())}"
-    height_dm = int(read_r16_tile(height_path, manifest["tile_size"])[lz, lx])
+    height_dm = int(read_layer_tile(root, manifest["height"], tx, tz, manifest["tile_size"])[lz, lx])
     if height_dm == HEIGHT_NODATA:
         console.print("height: nodata")
     else:
         console.print(f"height: {height_dm * 0.1:.1f} m")
     if "surface_geology" in manifest:
         surface = manifest["surface_geology"]
-        path = root / surface["path"] / f"{tx:03d}_{tz:03d}{surface.get('extension', u8_extension())}"
-        if path.exists():
-            class_id = int(read_u8_tile(path, manifest["tile_size"])[lz, lx])
-            meta = surface.get("classes", {}).get(str(class_id), {})
-            console.print(f"surface_geology: {meta.get('name', class_id)} ({class_id})")
+        class_id = int(read_layer_tile(root, surface, tx, tz, manifest["tile_size"])[lz, lx])
+        meta = surface.get("classes", {}).get(str(class_id), {})
+        console.print(f"surface_geology: {meta.get('name', class_id)} ({class_id})")
     if "rivers" in manifest:
         river = manifest["rivers"]
-        path = root / river["path"] / f"{tx:03d}_{tz:03d}{river.get('extension', u8_extension())}"
-        if path.exists():
-            score = int(read_u8_tile(path, manifest["tile_size"])[lz, lx])
-            console.print(f"river: {score}")
+        score = int(read_layer_tile(root, river_u8_layer(river), tx, tz, manifest["tile_size"])[lz, lx])
+        console.print(f"river: {score}")
         if "order_path" in river:
-            path = root / river["order_path"] / f"{tx:03d}_{tz:03d}{river.get('extension', u8_extension())}"
-            if path.exists():
-                order = int(read_u8_tile(path, manifest["tile_size"])[lz, lx])
-                console.print(f"river_order: {order}")
+            order = int(read_layer_tile(root, river_u8_layer(river, "order_path", "order"), tx, tz, manifest["tile_size"])[lz, lx])
+            console.print(f"river_order: {order}")
         if "half_width_path" in river:
-            path = root / river["half_width_path"] / f"{tx:03d}_{tz:03d}{river.get('extension', u8_extension())}"
-            if path.exists():
-                half_width = int(read_u8_tile(path, manifest["tile_size"])[lz, lx])
-                console.print(f"river_half_width: {half_width}")
+            half_width = int(read_layer_tile(root, river_u8_layer(river, "half_width_path", "half_width"), tx, tz, manifest["tile_size"])[lz, lx])
+            console.print(f"river_half_width: {half_width}")
     if "vegetation" in manifest:
         vegetation = manifest["vegetation"]
         cell_blocks = int(vegetation.get("cell_blocks", 1))
         vtx, vtz, vlx, vlz = minecraft_to_layer_cell(x, z, bounds, cell_blocks=cell_blocks)
-        path = root / vegetation["path"] / f"{vtx:03d}_{vtz:03d}{vegetation.get('extension', u8_extension())}"
-        if path.exists():
-            class_id = int(read_u8_tile(path, manifest["tile_size"])[vlz, vlx])
-            meta = vegetation.get("classes", {}).get(str(class_id), {})
-            console.print(f"vegetation: {meta.get('name', class_id)} ({class_id})")
+        class_id = int(read_layer_tile(root, vegetation, vtx, vtz, manifest["tile_size"])[vlz, vlx])
+        meta = vegetation.get("classes", {}).get(str(class_id), {})
+        console.print(f"vegetation: {meta.get('name', class_id)} ({class_id})")
     if "biome_regions" in manifest:
         biome_regions = manifest["biome_regions"]
         cell_blocks = int(biome_regions.get("cell_blocks", 1))
         btx, btz, blx, blz = minecraft_to_layer_cell(x, z, bounds, cell_blocks=cell_blocks)
-        path = root / biome_regions["path"] / f"{btx:03d}_{btz:03d}{biome_regions.get('extension', u8_extension())}"
-        if path.exists():
-            class_id = int(read_u8_tile(path, manifest["tile_size"])[blz, blx])
-            meta = biome_regions.get("classes", {}).get(str(class_id), {})
-            console.print(f"biome_region: {meta.get('name', class_id)} ({class_id})")
+        class_id = int(read_layer_tile(root, biome_regions, btx, btz, manifest["tile_size"])[blz, blx])
+        meta = biome_regions.get("classes", {}).get(str(class_id), {})
+        console.print(f"biome_region: {meta.get('name', class_id)} ({class_id})")
     for ore, layer in manifest.get("ore_layers", {}).items():
-        path = root / layer["path"] / f"{tx:03d}_{tz:03d}{layer.get('extension', u8_extension())}"
-        if path.exists():
-            score = int(read_u8_tile(path, manifest["tile_size"])[lz, lx])
-            console.print(f"{ore}: {score}")
+        score = int(read_layer_tile(root, layer, tx, tz, manifest["tile_size"])[lz, lx])
+        console.print(f"{ore}: {score}")
 
 
 if __name__ == "__main__":
