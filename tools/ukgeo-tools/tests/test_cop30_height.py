@@ -12,6 +12,8 @@ from ukgeo.landmask import _height_overlay_preserve_tile
 from ukgeo.manifest import default_manifest, read_manifest, write_manifest
 from ukgeo.tiles import read_r16_tile, write_r16_tile
 
+BNG_TO_WGS84 = Transformer.from_crs("EPSG:27700", "EPSG:4326", always_xy=True)
+
 
 def test_ireland_iom_target_mask_known_points():
     included = {
@@ -101,6 +103,19 @@ def test_cop30_land_mask_known_points():
         assert bool(cop30_land_mask_lonlat(np.array([[lon]]), np.array([[lat]]), "ireland-iom")[0, 0]), name
     for name, (lon, lat) in excluded.items():
         assert not bool(cop30_land_mask_lonlat(np.array([[lon]]), np.array([[lat]]), "ireland-iom")[0, 0]), name
+
+
+def test_cop30_land_mask_includes_manual_ireland_extension_circles():
+    included_centres_bng = {
+        "NW Ireland cutoff 500 blocks at -12198 -9796": (140_160.0, 594_633.0),
+        "NW Ireland cutoff 250 blocks at -12509 -10335": (132_074.1, 608_647.0),
+        "NW Ireland cutoff 500 blocks at -17346 -10993": (6_313.9, 625_755.0),
+        "NW Ireland cutoff 300 blocks at -15189 -10861": (62_395.1, 622_323.0),
+    }
+
+    for name, (easting, northing) in included_centres_bng.items():
+        lon, lat = BNG_TO_WGS84.transform(easting, northing)
+        assert bool(cop30_land_mask_lonlat(np.array([[lon]]), np.array([[lat]]), "ireland-iom")[0, 0]), name
 
 
 def test_cop30_overlay_writes_target_cells_preserves_nodata_and_metadata(tmp_path):

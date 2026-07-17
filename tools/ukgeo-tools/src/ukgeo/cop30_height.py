@@ -36,6 +36,10 @@ IRELAND_MASK_EXTENSION_CIRCLES_BNG = (
     (-183_652.5, 283_868.0, 9_100.0),   # SW Ireland cutoff near MC (-24652, 2157), 350 blocks
     (-120_083.4, 497_900.0, 39_000.0),  # W Ireland cutoff near MC (-22207, -6075), 1500 blocks
     (-142_053.1, 449_982.0, 13_000.0),  # W Ireland cutoff near MC (-23052, -4232), 500 blocks
+    (140_160.0, 594_633.0, 13_000.0),   # NW Ireland cutoff near MC (-12198, -9796), 500 blocks
+    (132_074.1, 608_647.0, 6_500.0),    # NW Ireland cutoff near MC (-12509, -10335), 250 blocks
+    (6_313.9, 625_755.0, 13_000.0),     # NW Ireland cutoff near MC (-17346, -10993), 500 blocks
+    (62_395.1, 622_323.0, 7_800.0),     # NW Ireland cutoff near MC (-15189, -10861), 300 blocks
 )
 
 
