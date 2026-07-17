@@ -77,6 +77,15 @@ test("webgl renderer source disables browser-managed colour shifts for overlay t
   assert.doesNotMatch(appJs, /outside generated world/);
 });
 
+test("switching from WebGL to 2D replaces the canvas context owner", () => {
+  const appJs = fs.readFileSync(path.join(__dirname, "../site/app.js"), "utf8");
+
+  assert.match(appJs, /function replaceWithCanvasRenderer\(\)/);
+  assert.match(appJs, /previousCanvas\.replaceWith\(canvas\)/);
+  assert.match(appJs, /state\.mapCanvas = canvas;\s*createCanvasRenderer\(canvas\);/);
+  assert.doesNotMatch(appJs, /destroyMapRenderer\(\{ keepCanvas: true \}\);\s*createCanvasRenderer\(state\.mapCanvas\);/);
+});
+
 test("measurement drag uses client coordinates and no longer depends on removed faux scrollbars", () => {
   const appJs = fs.readFileSync(path.join(__dirname, "../site/app.js"), "utf8");
   const indexHtml = fs.readFileSync(path.join(__dirname, "../site/index.html"), "utf8");

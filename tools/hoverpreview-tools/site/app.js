@@ -328,8 +328,7 @@ async function loadManifest(url) {
   installLiveWeatherLayers(manifest);
   if (manifest.live_weather) {
     state.mapRendererFallbackReason = "live-weather-2d";
-    destroyMapRenderer({ keepCanvas: true });
-    createCanvasRenderer(state.mapCanvas);
+    replaceWithCanvasRenderer();
   }
 
   loadAnimalsList(manifest).catch(() => undefined);
@@ -485,12 +484,23 @@ function destroyMapRenderer({ keepCanvas = false } = {}) {
   if (!keepCanvas) state.mapCanvas = null;
 }
 
+function replaceWithCanvasRenderer() {
+  const previousCanvas = state.mapCanvas;
+  if (!previousCanvas) throw new Error("Map canvas unavailable");
+
+  destroyMapRenderer({ keepCanvas: true });
+  const canvas = document.createElement("canvas");
+  canvas.className = previousCanvas.className || "map-canvas";
+  previousCanvas.replaceWith(canvas);
+  state.mapCanvas = canvas;
+  createCanvasRenderer(canvas);
+}
+
 function fallbackToCanvasRenderer(error) {
   if (!state.mapCanvas) return;
   console.warn("[hoverpreview] Falling back to 2D renderer", error);
   state.mapRendererFallbackReason = error?.message || String(error || "webgl-runtime-failure");
-  destroyMapRenderer({ keepCanvas: true });
-  createCanvasRenderer(state.mapCanvas);
+  replaceWithCanvasRenderer();
   if (elements.loadState && state.manifest) {
     elements.loadState.textContent = `Loaded ${(state.manifest.layers || []).length} layers · 2D fallback`;
   }
