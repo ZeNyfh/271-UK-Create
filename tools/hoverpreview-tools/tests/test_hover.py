@@ -17,6 +17,7 @@ from hoverpreview_tools.hover_previews import (
     _save_sample_tiles,
     _save_visual_layer,
 )
+from hoverpreview_tools.weather_overlay import build_weather_overlay_grid
 from ukgeo.manifest import default_manifest, write_manifest
 from ukgeo.tiles import write_r16_tile, write_u8_tile
 
@@ -224,7 +225,7 @@ def test_export_hover_manifest_preserves_height_overlays_and_manifest_bounds(tmp
             write_r16_tile(height_root / f"{tile_x:03d}_{tile_z:03d}.r16", np.full((512, 512), 123, dtype="<i2"))
 
     out = tmp_path / "hoverpreviews"
-    export_hover_previews(root, out, max_size=256, tile_size=128, workers=1)
+    export_hover_previews(root, out, max_size=256, tile_size=128, workers=1, weather_overlay=False)
 
     hover_manifest = json.loads((out / "hover_manifest.json").read_text(encoding="utf-8"))
     assert hover_manifest["world_width"] == 700
@@ -259,7 +260,7 @@ def test_export_hover_previews_includes_animal_layers(tmp_path):
     write_u8_tile(animal_root / "000_000.u8.gz", np.full((512, 512), 255, dtype=np.uint8), 512)
 
     out = tmp_path / "hoverpreviews"
-    export_hover_previews(root, out, max_size=256, tile_size=128, workers=1)
+    export_hover_previews(root, out, max_size=256, tile_size=128, workers=1, weather_overlay=False)
 
     hover_manifest = json.loads((out / "hover_manifest.json").read_text(encoding="utf-8"))
     animal_layers = [layer for layer in hover_manifest["layers"] if layer["kind"] == "animal"]
@@ -277,7 +278,7 @@ def test_export_hover_previews_deploy_minimal_keeps_only_manifest_and_tile_pyram
     write_r16_tile(height_root / "000_000.r16", np.full((512, 512), 123, dtype="<i2"))
 
     out = tmp_path / "hoverpreviews"
-    export_hover_previews(root, out, max_size=256, tile_size=128, workers=1, deploy_minimal=True)
+    export_hover_previews(root, out, max_size=256, tile_size=128, workers=1, deploy_minimal=True, weather_overlay=False)
 
     assert (out / "hover_manifest.json").exists()
     assert (out / "tiles").exists()
@@ -299,7 +300,7 @@ def test_export_hover_previews_normalises_renderer_preference(tmp_path):
     write_r16_tile(height_root / "000_000.r16", np.full((512, 512), 123, dtype="<i2"))
 
     out = tmp_path / "hoverpreviews"
-    export_hover_previews(root, out, max_size=256, tile_size=128, workers=1, renderer="canvas")
+    export_hover_previews(root, out, max_size=256, tile_size=128, workers=1, renderer="canvas", weather_overlay=False)
 
     hover_manifest = json.loads((out / "hover_manifest.json").read_text(encoding="utf-8"))
     assert hover_manifest["viewer"]["renderer_preference"] == "2d"
@@ -312,3 +313,65 @@ def test_resample_visual_to_base_size_scales_visual_overlay():
     scaled = _resample_visual_to_base_size(image, (64, 32), resampling=Image.Resampling.BILINEAR)
 
     assert scaled.size == (64, 32)
+
+
+def test_weather_overlay_grid_uses_manifest_georeferencing():
+    manifest = default_manifest(
+        width=700,
+        depth=1400,
+        tile_size=512,
+        minecraft_min_x=-26050,
+        minecraft_min_z=-36925,
+        bng_min_easting=-220000,
+        bng_min_northing=0,
+        bng_max_easting=650000,
+        bng_max_northing=1300000,
+    )
+
+    grid = build_weather_overlay_grid(manifest, grid_columns=8)
+
+    assert grid.columns == 8
+    assert grid.rows == 16
+    assert len(grid.latitudes) == 128
+    assert len(grid.longitudes) == 128
+    assert min(grid.longitudes) < max(grid.longitudes)
+    assert min(grid.latitudes) < max(grid.latitudes)
+
+
+def test_export_hover_previews_writes_live_weather_query_metadata(tmp_path):
+    root = tmp_path / "world"
+    height_root = root / "height"
+    height_root.mkdir(parents=True)
+    manifest = default_manifest(
+        width=512,
+        depth=512,
+        tile_size=512,
+        bng_min_easting=-220000,
+        bng_min_northing=0,
+        bng_max_easting=650000,
+        bng_max_northing=1300000,
+    )
+    write_manifest(root / "manifest.json", manifest)
+    write_r16_tile(height_root / "000_000.r16", np.full((512, 512), 123, dtype="<i2"))
+
+    out = tmp_path / "hoverpreviews"
+    export_hover_previews(
+        root,
+        out,
+        max_size=256,
+        tile_size=128,
+        workers=1,
+        weather_overlay=True,
+    )
+
+    hover_manifest = json.loads((out / "hover_manifest.json").read_text(encoding="utf-8"))
+    assert "live_weather" in hover_manifest
+    assert hover_manifest["live_weather"]["provider"] == "Open-Meteo"
+    assert hover_manifest["live_weather"]["metrics"]["cloud_cover"]["unit"] == "percent"
+    assert hover_manifest["live_weather"]["metrics"]["downfall_coverage"]["source"] == "hourly.precipitation_probability[0]"
+    assert hover_manifest["live_weather"]["grid"]["rows"] >= 2
+    assert hover_manifest["live_weather"]["grid"]["columns"] >= 2
+    assert len(hover_manifest["live_weather"]["grid"]["latitudes"]) == (
+        hover_manifest["live_weather"]["grid"]["rows"] * hover_manifest["live_weather"]["grid"]["columns"]
+    )
+    assert [layer for layer in hover_manifest["layers"] if layer["kind"] == "weather"] == []

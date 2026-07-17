@@ -1,8 +1,17 @@
-#!/usr/bin/env sh
-set -eu
+#!/usr/bin/env bash
+set -euo pipefail
 
-JAVA_DIR="${JAVA_DIR:-$HOME/.jdks/temurin-21.0.11}"
-export JAVA_HOME="$JAVA_DIR"
-export PATH="$JAVA_HOME/bin:$PATH"
+MOD_DIR="/media/zenyfh/GoodHDD/Games/Minecraft/Instances/UK Create (1)/mods"
+LOCAL_JAVA="${JAVA_DIR:-$HOME/.jdks/temurin-21.0.11}"
+if [ -x "$LOCAL_JAVA/bin/java" ]; then
+    export JAVA_HOME="$LOCAL_JAVA"
+    export PATH="$JAVA_HOME/bin:$PATH"
+fi
 
-./gradlew build
+cd "$(dirname "$0")"
+./gradlew clean build
+
+JAR="$(ls -t build/libs/*.jar | head -n 1)"
+rm -f "$MOD_DIR"/realtime_localised_weather-*.jar
+cp -f "$JAR" "$MOD_DIR/"
+echo "Copied $(basename "$JAR") -> $MOD_DIR/"

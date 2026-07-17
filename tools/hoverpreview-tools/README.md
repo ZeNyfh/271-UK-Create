@@ -101,6 +101,16 @@ tile templates, sample tile templates, and sample encodings. Newer browser code
 uses that metadata instead of hardcoding paths; older exports still fall back to
 full/cropped sample images where tile metadata is missing.
 
+By default the exporter also writes static metadata that the browser can use to
+fetch live Open-Meteo weather overlays:
+
+- `Cloud cover`
+- `Downfall coverage` (from Open-Meteo precipitation probability for the current forecast hour)
+
+The browser fetches those overlays at runtime using the exported UKGeo
+georeferencing-derived WGS84 query grid. The site remains static; weather does
+not require regenerating tile pyramids.
+
 ## Optional GPU rendering
 
 The exporter can use an NVIDIA GPU for the large per-pixel preview rendering
@@ -119,6 +129,15 @@ For browser rendering, set `generate.HOVERPREVIEW_RENDERER` in
 [config.yml](/home/zenyfh/Documents/GitHub/mapcreator/tools/hoverpreview-tools/config.yml).
 `auto` is the default and prefers WebGL while falling back to the previous 2D
 canvas renderer if WebGL is unavailable or fails at runtime.
+
+Live weather metadata controls also live in `generate` inside `config.yml`:
+
+- `HOVERPREVIEW_WEATHER_ENABLED`
+- `HOVERPREVIEW_WEATHER_API_BASE_URL`
+- `HOVERPREVIEW_WEATHER_MODEL`
+- `HOVERPREVIEW_WEATHER_TIMEOUT_SECONDS`
+- `HOVERPREVIEW_WEATHER_GRID_COLUMNS`
+- `HOVERPREVIEW_WEATHER_BATCH_POINTS`
 
 ## Publish from the repository root
 

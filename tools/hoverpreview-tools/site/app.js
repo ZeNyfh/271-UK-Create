@@ -39,6 +39,7 @@ const PINCH_MIN_DISTANCE = 8;
 const SAMPLE_CROP_SIZE = 512;
 const DEFAULT_RENDERER_PREFERENCE = "auto";
 const FIT_VIEW_PADDING_PX = 72;
+const LIVE_WEATHER_REFRESH_MS = 15 * 60 * 1000;
 const RenderMath = globalThis.HoverRenderMath || {};
 const BACKGROUND_ORE_ATTEMPT_MULTIPLIER = 0.1;
 const ORE_AREA_ATTEMPT_MULTIPLIER = 3.0;
@@ -137,6 +138,12 @@ const state = {
   pinchStartImageX: null,
   pinchStartImageY: null,
   lastStatusPoint: null,
+  liveWeather: {
+    timer: 0,
+    loading: false,
+    cloud_cover: null,
+    downfall_coverage: null,
+  },
 };
 
 elements.zoomIn.addEventListener("click", (event) => stepZoomAroundCentre(1, event.shiftKey));
@@ -286,6 +293,7 @@ async function loadManifest(url) {
   state.animals.clear();
   state.animalsLoaded = false;
   state.animalsLoadError = null;
+  resetLiveWeatherState();
   clearBitmapCaches();
   destroyMapRenderer();
   clearMeasurement();
@@ -302,14 +310,26 @@ async function loadManifest(url) {
   for (const layer of manifest.layers || []) {
     addLayer(layer);
   }
+  installLiveWeatherLayers(manifest);
+  if (manifest.live_weather) {
+    state.mapRendererFallbackReason = "live-weather-2d";
+    destroyMapRenderer({ keepCanvas: true });
+    createCanvasRenderer(state.mapCanvas);
+    fetchLiveWeather(manifest).catch((error) => {
+      console.warn("[hoverpreview] Live weather fetch failed", error);
+      refreshStatus();
+    });
+  }
 
   loadAnimalsList(manifest).catch(() => undefined);
 
   elements.empty.hidden = true;
   fitView();
   if (elements.loadState) {
+    const staticCount = (manifest.layers || []).length;
+    const liveCount = manifest.live_weather ? 2 : 0;
     const suffix = state.mapRendererMode === "webgl" ? " · WebGL" : state.mapRendererFallbackReason ? " · 2D fallback" : " · 2D";
-    elements.loadState.textContent = `Loaded ${(manifest.layers || []).length} layers${suffix}`;
+    elements.loadState.textContent = `Loaded ${staticCount + liveCount} layers${suffix}`;
   }
   setStatus(START_STATUS);
 }
@@ -481,10 +501,29 @@ function addLayer(layer) {
   controls.append(toggleFor(layer, enabled));
 }
 
+function installLiveWeatherLayers(manifest) {
+  if (!manifest?.live_weather?.grid?.latitudes?.length) return;
+  addLayer({
+    name: "cloud_cover",
+    kind: "weather-live",
+    label: "Cloud cover",
+    value_format: "percent",
+    live_weather_metric: "cloud_cover",
+  });
+  addLayer({
+    name: "downfall_coverage",
+    kind: "weather-live",
+    label: "Downfall coverage",
+    value_format: "percent",
+    live_weather_metric: "downfall_coverage",
+  });
+}
+
 function isLayerVisibleByDefault(layer) {
   if (layer.kind === "base") return true;
   if (layer.kind === "ore") return DEFAULT_VISIBLE_ORES.has(layer.ore || labelFor(layer.name));
   if (layer.kind === "animal") return false;
+  if (layer.kind === "weather-live") return false;
   return DEFAULT_VISIBLE_OVERLAYS.has(layer.name);
 }
 
@@ -952,6 +991,10 @@ function renderViewport() {
     state.activeLayerBitmapKeys = activeBitmapKeys;
     for (const entry of state.layers.values()) {
       if (!entry.enabled) continue;
+      if (entry.layer.kind === "weather-live") {
+        drawLiveWeatherLayer(entry.layer, crop);
+        continue;
+      }
       const mip = chooseMip(entry.layer);
       const fallback = fallbackLayerRegion(entry.layer, crop, mip);
       if (fallback) {
@@ -986,6 +1029,24 @@ function renderViewport() {
     }
     throw error;
   }
+}
+
+function drawLiveWeatherLayer(layer, crop) {
+  if (state.mapRendererMode !== "2d") return;
+  const ctx = state.mapCtx;
+  const live = state.liveWeather[layer.live_weather_metric];
+  if (!ctx || !live?.canvas) return;
+  const drawCrop = { left: crop.left, top: crop.top, right: crop.right, bottom: crop.bottom };
+  const sx = drawCrop.left * live.canvas.width / state.imageWidth;
+  const sy = drawCrop.top * live.canvas.height / state.imageHeight;
+  const sw = (drawCrop.right - drawCrop.left) * live.canvas.width / state.imageWidth;
+  const sh = (drawCrop.bottom - drawCrop.top) * live.canvas.height / state.imageHeight;
+  const dx = state.offsetX + drawCrop.left * state.zoom;
+  const dy = state.offsetY + drawCrop.top * state.zoom;
+  const dw = (drawCrop.right - drawCrop.left) * state.zoom;
+  const dh = (drawCrop.bottom - drawCrop.top) * state.zoom;
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(live.canvas, sx, sy, sw, sh, dx, dy, dw, dh);
 }
 
 function prepareRendererFrame(rect, dpr) {
@@ -1587,7 +1648,7 @@ function statusDetails(sample) {
     } else if (entry.layer.kind === "animal") {
       continue;
     } else {
-      const label = classLabel(entry.layer.name, value);
+      const label = overlayValueLabel(entry.layer, value);
       if (entry.enabled) overlays.push(`${labelFor(entry.layer.name)}: ${label}`);
 
       // Animal lookup must not depend on the overlay being visible. Use the
@@ -1718,6 +1779,125 @@ function formatMultiplier(multiplier) {
 function classLabel(layerName, value) {
   const info = classInfoFor(layerName, value);
   return info?.name || info?.label || info?.id || info?.key || String(value);
+}
+
+function overlayValueLabel(layer, value) {
+  if (layer?.value_format === "percent") {
+    return `${Math.round(Number(value) || 0)}%`;
+  }
+  return classLabel(layer?.name || "", value);
+}
+
+function resetLiveWeatherState() {
+  if (state.liveWeather.timer) {
+    window.clearTimeout(state.liveWeather.timer);
+  }
+  state.liveWeather = {
+    timer: 0,
+    loading: false,
+    cloud_cover: null,
+    downfall_coverage: null,
+  };
+}
+
+async function fetchLiveWeather(manifest) {
+  const config = manifest?.live_weather;
+  const grid = config?.grid;
+  if (!config || !grid?.latitudes?.length || !grid?.longitudes?.length) return;
+  if (state.liveWeather.loading) return;
+  state.liveWeather.loading = true;
+  try {
+    const payloads = await fetchOpenMeteoWeather(config);
+    const metrics = decodeLiveWeatherMetrics(config, payloads);
+    state.liveWeather.cloud_cover = createLiveWeatherMetric("cloud_cover", metrics.cloud_cover, grid.columns, grid.rows);
+    state.liveWeather.downfall_coverage = createLiveWeatherMetric("downfall_coverage", metrics.downfall_coverage, grid.columns, grid.rows);
+    scheduleRender();
+    refreshStatus();
+  } finally {
+    state.liveWeather.loading = false;
+    if (state.liveWeather.timer) window.clearTimeout(state.liveWeather.timer);
+    state.liveWeather.timer = window.setTimeout(() => {
+      fetchLiveWeather(manifest).catch((error) => console.warn("[hoverpreview] Live weather refresh failed", error));
+    }, LIVE_WEATHER_REFRESH_MS);
+  }
+}
+
+async function fetchOpenMeteoWeather(config) {
+  const baseUrl = String(config.api_base_url || "https://api.open-meteo.com/v1/forecast");
+  const model = String(config.weather_model || "auto").trim();
+  const batchPoints = Math.max(1, Number(config.batch_points) || 64);
+  const latitudes = Array.from(config.grid.latitudes || [], (value) => Number(value));
+  const longitudes = Array.from(config.grid.longitudes || [], (value) => Number(value));
+  const results = [];
+  for (let start = 0; start < latitudes.length; start += batchPoints) {
+    const batchLatitudes = latitudes.slice(start, start + batchPoints);
+    const batchLongitudes = longitudes.slice(start, start + batchPoints);
+    const url = new URL(baseUrl, location.href);
+    url.searchParams.set("latitude", batchLatitudes.map((value) => value.toFixed(6)).join(","));
+    url.searchParams.set("longitude", batchLongitudes.map((value) => value.toFixed(6)).join(","));
+    url.searchParams.set("current", "cloud_cover");
+    url.searchParams.set("hourly", "precipitation_probability");
+    url.searchParams.set("forecast_hours", "1");
+    url.searchParams.set("timezone", "GMT");
+    url.searchParams.set("timeformat", "unixtime");
+    if (model && model.toLowerCase() !== "auto") {
+      url.searchParams.set("models", model);
+    }
+    const response = await fetch(url.href, { cache: "no-store" });
+    if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+    const payload = await response.json();
+    if (!Array.isArray(payload)) throw new Error(`Expected Open-Meteo multi-location response array, got ${typeof payload}`);
+    results.push(...payload);
+  }
+  return results;
+}
+
+function decodeLiveWeatherMetrics(config, payloads) {
+  const total = Number(config?.grid?.rows) * Number(config?.grid?.columns);
+  const cloud = new Uint8Array(total);
+  const downfall = new Uint8Array(total);
+  payloads.forEach((location, index) => {
+    const current = location?.current || {};
+    const hourly = location?.hourly || {};
+    const probabilities = Array.isArray(hourly.precipitation_probability) ? hourly.precipitation_probability : [];
+    cloud[index] = clampPercent(current.cloud_cover);
+    downfall[index] = clampPercent(probabilities.length ? probabilities[0] : 0);
+  });
+  return { cloud_cover: cloud, downfall_coverage: downfall };
+}
+
+function clampPercent(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return 0;
+  return Math.max(0, Math.min(100, Math.round(number)));
+}
+
+function createLiveWeatherMetric(metricName, values, columns, rows) {
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, columns);
+  canvas.height = Math.max(1, rows);
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  const imageData = ctx.createImageData(canvas.width, canvas.height);
+  for (let index = 0; index < values.length; index += 1) {
+    const base = index * 4;
+    const value = values[index];
+    if (metricName === "cloud_cover") {
+      const shade = Math.round(232 - (232 - 108) * (value / 100));
+      const alpha = Math.round(176 * (value / 100));
+      imageData.data[base + 0] = shade;
+      imageData.data[base + 1] = shade;
+      imageData.data[base + 2] = shade;
+      imageData.data[base + 3] = alpha;
+    } else {
+      const alpha = Math.round(208 * (value / 100));
+      imageData.data[base + 0] = 76;
+      imageData.data[base + 1] = 148;
+      imageData.data[base + 2] = 255;
+      imageData.data[base + 3] = alpha;
+    }
+  }
+  ctx.putImageData(imageData, 0, 0);
+  return { metricName, values, columns, rows, canvas };
 }
 
 function animalsListUrls(manifest) {
@@ -2243,6 +2423,16 @@ function samplePixel(layerName, imageX, imageY) {
 
 function samplePixelRgba(layerName, imageX, imageY) {
   const entry = state.layers.get(layerName);
+  if (entry?.layer?.kind === "weather-live") {
+    const live = state.liveWeather[entry.layer.live_weather_metric];
+    if (!live || !Number.isFinite(imageX) || !Number.isFinite(imageY)) return undefined;
+    const x = Math.max(0, Math.min(state.imageWidth - 1, Math.floor(imageX)));
+    const y = Math.max(0, Math.min(state.imageHeight - 1, Math.floor(imageY)));
+    const column = Math.max(0, Math.min(live.columns - 1, Math.floor(x * live.columns / Math.max(1, state.imageWidth))));
+    const row = Math.max(0, Math.min(live.rows - 1, Math.floor(y * live.rows / Math.max(1, state.imageHeight))));
+    const value = live.values[row * live.columns + column];
+    return [value, 0, 0, 255];
+  }
   if (entry?.layer?.sample_tiles) {
     const tileInfo = sampleTileFor(entry.layer, imageX, imageY);
     if (!tileInfo) return undefined;

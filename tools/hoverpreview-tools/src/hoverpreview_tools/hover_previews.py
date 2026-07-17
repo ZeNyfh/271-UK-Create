@@ -20,6 +20,7 @@ from ukgeo.config import get_config_value
 from ukgeo.manifest import read_manifest
 from ukgeo.preview import ORE_COLORS, _height_image as _cpu_height_image, _hex_color, _read_height_preview, _read_u8_preview, read_cell_u8_preview, read_vegetation_preview
 from ukgeo.tiles import HEIGHT_NODATA
+from .weather_overlay import DEFAULT_OPEN_METEO_BASE_URL, build_weather_overlay_grid
 
 
 HOVER_PREVIEW_FORMAT = "ukgeo-hoverpreviews-v1"
@@ -53,6 +54,12 @@ ANIMAL_LAYER_COLORS: dict[str, tuple[int, int, int]] = {
     "minecraft:fox": (191, 72, 49),
 }
 
+CLOUD_OVERLAY_MIN_SHADE = 108
+CLOUD_OVERLAY_MAX_SHADE = 232
+CLOUD_OVERLAY_MAX_ALPHA = 176
+DOWNFALL_OVERLAY_COLOR = (76, 148, 255)
+DOWNFALL_OVERLAY_MAX_ALPHA = 208
+
 
 @dataclass(frozen=True)
 class DiskRaster:
@@ -67,6 +74,22 @@ class DiskRaster:
 def _hoverpreview_gpu_mode() -> str:
     config_path = Path(__file__).resolve().parents[2] / "config.yml"
     return str(get_config_value(config_path, "runtime.HOVERPREVIEW_GPU", "auto")).strip().lower()
+
+
+def _weather_overlay_settings() -> dict[str, Any]:
+    config_path = Path(__file__).resolve().parents[2] / "config.yml"
+    return {
+        "enabled": bool(get_config_value(config_path, "generate.HOVERPREVIEW_WEATHER_ENABLED", True)),
+        "api_base_url": str(get_config_value(config_path, "generate.HOVERPREVIEW_WEATHER_API_BASE_URL", DEFAULT_OPEN_METEO_BASE_URL)).strip(),
+        "weather_model": str(get_config_value(config_path, "generate.HOVERPREVIEW_WEATHER_MODEL", "auto")).strip(),
+        "timeout_seconds": float(get_config_value(config_path, "generate.HOVERPREVIEW_WEATHER_TIMEOUT_SECONDS", 20)),
+        "grid_columns": max(2, int(get_config_value(config_path, "generate.HOVERPREVIEW_WEATHER_GRID_COLUMNS", 32))),
+        "batch_points": max(1, int(get_config_value(config_path, "generate.HOVERPREVIEW_WEATHER_BATCH_POINTS", 64))),
+    }
+
+
+def _weather_overlay_enabled() -> bool:
+    return bool(_weather_overlay_settings()["enabled"])
 
 
 def hover_preview_scale(manifest: dict[str, Any], max_size: int) -> tuple[int, int, int]:
@@ -118,6 +141,7 @@ def export_hover_previews(
     write_full_images: bool = False,
     tile_batch_rows: int = DEFAULT_TILE_BATCH_ROWS,
     progress: Callable[[str], None] | None = None,
+    weather_overlay: bool | None = None,
 ) -> Path:
     manifest = read_manifest(root / "manifest.json")
     source_tile_size = int(manifest["tile_size"])
@@ -128,6 +152,7 @@ def export_hover_previews(
         raise ValueError(f"Unsupported visual format {visual_format!r}; expected one of {sorted(SUPPORTED_VISUAL_FORMATS)}")
     renderer = _validate_renderer(renderer)
     tile_batch_rows = max(1, int(tile_batch_rows))
+    weather_overlay = _weather_overlay_enabled() if weather_overlay is None else bool(weather_overlay)
     scale, tiles_x, tiles_z = hover_preview_scale(manifest, max_size)
     timings: list[tuple[str, float]] = []
 
@@ -590,6 +615,8 @@ def export_hover_previews(
         },
         "layers": layers,
     }
+    if weather_overlay:
+        index["live_weather"] = _live_weather_manifest(manifest)
     index["generation"] = {
         "tile_size": preview_tile_size,
         "workers": encoder_workers,
@@ -616,6 +643,166 @@ def export_hover_previews(
         for step, seconds in timings:
             print(f"{step}: {seconds:.3f}s")
     return out
+
+
+def _live_weather_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
+    settings = _weather_overlay_settings()
+    grid = build_weather_overlay_grid(manifest, grid_columns=settings["grid_columns"])
+    return {
+        "provider": "Open-Meteo",
+        "api_base_url": settings["api_base_url"],
+        "weather_model": settings["weather_model"],
+        "timeout_seconds": settings["timeout_seconds"],
+        "batch_points": settings["batch_points"],
+        "metrics": {
+            "cloud_cover": {"unit": "percent", "source": "current.cloud_cover"},
+            "downfall_coverage": {"unit": "percent", "source": "hourly.precipitation_probability[0]"},
+        },
+        "grid": {
+            "rows": grid.rows,
+            "columns": grid.columns,
+            "latitudes": list(grid.latitudes),
+            "longitudes": list(grid.longitudes),
+        },
+    }
+
+
+def _export_weather_overlay_layers(
+    manifest: dict[str, Any],
+    out: Path,
+    base_size: tuple[int, int],
+    *,
+    preview_tile_size: int,
+    visual_format: str,
+    encoder_workers: int,
+    force: bool,
+    tile_batch_rows: int,
+    write_full_images: bool,
+    layers: list[dict[str, Any]],
+    fetcher: Callable[..., WeatherOverlaySnapshot],
+) -> dict[str, Any]:
+    settings = _weather_overlay_settings()
+    grid = build_weather_overlay_grid(manifest, grid_columns=settings["grid_columns"])
+    snapshot = fetcher(
+        grid,
+        api_base_url=settings["api_base_url"],
+        weather_model=settings["weather_model"],
+        timeout_seconds=settings["timeout_seconds"],
+        batch_points=settings["batch_points"],
+    )
+    cloud_layer = _export_numeric_weather_layer(
+        out,
+        values=snapshot.cloud_cover,
+        base_size=base_size,
+        layer_name="cloud_cover",
+        label="Cloud cover",
+        preview_tile_size=preview_tile_size,
+        visual_format=visual_format,
+        encoder_workers=encoder_workers,
+        force=force,
+        tile_batch_rows=tile_batch_rows,
+        write_full_images=write_full_images,
+        render_visual=_render_cloud_overlay_raster,
+    )
+    downfall_layer = _export_numeric_weather_layer(
+        out,
+        values=snapshot.downfall_coverage,
+        base_size=base_size,
+        layer_name="downfall_coverage",
+        label="Downfall coverage",
+        preview_tile_size=preview_tile_size,
+        visual_format=visual_format,
+        encoder_workers=encoder_workers,
+        force=force,
+        tile_batch_rows=tile_batch_rows,
+        write_full_images=write_full_images,
+        render_visual=_render_downfall_overlay_raster,
+    )
+    layers.extend([cloud_layer, downfall_layer])
+    return {
+        "provider": "Open-Meteo",
+        "api_base_url": snapshot.api_base_url,
+        "weather_model": snapshot.weather_model,
+        "grid_rows": snapshot.grid_rows,
+        "grid_columns": snapshot.grid_columns,
+        "cloud_cover": {
+            "metric": "cloud_cover",
+            "unit": "percent",
+            "observed_at_unix": snapshot.cloud_observed_at_unix,
+        },
+        "downfall_coverage": {
+            "metric": "precipitation_probability",
+            "unit": "percent",
+            "observed_at_unix": snapshot.downfall_observed_at_unix,
+        },
+    }
+
+
+def _export_numeric_weather_layer(
+    out: Path,
+    *,
+    values: np.ndarray,
+    base_size: tuple[int, int],
+    layer_name: str,
+    label: str,
+    preview_tile_size: int,
+    visual_format: str,
+    encoder_workers: int,
+    force: bool,
+    tile_batch_rows: int,
+    write_full_images: bool,
+    render_visual: Callable[[np.ndarray, DiskRaster], None],
+) -> dict[str, Any]:
+    with tempfile.TemporaryDirectory(prefix=f"hoverpreview-{layer_name}-", dir=out) as temp_dir_name:
+        temp_dir = Path(temp_dir_name)
+        sample_source = _create_disk_raster(temp_dir / f"{layer_name}.sample.source.bin", (values.shape[1], values.shape[0]), "L")
+        _render_fitted_u8_sample_raster(values.astype(np.uint8), sample_source)
+        sample = _resize_disk_raster(sample_source, temp_dir / f"{layer_name}.sample.bin", base_size, Image.Resampling.BILINEAR)
+
+        visual_source = _create_disk_raster(temp_dir / f"{layer_name}.visual.source.bin", (values.shape[1], values.shape[0]), "RGBA")
+        render_visual(values.astype(np.uint8), visual_source)
+        visual = _resize_disk_raster(visual_source, temp_dir / f"{layer_name}.visual.bin", base_size, Image.Resampling.BILINEAR)
+
+        mips = _save_visual_raster_layer(
+            out,
+            visual,
+            f"layers/weather/{layer_name}",
+            tile_size=preview_tile_size,
+            visual_format=visual_format,
+            workers=encoder_workers,
+            force=force,
+            resampling=Image.Resampling.BILINEAR,
+            tile_batch_rows=tile_batch_rows,
+            write_full_images=write_full_images,
+        )
+        sample_file = f"samples/weather/{layer_name}_u8.png" if write_full_images else None
+        if write_full_images and sample_file is not None:
+            _save_disk_raster_image(out / sample_file, sample, "png", force=force)
+        sample_tiles = _save_sample_raster_tiles(
+            out,
+            sample,
+            f"samples/weather/{layer_name}_u8.png",
+            tile_size=preview_tile_size,
+            encoding="u8",
+            workers=encoder_workers,
+            force=force,
+            tile_batch_rows=tile_batch_rows,
+        )
+        _delete_disk_raster(sample_source)
+        _delete_disk_raster(sample)
+        _delete_disk_raster(visual_source)
+        _delete_disk_raster(visual)
+
+    return {
+        "name": layer_name,
+        "kind": "weather",
+        "label": label,
+        "value_format": "percent",
+        "file": mips[0].get("file"),
+        "mips": mips,
+        "sample_file": sample_file,
+        "sample_tiles": sample_tiles,
+    }
 
 
 def _create_disk_raster(path: Path, size: tuple[int, int], mode: str) -> DiskRaster:
@@ -847,6 +1034,44 @@ def _render_animal_overlay_raster(values: np.ndarray, entity_id: str, raster: Di
         view = array[:height, :width]
         view[:, :, :3] = np.array(_animal_overlay_color(entity_id), dtype=np.uint8)
         view[:, :, 3] = np.clip(score * 168, 0, 196).astype(np.uint8)
+        array.flush()
+    finally:
+        del array
+
+
+def _render_cloud_overlay_raster(values: np.ndarray, raster: DiskRaster) -> None:
+    array = _open_disk_raster(raster, write=True)
+    try:
+        array[...] = 0
+        height = min(values.shape[0], raster.height)
+        width = min(values.shape[1], raster.width)
+        coverage = np.clip(values[:height, :width].astype(np.float32) / 100.0, 0.0, 1.0)
+        shade = CLOUD_OVERLAY_MAX_SHADE - (CLOUD_OVERLAY_MAX_SHADE - CLOUD_OVERLAY_MIN_SHADE) * coverage
+        alpha = np.clip(coverage * CLOUD_OVERLAY_MAX_ALPHA, 0, CLOUD_OVERLAY_MAX_ALPHA).astype(np.uint8)
+        view = array[:height, :width]
+        gray = np.clip(shade, 0, 255).astype(np.uint8)
+        view[:, :, 0] = gray
+        view[:, :, 1] = gray
+        view[:, :, 2] = gray
+        view[:, :, 3] = alpha
+        array.flush()
+    finally:
+        del array
+
+
+def _render_downfall_overlay_raster(values: np.ndarray, raster: DiskRaster) -> None:
+    array = _open_disk_raster(raster, write=True)
+    try:
+        array[...] = 0
+        height = min(values.shape[0], raster.height)
+        width = min(values.shape[1], raster.width)
+        probability = np.clip(values[:height, :width].astype(np.float32) / 100.0, 0.0, 1.0)
+        alpha = np.clip(probability * DOWNFALL_OVERLAY_MAX_ALPHA, 0, DOWNFALL_OVERLAY_MAX_ALPHA).astype(np.uint8)
+        view = array[:height, :width]
+        view[:, :, 0] = DOWNFALL_OVERLAY_COLOR[0]
+        view[:, :, 1] = DOWNFALL_OVERLAY_COLOR[1]
+        view[:, :, 2] = DOWNFALL_OVERLAY_COLOR[2]
+        view[:, :, 3] = alpha
         array.flush()
     finally:
         del array

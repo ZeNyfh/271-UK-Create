@@ -23,6 +23,7 @@ def _progress_label(step: str) -> str:
         "height": "Generating height layer",
         "surface": "Generating surface layer",
         "vegetation": "Generating vegetation layer",
+        "weather": "Generating weather overlay layers",
         "rivers": "Generating river layer",
         "manifest": "Writing hover manifest",
     }

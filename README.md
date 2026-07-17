@@ -24,6 +24,7 @@ This is not a single mod. It is a workspace with data tools, a static map site, 
 | Path                       | Purpose                                                                           |
 |----------------------------|-----------------------------------------------------------------------------------|
 | `mods/ukgeo`               | Main worldgen/runtime mod for the 271 UK Create map.                              |
+| `mods/realtime-localised-weather` | Required client/server UKGeo weather replacement driven by Open-Meteo regional data. |
 | `mods/ukgeo-animals`       | Animal habitat integration for UKGeo/WilderNature spawning.                       |
 | `mods/animalhunger`        | Persistent animal hunger, trough feeding, grazing, and optional Jade integration. |
 | `mods/foodspoilage`        | Dynamic food spoilage.                                                            |
@@ -202,6 +203,9 @@ The root-level [build.sh](build.sh) is narrower: it builds `mods/ukgeo` and copi
 - `mods/ukgeo-animals`
   - depends on `ukgeo`
   - integrates habitat data with spawning
+- `mods/realtime-localised-weather`
+  - depends on `ukgeo`
+  - adds required regional live/manual/vanilla weather authority for UKGeo worlds
 - `mods/createenginebalance`
   - depends on Create + Create Diesel Generators
 
