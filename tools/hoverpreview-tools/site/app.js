@@ -267,8 +267,13 @@ window.addEventListener("resize", () => {
 });
 
 loadManifest(defaultManifest()).catch((error) => {
+  console.error("[hoverpreview] Viewer initialisation failed", error);
   if (elements.loadState) elements.loadState.textContent = "Preview data not found";
-  if (elements.empty) elements.empty.hidden = false;
+  if (elements.empty) {
+    elements.empty.hidden = false;
+    const detail = elements.empty.querySelector("[data-load-error]");
+    if (detail) detail.textContent = `Error: ${error?.message || String(error)}`;
+  }
   setStatus(`No hover preview found at ${defaultManifest()}: ${error.message}`);
 });
 
@@ -309,7 +314,12 @@ async function loadManifest(url) {
   elements.stack.append(state.mapCanvas);
   setupMapRenderer(state.mapCanvas, manifest);
 
-  const liveWeatherConfig = resolveLiveWeatherConfig(manifest);
+  let liveWeatherConfig = null;
+  try {
+    liveWeatherConfig = resolveLiveWeatherConfig(manifest);
+  } catch (error) {
+    console.warn("[hoverpreview] Live weather metadata could not be derived; continuing without weather overlays", error);
+  }
   if (liveWeatherConfig) manifest.live_weather = liveWeatherConfig;
 
   for (const layer of manifest.layers || []) {

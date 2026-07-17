@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>UKGeo Hover Map</title>
-  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="styles.css?v=20260717-1" />
 </head>
 <body data-default-manifest="../../ukgeo-tools/uk_world_data_gb/hoverpreviews/hover_manifest.json">
   <div class="app-shell">
@@ -40,15 +40,15 @@
         <div id="map-stack" class="map-stack"></div>
         <div id="empty-state" class="empty-state" hidden>
           <h1>Map data unavailable</h1>
-          <p>The UKGeo preview manifest could not be loaded.</p>
-          <p>Refresh the page to try again.</p>
+          <p>The UKGeo map viewer could not be initialised.</p>
+          <p data-load-error>Refresh the page to try again.</p>
         </div>
       </div>
     </main>
   </div>
   <output id="status" class="status" aria-live="polite">Mouse wheel zooms. Middle/right drag pans. Left drag measures distance. Left click copies the current Minecraft coordinates.</output>
 
-  <script src="render_math.js" defer></script>
-  <script src="app.js" defer></script>
+  <script src="render_math.js?v=20260717-1" defer></script>
+  <script src="app.js?v=20260717-1" defer></script>
 </body>
 </html>

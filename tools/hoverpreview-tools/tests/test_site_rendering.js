@@ -99,6 +99,8 @@ test("published root page includes the current hover map shell", () => {
   assert.match(rootIndexHtml, /id="animal-controls"/);
   assert.match(rootIndexHtml, /id="empty-state" class="empty-state" hidden/);
   assert.doesNotMatch(rootIndexHtml, /standalone file is not the supported local entrypoint/);
+  assert.match(rootIndexHtml, /app\.js\?v=\d{8}-\d+/);
+  assert.match(rootIndexHtml, /styles\.css\?v=\d{8}-\d+/);
   assert.match(rootIndexHtml, /render_math\.js/);
   assert.doesNotMatch(rootIndexHtml, /scrollbar scrollbar-[xy]/);
   assert.match(rootIndexHtml, /Left drag measures distance/);
@@ -121,6 +123,8 @@ test("live weather controls work with older manifests and fetch Open-Meteo", () 
   assert.match(appJs, /label: "Rain \/ precipitation"/);
   assert.match(appJs, /input\.checked && layer\.kind === "weather-live"/);
   assert.doesNotMatch(appJs, /createCanvasRenderer\(state\.mapCanvas\);\s*fetchLiveWeather\(manifest\)/);
+  assert.match(appJs, /Viewer initialisation failed/);
+  assert.match(appJs, /continuing without weather overlays/);
 });
 
 test("site fit view uses the full exported image and treats outside-height ocean as y=62", () => {
