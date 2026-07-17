@@ -3,6 +3,7 @@ package com.ukgeo.worldgen;
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.MapCodec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
+import com.ukgeo.worldgen.geo.UkGeoReference;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -2200,6 +2201,11 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
             data.biomeRegionLayer == null ? "none" : "loaded",
             data.height.cacheStats()
         );
+    }
+
+    public Optional<UkGeoReference> reference() {
+        RuntimeData data = data();
+        return data == null ? Optional.empty() : Optional.of(data.manifest.toReference());
     }
 
     public Map<String, Integer> sampleOres(int x, int z) {

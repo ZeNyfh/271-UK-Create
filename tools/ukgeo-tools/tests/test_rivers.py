@@ -4,7 +4,18 @@ import geopandas as gpd
 import numpy as np
 from shapely.geometry import LineString, MultiLineString
 
-from ukgeo.rivers import _Edge, _coerce_source_order, _dataset_half_width, _extract_lines, _normalize_computed_order_to_source_scale, _thin_top_order_half_widths
+from ukgeo.rivers import (
+    _Edge,
+    _coerce_source_order,
+    _dataset_half_width,
+    _extract_lines,
+    _irish_preview_radius_for_order,
+    _normalize_computed_order_to_source_scale,
+    _preview_radius_for_edge,
+    _preview_radius_for_half_width,
+    _preview_radius_for_order,
+    _thin_top_order_half_widths,
+)
 
 
 def test_coerce_source_order_rejects_missing_or_non_positive_values():
@@ -145,3 +156,31 @@ def test_normalize_computed_order_to_source_scale_compresses_to_source_max():
     assert _normalize_computed_order_to_source_scale(6, 8, 7) == 5
     assert _normalize_computed_order_to_source_scale(5, 8, 7) == 4
     assert _normalize_computed_order_to_source_scale(3, 8, 7) == 3
+
+
+def test_preview_radius_for_order_preserves_legacy_gb_strahler_steps():
+    assert _preview_radius_for_order(1) == 1
+    assert _preview_radius_for_order(2) == 1
+    assert _preview_radius_for_order(3) == 2
+    assert _preview_radius_for_order(4) == 3
+    assert _preview_radius_for_order(5) == 5
+    assert _preview_radius_for_order(6) == 6
+
+
+def test_irish_preview_radius_suppresses_order_one_minor_streams():
+    assert _irish_preview_radius_for_order(1) == 0
+    assert _irish_preview_radius_for_order(2) == 0
+    assert _irish_preview_radius_for_order(3) == 1
+    assert _irish_preview_radius_for_order(4) == 2
+    assert _irish_preview_radius_for_order(6) == 4
+    assert _irish_preview_radius_for_order(7) == 5
+
+
+def test_preview_radius_for_edge_uses_gb_order_but_keeps_ni_half_width_mode():
+    gb = _Edge(LineString([(0, 0), (1, 1)]), 5, 2, "os_open_rivers_gb", False)
+    ni = _Edge(LineString([(0, 0), (1, 1)]), 5, 9, "ni_river_segment", True)
+    roi = _Edge(LineString([(0, 0), (1, 1)]), 1, 1, "epa_river_network_routes_ie", True)
+
+    assert _preview_radius_for_edge(gb) == 5
+    assert _preview_radius_for_edge(ni) == _preview_radius_for_half_width(9)
+    assert _preview_radius_for_edge(roi) == 0

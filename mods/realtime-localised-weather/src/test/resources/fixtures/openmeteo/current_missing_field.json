@@ -1,0 +1,21 @@
+{
+  "latitude": 55.9533,
+  "longitude": -3.1883,
+  "current": {
+    "time": "2026-07-17T11:45:00Z",
+    "precipitation": 1.4,
+    "rain": 1.2,
+    "showers": 0.2,
+    "snowfall": 0.0,
+    "cloud_cover": 92.0,
+    "cloud_cover_low": 88.0,
+    "cloud_cover_mid": 76.0,
+    "cloud_cover_high": 64.0,
+    "visibility": 6400.0,
+    "temperature_2m": 13.1,
+    "relative_humidity_2m": 84.0,
+    "wind_speed_10m": 18.0,
+    "wind_direction_10m": 220.0,
+    "wind_gusts_10m": 29.0
+  }
+}

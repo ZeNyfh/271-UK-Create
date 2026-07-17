@@ -32,6 +32,8 @@ THINNER_RIVER_DATASETS = {"epa_river_network_routes_ie", "ni_river_segment"}
 THINNER_RIVER_WIDTH_FACTOR = 0.7
 TOP_ORDER_THINNING_FACTORS = (0.5, 1.0 / 1.5, 1.0 / 1.25, 1.0 / 1.125)
 RIVER_RASTER_BATCH_SIZE = 8000
+PREVIEW_RIVER_WIDTH_SCALE = 0.18
+PREVIEW_RIVER_MAX_RADIUS = 6
 
 
 def make_river_tiles(
@@ -70,6 +72,7 @@ def make_river_tiles(
             console.print("[yellow]No river features intersect the manifest extent.[/yellow]")
         order_arr = np.zeros((depth, width), dtype=np.uint8)
         half_width_arr = np.zeros((depth, width), dtype=np.uint8)
+        preview_radius_arr = np.zeros((depth, width), dtype=np.uint8)
         if frame.empty:
             pass
         else:
@@ -84,6 +87,7 @@ def make_river_tiles(
                 cover_shapes: list[tuple[object, int]] = []
                 width_shapes: list[tuple[object, int]] = []
                 order_shapes: list[tuple[object, int]] = []
+                preview_shapes: list[tuple[object, int]] = []
                 fallback_half_width = max(1, int(round(width_metres / (2.0 * cell_metres)))) if width_metres > 0 else 1
                 for geom in tqdm(frame.geometry, desc="rasterizing fallback rivers"):
                     if geom is None or geom.is_empty:
@@ -97,20 +101,25 @@ def make_river_tiles(
                     cover_shapes.append((shape, 255))
                     width_shapes.append((shape, fallback_half_width))
                     order_shapes.append((shape, 1))
+                    preview_shapes.append((shape, _preview_radius_for_order(1)))
                     if len(cover_shapes) >= RIVER_RASTER_BATCH_SIZE:
                         _rasterize_shape_batches(cover_shapes, arr, transform)
                         _rasterize_shape_batches(width_shapes, half_width_arr, transform)
                         _rasterize_shape_batches(order_shapes, order_arr, transform)
+                        _rasterize_shape_batches(preview_shapes, preview_radius_arr, transform)
                         cover_shapes.clear()
                         width_shapes.clear()
                         order_shapes.clear()
+                        preview_shapes.clear()
                 _rasterize_shape_batches(cover_shapes, arr, transform)
                 _rasterize_shape_batches(width_shapes, half_width_arr, transform)
                 _rasterize_shape_batches(order_shapes, order_arr, transform)
+                _rasterize_shape_batches(preview_shapes, preview_radius_arr, transform)
             else:
                 cover_shapes = []
                 width_shapes = []
                 order_shapes = []
+                preview_shapes = []
                 for edge in tqdm(strahler.edges, desc="rasterizing rivers"):
                     if edge.line.is_empty:
                         continue
@@ -120,20 +129,25 @@ def make_river_tiles(
                     cover_shapes.append((buffered, 255))
                     width_shapes.append((buffered, min(255, half_width)))
                     order_shapes.append((buffered, min(255, max(1, edge.order))))
+                    preview_shapes.append((buffered, _preview_radius_for_edge(edge)))
                     if len(cover_shapes) >= RIVER_RASTER_BATCH_SIZE:
                         _rasterize_shape_batches(cover_shapes, arr, transform)
                         _rasterize_shape_batches(width_shapes, half_width_arr, transform)
                         _rasterize_shape_batches(order_shapes, order_arr, transform)
+                        _rasterize_shape_batches(preview_shapes, preview_radius_arr, transform)
                         cover_shapes.clear()
                         width_shapes.clear()
                         order_shapes.clear()
+                        preview_shapes.clear()
                 _rasterize_shape_batches(cover_shapes, arr, transform)
                 _rasterize_shape_batches(width_shapes, half_width_arr, transform)
                 _rasterize_shape_batches(order_shapes, order_arr, transform)
+                _rasterize_shape_batches(preview_shapes, preview_radius_arr, transform)
         root = out / "water" / "rivers"
         _write_tiles(arr, root, tile_size)
         _write_tiles(order_arr, out / "water" / "river_order", tile_size)
         _write_tiles(half_width_arr, out / "water" / "river_half_width", tile_size)
+        _write_tiles(preview_radius_arr, out / "water" / "river_preview_radius", tile_size)
         manifest["rivers"] = {
             "path": "water/rivers",
             "extension": u8_extension(),
@@ -142,8 +156,9 @@ def make_river_tiles(
             "max": 255,
             "order_path": "water/river_order",
             "half_width_path": "water/river_half_width",
+            "preview_radius_path": "water/river_preview_radius",
             "max_half_width": int(half_width_arr.max()) if half_width_arr.size else 0,
-            "note": "255 marks cells inside variable-width river/watercourse vectors. Widths are derived from source river order where present, otherwise approximate Strahler stream order.",
+            "note": "255 marks cells inside variable-width river/watercourse vectors. Widths are derived from source river order where present, otherwise approximate Strahler stream order. Preview radii preserve legacy GB Strahler sizing while allowing thinner ROI minor streams.",
         }
         write_manifest(manifest_path, manifest)
         if debug_geotiff:
@@ -350,11 +365,12 @@ class _HeightSampler:
 
 
 class _Edge:
-    def __init__(self, line: LineString, order: int, half_width: int, source_dataset: str | None = None):
+    def __init__(self, line: LineString, order: int, half_width: int, source_dataset: str | None = None, source_order_provided: bool = False):
         self.line = line
         self.order = order
         self.half_width = half_width
         self.source_dataset = source_dataset
+        self.source_order_provided = source_order_provided
 
 
 class _StrahlerResult:
@@ -453,7 +469,15 @@ def _strahler_widths(lines: list[_InputLine], manifest: dict, root: Path) -> _St
                 half_width = round(half_width * 1.2)
         minimum = _minimum_half_width_for_order(order)
         clamped_half_width = min(MAX_RIVER_HALFWIDTH, max(minimum, half_width))
-        edges.append(_Edge(line, min(order, 255), _dataset_half_width(clamped_half_width, source_dataset), source_dataset))
+        edges.append(
+            _Edge(
+                line,
+                min(order, 255),
+                _dataset_half_width(clamped_half_width, source_dataset),
+                source_dataset,
+                source_order is not None,
+            )
+        )
     _thin_top_order_half_widths(edges)
     return _StrahlerResult(edges)
 
@@ -483,6 +507,50 @@ def _dataset_half_width(half_width: int, source_dataset: str | None) -> int:
     if source_dataset not in THINNER_RIVER_DATASETS:
         return half_width
     return max(1, int(math.floor(half_width * THINNER_RIVER_WIDTH_FACTOR)))
+
+
+def _preview_radius_for_half_width(half_width: int) -> int:
+    if half_width <= 0:
+        return 0
+    return max(1, min(PREVIEW_RIVER_MAX_RADIUS, int(round(half_width * PREVIEW_RIVER_WIDTH_SCALE))))
+
+
+def _preview_radius_for_order(order: int) -> int:
+    if order <= 0:
+        return 0
+    if order in {1, 2}:
+        return 1
+    if order == 3:
+        return 2
+    if order == 4:
+        return 3
+    if order == 5:
+        return 5
+    return 6
+
+
+def _irish_preview_radius_for_order(order: int) -> int:
+    if order <= 2:
+        return 0
+    if order == 3:
+        return 1
+    if order == 4:
+        return 2
+    if order == 5:
+        return 3
+    if order == 6:
+        return 4
+    return 5
+
+
+def _preview_radius_for_edge(edge: _Edge) -> int:
+    if edge.source_dataset == "epa_river_network_routes_ie":
+        return _irish_preview_radius_for_order(edge.order)
+    if edge.source_dataset == "ni_river_segment":
+        return _preview_radius_for_half_width(edge.half_width)
+    if not edge.source_order_provided:
+        return _preview_radius_for_order(edge.order)
+    return _preview_radius_for_half_width(edge.half_width)
 
 
 def _orient_edge(

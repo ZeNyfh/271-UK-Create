@@ -111,6 +111,15 @@ def test_river_preview_radii_use_half_width_hierarchy():
     assert radii[0, 4] == 0
 
 
+def test_river_preview_radii_accept_precomputed_preview_radius_values():
+    river = np.array([[255, 255, 255, 255, 255, 0]], dtype=np.uint8)
+    preview_radius = np.array([[0, 1, 2, 3, 6, 6]], dtype=np.uint8)
+
+    radii = _river_preview_radii(river, preview_radius, "river_preview_radius")
+
+    assert radii.tolist() == [[0, 1, 2, 3, 6, 0]]
+
+
 def test_hover_preview_steps_include_biome_regions(tmp_path):
     root = tmp_path
     (root / "height").mkdir()

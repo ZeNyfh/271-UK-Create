@@ -9,6 +9,7 @@ group = mod_group_id
 
 repositories {
     mavenLocal()
+    mavenCentral()
 }
 
 base {
@@ -64,3 +65,7 @@ var generateModMetadata = tasks.register("generateModMetadata", ProcessResources
 sourceSets.main.resources.srcDir generateModMetadata
 neoForge.ideSyncTask generateModMetadata
 
+dependencies {
+    implementation("org.locationtech.proj4j:proj4j:1.4.1")
+    jarJar("org.locationtech.proj4j:proj4j:1.4.1")
+}

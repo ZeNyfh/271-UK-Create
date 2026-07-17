@@ -3,6 +3,7 @@ package com.ukgeo.worldgen;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.ukgeo.worldgen.geo.UkGeoReference;
 import java.io.IOException;
 import java.io.Reader;
 import java.nio.file.Files;
@@ -24,6 +25,7 @@ public final class TileManifest {
     public final int minecraftMinZ;
     public final int minecraftMaxX;
     public final int minecraftMaxZ;
+    public final String crs;
     public final double bngMinEasting;
     public final double bngMinNorthing;
     public final double bngMaxEasting;
@@ -63,6 +65,7 @@ public final class TileManifest {
         this.minecraftMaxX = world.get("minecraft_max_x").getAsInt();
         this.minecraftMaxZ = world.get("minecraft_max_z").getAsInt();
         JsonObject georeferencing = json.getAsJsonObject("georeferencing");
+        this.crs = georeferencing != null && georeferencing.has("crs") ? georeferencing.get("crs").getAsString() : "EPSG:27700";
         this.bngMinEasting = optionalDouble(georeferencing, "bng_min_easting");
         this.bngMinNorthing = optionalDouble(georeferencing, "bng_min_northing");
         this.bngMaxEasting = optionalDouble(georeferencing, "bng_max_easting");
@@ -179,6 +182,22 @@ public final class TileManifest {
         double easting = bngMinEasting + (dataX + 0.5D) * (bngMaxEasting - bngMinEasting) / width;
         double northing = bngMaxNorthing - (dataZ + 0.5D) * (bngMaxNorthing - bngMinNorthing) / depth;
         return "BNG E %.0f N %.0f".formatted(easting, northing);
+    }
+
+    public UkGeoReference toReference() {
+        return new UkGeoReference(
+            crs,
+            minecraftMinX,
+            minecraftMinZ,
+            minecraftMaxX,
+            minecraftMaxZ,
+            bngMinEasting,
+            bngMinNorthing,
+            bngMaxEasting,
+            bngMaxNorthing,
+            width,
+            depth
+        );
     }
 
     private static String extension(JsonObject object, String fallback) {

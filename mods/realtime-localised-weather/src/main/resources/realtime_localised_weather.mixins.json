@@ -1,0 +1,17 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "com.ukgeo.realtimelocalisedweather.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [
+    "LevelWeatherMixin",
+    "ServerLevelWeatherMixin"
+  ],
+  "client": [
+    "VanillaCloudRendererMixin",
+    "VanillaPrecipitationRendererMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

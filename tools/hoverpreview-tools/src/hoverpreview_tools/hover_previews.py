@@ -31,6 +31,8 @@ PREVIEW_RIVER_WIDTH_SCALE = 0.18
 PREVIEW_RIVER_MIN_RADIUS = 1
 PREVIEW_RIVER_MAX_RADIUS = 6
 PREVIEW_RIVER_COLOR = (65, 145, 230)
+RIVER_MIP_ALPHA_GAMMA = 2.4
+RIVER_MIP_ALPHA_CUTOFF = 18
 DEFAULT_TILE_BATCH_ROWS = 4
 _CUPY_MODULE: Any | None | bool = None
 ANIMAL_LAYER_COLORS: dict[str, tuple[int, int, int]] = {
@@ -380,6 +382,9 @@ def export_hover_previews(
                 workers=encoder_workers,
                 force=force,
                 resampling=Image.Resampling.BILINEAR,
+                mip_alpha_gamma=RIVER_MIP_ALPHA_GAMMA,
+                mip_alpha_cutoff=RIVER_MIP_ALPHA_CUTOFF,
+                mip_alpha_transform_min_factor=4,
                 tile_batch_rows=tile_batch_rows,
                 write_full_images=write_full_images,
             )
@@ -668,6 +673,19 @@ def _resize_disk_raster(source: DiskRaster, path: Path, size: tuple[int, int], r
     return out
 
 
+def _adjust_disk_raster_alpha(raster: DiskRaster, gamma: float, cutoff: int) -> None:
+    array = _open_disk_raster(raster, write=True)
+    try:
+        alpha = np.asarray(array[:, :, 3], dtype=np.float32) / 255.0
+        adjusted = np.power(np.clip(alpha, 0.0, 1.0), max(0.01, float(gamma))) * 255.0
+        if cutoff > 0:
+            adjusted[adjusted < cutoff] = 0.0
+        array[:, :, 3] = np.clip(adjusted, 0, 255).astype(np.uint8)
+        array.flush()
+    finally:
+        del array
+
+
 def _render_height_visual_raster(values: np.ndarray, style: str, raster: DiskRaster) -> None:
     array = _open_disk_raster(raster, write=True)
     try:
@@ -861,6 +879,9 @@ def _save_visual_raster_layer(
     workers: int = 1,
     force: bool = True,
     resampling: Image.Resampling = Image.Resampling.BILINEAR,
+    mip_alpha_gamma: float | None = None,
+    mip_alpha_cutoff: int = 0,
+    mip_alpha_transform_min_factor: int = 2,
     tile_batch_rows: int = DEFAULT_TILE_BATCH_ROWS,
     write_full_images: bool = False,
 ) -> list[dict[str, Any]]:
@@ -909,6 +930,12 @@ def _save_visual_raster_layer(
                 next_size,
                 resampling,
             )
+            if (
+                mip_alpha_gamma is not None
+                and next_raster.mode == "RGBA"
+                and factor >= max(2, mip_alpha_transform_min_factor)
+            ):
+                _adjust_disk_raster_alpha(next_raster, mip_alpha_gamma, mip_alpha_cutoff)
             temp_outputs.append(next_raster)
             current = next_raster
     finally:
@@ -1431,11 +1458,13 @@ def _read_river_width_preview(
 ) -> tuple[np.ndarray | None, dict[str, Any]]:
     rivers = manifest.get("rivers", {})
     candidates = (
+        ("river_preview_radius", rivers.get("preview_radius_path") or rivers.get("preview_radii_path")),
         ("river_half_width", rivers.get("half_width_path") or rivers.get("river_half_width_path")),
         ("river_order", rivers.get("order_path") or rivers.get("river_order_path")),
     )
     metadata: dict[str, Any] = {
         "source": "river_mask",
+        "river_preview_radius_available": False,
         "river_half_width_available": False,
         "river_order_available": False,
         "river_width_scale": PREVIEW_RIVER_WIDTH_SCALE,
@@ -1449,6 +1478,8 @@ def _read_river_width_preview(
         available = (root / str(layer_path)).exists()
         if source == "river_half_width":
             metadata["river_half_width_available"] = available
+        elif source == "river_preview_radius":
+            metadata["river_preview_radius_available"] = available
         elif source == "river_order":
             metadata["river_order_available"] = available
         if not available:
@@ -1483,6 +1514,10 @@ def _river_preview_radii(river_mask: np.ndarray, width_values: np.ndarray | None
         return radii
 
     values = _fit_array(width_values, river_mask.shape)
+    if width_source == "river_preview_radius":
+        scaled = np.clip(values.astype(np.int16), 0, PREVIEW_RIVER_MAX_RADIUS)
+        radii[river] = scaled[river].astype(np.uint8)
+        return radii
     if width_source == "river_half_width":
         scaled = np.rint(values.astype(np.float32) * PREVIEW_RIVER_WIDTH_SCALE).astype(np.int16)
     elif width_source == "river_order":
