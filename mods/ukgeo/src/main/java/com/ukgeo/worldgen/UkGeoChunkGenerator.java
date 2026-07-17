@@ -83,7 +83,9 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     private static final boolean PRESERVE_DELEGATE_NOISE_CAVES = Boolean.getBoolean("ukgeo.preserveDelegateNoiseCaves");
     private static final boolean ENABLE_VANILLA_CARVERS = !Boolean.getBoolean("ukgeo.disableVanillaCarvers");
     private static final boolean ENABLE_DEEP_CARVERS = Boolean.getBoolean("ukgeo.enableUkGeoDeepCaves");
-    private static final boolean ENABLE_BIOME_FEATURE_DECORATION = !Boolean.getBoolean("ukgeo.disableBiomeFeatureDecoration");
+    private static final boolean REQUEST_BIOME_FEATURE_DECORATION = Boolean.getBoolean("ukgeo.enableBiomeFeatureDecoration");
+    private static final boolean ENABLE_BIOME_FEATURE_DECORATION = REQUEST_BIOME_FEATURE_DECORATION
+        && !Boolean.getBoolean("ukgeo.disableBiomeFeatureDecoration");
     private static final boolean DEBUG_BIOME_DECORATION = Boolean.getBoolean("ukgeo.debugBiomeDecoration");
     private static final boolean DEBUG_STRUCTURE_CLEANUP = Boolean.getBoolean("ukgeo.debugStructureCleanup");
     private static final boolean DEBUG_FULL_TIMING_SPAM = Boolean.getBoolean("ukgeo.debugTimingSpam");
@@ -2438,8 +2440,11 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
             logTiming("applyBiomeDecoration.biomeFeatures", chunk.getPos(), biomeFeatureStartNanos);
         } else if (DEBUG_BIOME_DECORATION) {
             UkGeoMod.LOGGER.info(
-                "UKGeo full biome decoration SKIP chunk={} thread={} because -Dukgeo.disableBiomeFeatureDecoration=true",
-                chunk.getPos(), Thread.currentThread().getName()
+                "UKGeo full biome decoration SKIP chunk={} thread={} enableFlag={} disableFlag={}",
+                chunk.getPos(),
+                Thread.currentThread().getName(),
+                REQUEST_BIOME_FEATURE_DECORATION,
+                Boolean.getBoolean("ukgeo.disableBiomeFeatureDecoration")
             );
         }
         if (ranFullBiomeDecoration) {
@@ -3805,10 +3810,12 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     private static void logDecorationConfigOnce() {
         if (DECORATION_CONFIG_LOGGED.compareAndSet(false, true)) {
             UkGeoMod.LOGGER.warn(
-                "UKGeo biome feature decoration config: fullDecorationEnabled={} disableFlag={} debugDecoration={} slowWarnMs={} safeModdedPlants={}. "
-                    + "Disable full delegated biome features with -Dukgeo.disableBiomeFeatureDecoration=true if world creation stalls at 0%. "
-                    + "Auto-disable slow delegated decoration with ukgeo.fullBiomeDecorationAutoDisableMs={}ms.",
+                "UKGeo biome feature decoration config: fullDecorationEnabled={} enableFlag={} disableFlag={} debugDecoration={} slowWarnMs={} safeModdedPlants={}. "
+                    + "Delegated vanilla/modded biome features are opt-in because some feature graphs can recursively wait for chunks during teleport/worldgen. "
+                    + "Enable with -Dukgeo.enableBiomeFeatureDecoration=true; force-disable with -Dukgeo.disableBiomeFeatureDecoration=true. "
+                    + "Auto-disable slow delegated decoration with ukgeo.fullBiomeDecorationAutoDisableMs={}ms after a slow call returns.",
                 ENABLE_BIOME_FEATURE_DECORATION,
+                REQUEST_BIOME_FEATURE_DECORATION,
                 Boolean.getBoolean("ukgeo.disableBiomeFeatureDecoration"),
                 DEBUG_BIOME_DECORATION,
                 SLOW_BIOME_DECORATION_WARN_MS,

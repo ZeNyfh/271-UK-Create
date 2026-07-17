@@ -29,6 +29,22 @@ data_root = "/absolute/path/to/uk_world_data"
 
 Relative paths are resolved from the game or server root.
 
+## Worldgen stability knobs
+
+UKGeo's local terrain, water, ore, and flora placement runs by default. Delegated vanilla/modded biome feature decoration is opt-in because some modded feature graphs can recursively wait for neighbouring chunks during teleport or edge-of-view generation.
+
+To re-enable delegated biome features for testing:
+
+```text
+-Dukgeo.enableBiomeFeatureDecoration=true
+```
+
+To force-disable them even if another launch profile enables them:
+
+```text
+-Dukgeo.disableBiomeFeatureDecoration=true
+```
+
 ## World preset
 
 The bundled preset is `ukgeo:uk_geological_create` and the custom generator type is `ukgeo:heightmap`.

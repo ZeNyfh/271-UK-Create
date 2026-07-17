@@ -40,6 +40,7 @@ const SAMPLE_CROP_SIZE = 512;
 const DEFAULT_RENDERER_PREFERENCE = "auto";
 const FIT_VIEW_PADDING_PX = 72;
 const LIVE_WEATHER_REFRESH_MS = 15 * 60 * 1000;
+const LIVE_WEATHER_GRID_COLUMNS = 32;
 const RenderMath = globalThis.HoverRenderMath || {};
 const BACKGROUND_ORE_ATTEMPT_MULTIPLIER = 0.1;
 const ORE_AREA_ATTEMPT_MULTIPLIER = 3.0;
@@ -70,6 +71,7 @@ const elements = {
   loadState: document.querySelector("#load-state"),
   controls: document.querySelector(".controls"),
   layerControls: document.querySelector("#layer-controls"),
+  weatherControls: document.querySelector("#weather-controls"),
   oreControls: document.querySelector("#ore-controls"),
   animalControls: document.querySelector("#animal-controls"),
   viewer: document.querySelector("#viewer"),
@@ -299,6 +301,7 @@ async function loadManifest(url) {
   clearMeasurement();
   elements.stack.replaceChildren();
   elements.layerControls.replaceChildren();
+  elements.weatherControls?.replaceChildren();
   elements.oreControls.replaceChildren();
   elements.animalControls?.replaceChildren();
 
@@ -306,6 +309,9 @@ async function loadManifest(url) {
   state.mapCanvas.className = "map-canvas";
   elements.stack.append(state.mapCanvas);
   setupMapRenderer(state.mapCanvas, manifest);
+
+  const liveWeatherConfig = resolveLiveWeatherConfig(manifest);
+  if (liveWeatherConfig) manifest.live_weather = liveWeatherConfig;
 
   for (const layer of manifest.layers || []) {
     addLayer(layer);
@@ -489,7 +495,9 @@ function addLayer(layer) {
   const enabled = isLayerVisibleByDefault(layer);
   state.layers.set(layer.name, { layer, enabled });
   if (layer.name === "biome_regions") return;
-  const controls = layer.kind === "ore"
+  const controls = layer.kind === "weather-live"
+    ? elements.weatherControls
+    : layer.kind === "ore"
     ? elements.oreControls
     : layer.kind === "animal"
       ? elements.animalControls
@@ -506,17 +514,64 @@ function installLiveWeatherLayers(manifest) {
   addLayer({
     name: "cloud_cover",
     kind: "weather-live",
-    label: "Cloud cover",
+    label: "Cloud coverage",
     value_format: "percent",
     live_weather_metric: "cloud_cover",
   });
   addLayer({
     name: "downfall_coverage",
     kind: "weather-live",
-    label: "Downfall coverage",
+    label: "Rain / precipitation",
     value_format: "percent",
     live_weather_metric: "downfall_coverage",
   });
+}
+
+function resolveLiveWeatherConfig(manifest) {
+  const configured = manifest?.live_weather;
+  if (configured?.grid?.latitudes?.length && configured?.grid?.longitudes?.length) return configured;
+
+  const grid = buildLiveWeatherGrid(manifest, LIVE_WEATHER_GRID_COLUMNS);
+  if (!grid) return null;
+  return {
+    provider: "Open-Meteo",
+    api_base_url: "https://api.open-meteo.com/v1/forecast",
+    weather_model: "auto",
+    batch_points: 64,
+    metrics: {
+      cloud_cover: { unit: "percent", source: "current.cloud_cover" },
+      downfall_coverage: { unit: "percent", source: "hourly.precipitation_probability[0]" },
+    },
+    grid,
+  };
+}
+
+function buildLiveWeatherGrid(manifest, requestedColumns) {
+  const world = manifest?.world || {};
+  const geo = manifest?.georeferencing || {};
+  const values = [world.width, world.depth, geo.bng_min_easting, geo.bng_max_easting, geo.bng_min_northing, geo.bng_max_northing];
+  if (values.some((value) => !Number.isFinite(Number(value)))) return null;
+  if (geo.crs && String(geo.crs).toUpperCase() !== "EPSG:27700") return null;
+
+  const width = Number(world.width);
+  const depth = Number(world.depth);
+  if (width <= 0 || depth <= 0) return null;
+  const columns = Math.max(2, Math.round(Number(requestedColumns) || LIVE_WEATHER_GRID_COLUMNS));
+  const rows = Math.max(2, Math.round(columns * depth / width));
+  const latitudes = [];
+  const longitudes = [];
+  for (let row = 0; row < rows; row += 1) {
+    const dataZ = rows === 1 ? 0.5 : 0.5 + row * (depth - 1) / (rows - 1);
+    const northing = Number(geo.bng_max_northing) - dataZ * (Number(geo.bng_max_northing) - Number(geo.bng_min_northing)) / Math.max(1, depth);
+    for (let column = 0; column < columns; column += 1) {
+      const dataX = columns === 1 ? 0.5 : 0.5 + column * (width - 1) / (columns - 1);
+      const easting = Number(geo.bng_min_easting) + dataX * (Number(geo.bng_max_easting) - Number(geo.bng_min_easting)) / Math.max(1, width);
+      const point = britishNationalGridToWgs84(easting, northing);
+      latitudes.push(point.lat);
+      longitudes.push(point.lon);
+    }
+  }
+  return { rows, columns, latitudes, longitudes };
 }
 
 function isLayerVisibleByDefault(layer) {
@@ -852,6 +907,61 @@ function wgs84ToBritishNationalGrid(latDeg, lonDeg) {
   return osgb36LatLonToBng(latLon.lat, latLon.lon);
 }
 
+function britishNationalGridToWgs84(easting, northing) {
+  const osgb36LatLon = bngToOsgb36LatLon(easting, northing);
+  const osgb36 = latLonToCartesian(
+    radiansToDegrees(osgb36LatLon.lat),
+    radiansToDegrees(osgb36LatLon.lon),
+    6377563.396,
+    6356256.909,
+  );
+  const wgs84 = helmertTransformOsgb36ToWgs84(osgb36);
+  const latLon = cartesianToLatLon(wgs84.x, wgs84.y, wgs84.z, 6378137.0, 6356752.3141);
+  return { lat: radiansToDegrees(latLon.lat), lon: radiansToDegrees(latLon.lon) };
+}
+
+function bngToOsgb36LatLon(easting, northing) {
+  const a = 6377563.396;
+  const b = 6356256.909;
+  const f0 = 0.9996012717;
+  const lat0 = degreesToRadians(49);
+  const lon0 = degreesToRadians(-2);
+  const n0 = -100000;
+  const e0 = 400000;
+  const e2 = 1 - (b * b) / (a * a);
+  const n = (a - b) / (a + b);
+  let lat = lat0;
+  let meridionalArc = 0;
+  do {
+    lat = (Number(northing) - n0 - meridionalArc) / (a * f0) + lat;
+    meridionalArc = b * f0 * (
+      (1 + n + 1.25 * n ** 2 + 1.25 * n ** 3) * (lat - lat0)
+      - (3 * n + 3 * n ** 2 + 2.625 * n ** 3) * Math.sin(lat - lat0) * Math.cos(lat + lat0)
+      + (1.875 * n ** 2 + 1.875 * n ** 3) * Math.sin(2 * (lat - lat0)) * Math.cos(2 * (lat + lat0))
+      - (35 / 24) * n ** 3 * Math.sin(3 * (lat - lat0)) * Math.cos(3 * (lat + lat0))
+    );
+  } while (Math.abs(Number(northing) - n0 - meridionalArc) >= 0.00001);
+
+  const sinLat = Math.sin(lat);
+  const cosLat = Math.cos(lat);
+  const tanLat = Math.tan(lat);
+  const nu = a * f0 / Math.sqrt(1 - e2 * sinLat ** 2);
+  const rho = a * f0 * (1 - e2) / ((1 - e2 * sinLat ** 2) ** 1.5);
+  const eta2 = nu / rho - 1;
+  const dE = Number(easting) - e0;
+  const vii = tanLat / (2 * rho * nu);
+  const viii = tanLat / (24 * rho * nu ** 3) * (5 + 3 * tanLat ** 2 + eta2 - 9 * tanLat ** 2 * eta2);
+  const ix = tanLat / (720 * rho * nu ** 5) * (61 + 90 * tanLat ** 2 + 45 * tanLat ** 4);
+  const x = 1 / (cosLat * nu);
+  const xi = 1 / (6 * cosLat * nu ** 3) * (nu / rho + 2 * tanLat ** 2);
+  const xii = 1 / (120 * cosLat * nu ** 5) * (5 + 28 * tanLat ** 2 + 24 * tanLat ** 4);
+  const xiia = 1 / (5040 * cosLat * nu ** 7) * (61 + 662 * tanLat ** 2 + 1320 * tanLat ** 4 + 720 * tanLat ** 6);
+  return {
+    lat: lat - vii * dE ** 2 + viii * dE ** 4 - ix * dE ** 6,
+    lon: lon0 + x * dE - xi * dE ** 3 + xii * dE ** 5 - xiia * dE ** 7,
+  };
+}
+
 function latLonToCartesian(latDeg, lonDeg, a, b) {
   const lat = degreesToRadians(latDeg);
   const lon = degreesToRadians(lonDeg);
@@ -872,6 +982,21 @@ function helmertTransformWgs84ToOsgb36(point) {
   const rx = secondsToRadians(-0.1502);
   const ry = secondsToRadians(-0.2470);
   const rz = secondsToRadians(-0.8421);
+  return {
+    x: tx + (1 + scale) * point.x - rz * point.y + ry * point.z,
+    y: ty + rz * point.x + (1 + scale) * point.y - rx * point.z,
+    z: tz - ry * point.x + rx * point.y + (1 + scale) * point.z,
+  };
+}
+
+function helmertTransformOsgb36ToWgs84(point) {
+  const tx = 446.448;
+  const ty = -125.157;
+  const tz = 542.060;
+  const scale = 20.4894e-6;
+  const rx = secondsToRadians(0.1502);
+  const ry = secondsToRadians(0.2470);
+  const rz = secondsToRadians(0.8421);
   return {
     x: tx + (1 + scale) * point.x - rz * point.y + ry * point.z,
     y: ty + rz * point.x + (1 + scale) * point.y - rx * point.z,
@@ -930,6 +1055,10 @@ function osgb36LatLonToBng(lat, lon) {
 
 function degreesToRadians(value) {
   return value * Math.PI / 180;
+}
+
+function radiansToDegrees(value) {
+  return value * 180 / Math.PI;
 }
 
 function secondsToRadians(value) {
