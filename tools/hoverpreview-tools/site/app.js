@@ -40,7 +40,7 @@ const SAMPLE_CROP_SIZE = 512;
 const DEFAULT_RENDERER_PREFERENCE = "auto";
 const FIT_VIEW_PADDING_PX = 72;
 const LIVE_WEATHER_REFRESH_MS = 15 * 60 * 1000;
-const LIVE_WEATHER_GRID_COLUMNS = 32;
+const LIVE_WEATHER_GRID_COLUMNS = 12;
 const RenderMath = globalThis.HoverRenderMath || {};
 const BACKGROUND_ORE_ATTEMPT_MULTIPLIER = 0.1;
 const ORE_AREA_ATTEMPT_MULTIPLIER = 3.0;
@@ -268,6 +268,7 @@ window.addEventListener("resize", () => {
 
 loadManifest(defaultManifest()).catch((error) => {
   if (elements.loadState) elements.loadState.textContent = "Preview data not found";
+  if (elements.empty) elements.empty.hidden = false;
   setStatus(`No hover preview found at ${defaultManifest()}: ${error.message}`);
 });
 
@@ -319,10 +320,6 @@ async function loadManifest(url) {
     state.mapRendererFallbackReason = "live-weather-2d";
     destroyMapRenderer({ keepCanvas: true });
     createCanvasRenderer(state.mapCanvas);
-    fetchLiveWeather(manifest).catch((error) => {
-      console.warn("[hoverpreview] Live weather fetch failed", error);
-      refreshStatus();
-    });
   }
 
   loadAnimalsList(manifest).catch(() => undefined);
@@ -587,6 +584,12 @@ function toggleFor(layer, checked) {
   input.addEventListener("change", () => {
     const entry = state.layers.get(layer.name);
     entry.enabled = input.checked;
+    if (input.checked && layer.kind === "weather-live" && !state.liveWeather[layer.live_weather_metric]) {
+      fetchLiveWeather(state.manifest).catch((error) => {
+        console.warn("[hoverpreview] Live weather fetch failed", error);
+        refreshStatus();
+      });
+    }
     if (!input.checked) {
       releaseLayerBitmaps(layer.name);
       releaseSample(layer.name);
