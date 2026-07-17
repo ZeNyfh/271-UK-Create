@@ -104,12 +104,14 @@ full/cropped sample images where tile metadata is missing.
 By default the exporter also writes static metadata that the browser can use to
 fetch live Open-Meteo weather overlays:
 
-- `Cloud cover`
-- `Downfall coverage` (from Open-Meteo precipitation probability for the current forecast hour)
+- `Cloud coverage`
+- `Rain / precipitation` (coverage from Open-Meteo precipitation probability for the current forecast hour)
 
 The browser fetches those overlays at runtime using the exported UKGeo
 georeferencing-derived WGS84 query grid. The site remains static; weather does
-not require regenerating tile pyramids.
+not require regenerating tile pyramids. For older hover manifests without a
+`live_weather` block, the browser derives the same WGS84 query grid from the
+manifest's British National Grid georeferencing so the toggles remain available.
 
 ## Optional GPU rendering
 

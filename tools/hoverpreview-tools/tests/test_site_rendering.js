@@ -97,8 +97,6 @@ test("published root page includes the current hover map shell", () => {
 
   assert.match(rootIndexHtml, /viewport-fit=cover/);
   assert.match(rootIndexHtml, /id="animal-controls"/);
-  assert.match(rootIndexHtml, /id="weather-controls"/);
-  assert.match(rootIndexHtml, /Open-Meteo/);
   assert.match(rootIndexHtml, /render_math\.js/);
   assert.doesNotMatch(rootIndexHtml, /scrollbar scrollbar-[xy]/);
   assert.match(rootIndexHtml, /Left drag measures distance/);
@@ -109,7 +107,8 @@ test("live weather controls work with older manifests and fetch Open-Meteo", () 
   const appJs = fs.readFileSync(path.join(__dirname, "../site/app.js"), "utf8");
   const indexHtml = fs.readFileSync(path.join(__dirname, "../site/index.html"), "utf8");
 
-  assert.match(indexHtml, /id="weather-controls"/);
+  assert.match(indexHtml, /id="layer-controls"/);
+  assert.doesNotMatch(indexHtml, /id="weather-controls"/);
   assert.match(appJs, /function resolveLiveWeatherConfig\(manifest\)/);
   assert.match(appJs, /function buildLiveWeatherGrid\(manifest, requestedColumns\)/);
   assert.match(appJs, /function britishNationalGridToWgs84\(easting, northing\)/);

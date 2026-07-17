@@ -71,7 +71,6 @@ const elements = {
   loadState: document.querySelector("#load-state"),
   controls: document.querySelector(".controls"),
   layerControls: document.querySelector("#layer-controls"),
-  weatherControls: document.querySelector("#weather-controls"),
   oreControls: document.querySelector("#ore-controls"),
   animalControls: document.querySelector("#animal-controls"),
   viewer: document.querySelector("#viewer"),
@@ -301,7 +300,6 @@ async function loadManifest(url) {
   clearMeasurement();
   elements.stack.replaceChildren();
   elements.layerControls.replaceChildren();
-  elements.weatherControls?.replaceChildren();
   elements.oreControls.replaceChildren();
   elements.animalControls?.replaceChildren();
 
@@ -495,9 +493,7 @@ function addLayer(layer) {
   const enabled = isLayerVisibleByDefault(layer);
   state.layers.set(layer.name, { layer, enabled });
   if (layer.name === "biome_regions") return;
-  const controls = layer.kind === "weather-live"
-    ? elements.weatherControls
-    : layer.kind === "ore"
+  const controls = layer.kind === "ore"
     ? elements.oreControls
     : layer.kind === "animal"
       ? elements.animalControls
