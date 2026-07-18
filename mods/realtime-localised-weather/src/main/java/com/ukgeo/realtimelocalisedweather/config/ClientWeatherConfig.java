@@ -26,6 +26,7 @@ public final class ClientWeatherConfig {
     public static final ModConfigSpec.DoubleValue PRECIPITATION_DENSITY_MULTIPLIER;
     public static final ModConfigSpec.DoubleValue SNOW_DENSITY_MULTIPLIER;
     public static final ModConfigSpec.DoubleValue CLOUD_DENSITY_MULTIPLIER;
+    public static final ModConfigSpec.IntValue WEATHER_POLL_INTERVAL_TICKS;
     public static final ModConfigSpec.BooleanValue ENABLE_WEATHER_FOG;
     public static final ModConfigSpec.BooleanValue ENABLE_WEATHER_SOUNDS;
     public static final ModConfigSpec.BooleanValue ENABLE_WIND_SLANT;
@@ -46,6 +47,7 @@ public final class ClientWeatherConfig {
         PRECIPITATION_DENSITY_MULTIPLIER = builder.defineInRange("precipitation_density_multiplier", 1.0D, 0.0D, 4.0D);
         SNOW_DENSITY_MULTIPLIER = builder.defineInRange("snow_density_multiplier", 1.0D, 0.0D, 4.0D);
         CLOUD_DENSITY_MULTIPLIER = builder.defineInRange("cloud_density_multiplier", 1.0D, 0.0D, 4.0D);
+        WEATHER_POLL_INTERVAL_TICKS = builder.defineInRange("weather_poll_interval_ticks", 40, 20, 1200);
         ENABLE_WEATHER_FOG = builder.define("enable_weather_fog", true);
         ENABLE_WEATHER_SOUNDS = builder.define("enable_weather_sounds", true);
         ENABLE_WIND_SLANT = builder.define("enable_wind_slant", true);
@@ -69,6 +71,14 @@ public final class ClientWeatherConfig {
             return TRANSITION_SECONDS.get();
         } catch (IllegalStateException exception) {
             return 24.0D;
+        }
+    }
+
+    public static int weatherPollIntervalTicks() {
+        try {
+            return WEATHER_POLL_INTERVAL_TICKS.get();
+        } catch (IllegalStateException exception) {
+            return 40;
         }
     }
 }

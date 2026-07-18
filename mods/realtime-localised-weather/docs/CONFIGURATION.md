@@ -50,7 +50,7 @@ Operational guidance:
 
 ## Client: `config/realtime_localised_weather-client.toml`
 
-Visual controls only:
+Client-side controls:
 
 - `enabled`
 - `precipitation_renderer`
@@ -61,6 +61,7 @@ Visual controls only:
 - `precipitation_density_multiplier`
 - `snow_density_multiplier`
 - `cloud_density_multiplier`
+- `weather_poll_interval_ticks`: how often the client asks the server for the newest weather tile snapshots
 - `enable_weather_fog`
 - `enable_weather_sounds`
 - `enable_wind_slant`

@@ -15,7 +15,7 @@ import org.slf4j.LoggerFactory;
 public final class RealtimeLocalisedWeatherMod {
     public static final String MOD_ID = "realtime_localised_weather";
     public static final String MOD_VERSION = "1.0.0";
-    public static final String PROTOCOL_VERSION = "rlw-1";
+    public static final String PROTOCOL_VERSION = "rlw-2";
     public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
     private static final ServerWeatherManager SERVER_WEATHER_MANAGER = new ServerWeatherManager();
 

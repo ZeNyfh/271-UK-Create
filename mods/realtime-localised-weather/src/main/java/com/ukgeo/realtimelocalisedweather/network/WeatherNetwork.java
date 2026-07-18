@@ -3,6 +3,7 @@ package com.ukgeo.realtimelocalisedweather.network;
 import com.ukgeo.realtimelocalisedweather.RealtimeLocalisedWeatherMod;
 import com.ukgeo.realtimelocalisedweather.weather.client.ClientWeatherManager;
 import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
@@ -28,5 +29,10 @@ public final class WeatherNetwork {
         registrar.playToClient(WeatherTileRemovePayload.TYPE, WeatherTileRemovePayload.STREAM_CODEC, (payload, context) -> context.enqueueWork(() -> ClientWeatherManager.receiveRemovals(payload)));
         registrar.playToClient(WeatherAuthorityModePayload.TYPE, WeatherAuthorityModePayload.STREAM_CODEC, (payload, context) -> context.enqueueWork(() -> ClientWeatherManager.receiveMode(payload)));
         registrar.playToClient(WeatherLightningPayload.TYPE, WeatherLightningPayload.STREAM_CODEC, (payload, context) -> context.enqueueWork(() -> ClientWeatherManager.receiveLightning(payload)));
+        registrar.playToServer(WeatherPollRequestPayload.TYPE, WeatherPollRequestPayload.STREAM_CODEC, (payload, context) -> context.enqueueWork(() -> {
+            if (context.player() instanceof ServerPlayer player) {
+                RealtimeLocalisedWeatherMod.serverWeatherManager().handleClientPoll(player, payload);
+            }
+        }));
     }
 }

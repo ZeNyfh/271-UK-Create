@@ -12,6 +12,7 @@ import com.ukgeo.realtimelocalisedweather.network.UkGeoReferencePayload;
 import com.ukgeo.realtimelocalisedweather.network.WeatherAuthorityModePayload;
 import com.ukgeo.realtimelocalisedweather.network.WeatherInitialGridPayload;
 import com.ukgeo.realtimelocalisedweather.network.WeatherLightningPayload;
+import com.ukgeo.realtimelocalisedweather.network.WeatherPollRequestPayload;
 import com.ukgeo.realtimelocalisedweather.network.WeatherProtocolPayload;
 import com.ukgeo.realtimelocalisedweather.network.WeatherTileRemovePayload;
 import com.ukgeo.realtimelocalisedweather.network.WeatherTileUpdatePayload;
@@ -77,7 +78,6 @@ public final class ServerWeatherManager implements RegionalWeatherAccess {
         long gameTime = level.getGameTime();
         if (gameTime % 40L == 0L) {
             updateActiveTiles(level, state);
-            syncPlayers(level, state, true);
         }
         if (state.mode == WeatherAuthorityMode.LIVE && gameTime % (20L * ServerWeatherConfig.REFRESH_INTERVAL_MINUTES.get()) == 0L) {
             requestFetches(level, state, false);
@@ -124,6 +124,18 @@ public final class ServerWeatherManager implements RegionalWeatherAccess {
         if (state != null) {
             state.refreshRequested = true;
         }
+    }
+
+    public void handleClientPoll(ServerPlayer player, WeatherPollRequestPayload payload) {
+        ServerLevel level = player.serverLevel();
+        Optional<UkGeoReference> reference = UkGeoReferenceProvider.get(level);
+        if (reference.isEmpty()) {
+            return;
+        }
+        LevelState state = levelStates.computeIfAbsent(level.dimension(), ignored -> new LevelState(reference.get()));
+        state.reference = reference.get();
+        updateActiveTiles(level, state);
+        syncPlayer(level, state, player, false, false);
     }
 
     public void setMode(ServerLevel level, WeatherAuthorityMode mode) {
@@ -467,12 +479,15 @@ public final class ServerWeatherManager implements RegionalWeatherAccess {
 
     private void syncPlayers(ServerLevel level, LevelState state, boolean fullResync) {
         for (ServerPlayer player : level.players()) {
-            syncPlayer(level, state, player, fullResync);
+            syncPlayer(level, state, player, fullResync, true);
         }
     }
 
     private void syncPlayer(ServerLevel level, LevelState state, ServerPlayer player, boolean fullResync) {
-        sendProtocolAndReference(player, state);
+        syncPlayer(level, state, player, fullResync, true);
+    }
+
+    private void syncPlayer(ServerLevel level, LevelState state, ServerPlayer player, boolean fullResync, boolean includeHandshake) {
         Set<WeatherTileKey> relevant = ActiveTileTracker.collect(level.dimension(), List.of(player.blockPosition()), ServerWeatherConfig.ZONE_SIZE_BLOCKS.get(), ServerWeatherConfig.ACTIVE_ZONE_RADIUS.get(), ServerWeatherConfig.PREFETCH_ZONE_RADIUS.get());
         Set<Long> relevantPacked = new HashSet<>();
         List<TileSnapshotPayload> payloadTiles = new ArrayList<>();
@@ -485,7 +500,11 @@ public final class ServerWeatherManager implements RegionalWeatherAccess {
             }
         }
         PlayerSyncState playerState = state.playerSync.computeIfAbsent(player.getUUID(), ignored -> new PlayerSyncState());
-        if (fullResync || playerState.sentRevisions.isEmpty()) {
+        boolean initial = fullResync || playerState.sentRevisions.isEmpty();
+        if (includeHandshake || initial) {
+            sendProtocolAndReference(player, state);
+        }
+        if (initial) {
             PacketDistributor.sendToPlayer(player, new WeatherInitialGridPayload(level.dimension().location().toString(), state.mode, state.currentSeason, state.currentSubSeason, payloadTiles));
             playerState.replace(payloadTiles, relevantPacked);
             return;

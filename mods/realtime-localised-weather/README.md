@@ -17,6 +17,7 @@ UKGeo is a required dependency. Serene Seasons is optional.
 - The server converts active UKGeo regions from Minecraft block coordinates to British National Grid and then to WGS84 latitude/longitude.
 - The server batches active tile centres into asynchronous Open-Meteo requests.
 - The server owns authoritative regional precipitation, thunder eligibility, gameplay severity, cache state, overrides, and synchronisation.
+- Clients poll the server for the newest authoritative precipitation and cloud coverage snapshots.
 - The client owns local rendering quality, interpolation, precipitation density, cloud geometry, fog, and weather sound mixing.
 - Different clients may render different densities while still agreeing on gameplay weather.
 
@@ -46,6 +47,7 @@ Serene Seasons does not create precipitation on its own. If Open-Meteo reports n
 
 - Requests are performed only by the logical server.
 - Multiplayer clients do not contact Open-Meteo.
+- Multiplayer clients poll their Minecraft server for the latest cached tile snapshots and receive server-authoritative cloud/precipitation data.
 - Requests use Java 21 `HttpClient.sendAsync`.
 - Cached snapshots remain usable during upstream outages.
 - Expired or failed data are marked stale rather than crashing or freezing the server.

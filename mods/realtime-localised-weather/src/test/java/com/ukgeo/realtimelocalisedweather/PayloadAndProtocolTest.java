@@ -1,6 +1,7 @@
 package com.ukgeo.realtimelocalisedweather;
 
 import com.ukgeo.realtimelocalisedweather.network.ProtocolVersions;
+import com.ukgeo.realtimelocalisedweather.network.WeatherPollRequestPayload;
 import com.ukgeo.realtimelocalisedweather.network.WeatherProtocolPayload;
 import io.netty.buffer.Unpooled;
 import net.minecraft.core.RegistryAccess;
@@ -23,8 +24,20 @@ final class PayloadAndProtocolTest {
 
     @Test
     void protocolVersionMismatchIsRejected() {
-        assertTrue(ProtocolVersions.isCompatible("rlw-1"));
+        assertTrue(ProtocolVersions.isCompatible("rlw-2"));
+        assertFalse(ProtocolVersions.isCompatible("rlw-1"));
         assertFalse(ProtocolVersions.isCompatible("rlw-0"));
         assertFalse(ProtocolVersions.isCompatible("other"));
+    }
+
+    @Test
+    void weatherPollRequestCodecRoundTrips() {
+        RegistryFriendlyByteBuf buffer = new RegistryFriendlyByteBuf(Unpooled.buffer(), RegistryAccess.EMPTY);
+        WeatherPollRequestPayload payload = new WeatherPollRequestPayload("minecraft:overworld");
+
+        WeatherPollRequestPayload.STREAM_CODEC.encode(buffer, payload);
+        WeatherPollRequestPayload decoded = WeatherPollRequestPayload.STREAM_CODEC.decode(buffer);
+
+        assertEquals(payload, decoded);
     }
 }
