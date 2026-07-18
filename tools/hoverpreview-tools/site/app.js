@@ -41,12 +41,13 @@ const DEFAULT_RENDERER_PREFERENCE = "auto";
 const FIT_VIEW_PADDING_PX = 72;
 const LIVE_WEATHER_REFRESH_MS = 15 * 60 * 1000;
 const LIVE_WEATHER_PREFETCH_DELAY_MS = 750;
-const LIVE_WEATHER_GRID_COLUMNS = 32;
+const LIVE_WEATHER_GRID_COLUMNS = 256;
+const LIVE_WEATHER_SAMPLE_BATCH_POINTS = 8192;
 const LIVE_WEATHER_BATCH_POINTS = 128;
 const LIVE_WEATHER_BATCH_DELAY_MS = 350;
 const LIVE_WEATHER_MAX_RETRIES = 4;
 const LIVE_WEATHER_RETRY_BASE_DELAY_MS = 2000;
-const LIVE_WEATHER_PRECIPITATION_MAX_MM = 5;
+const LIVE_WEATHER_PRECIPITATION_MAX_MM = 30;
 const LIVE_WEATHER_OPEN_METEO_LAYER_SCRIPT_URL = "https://unpkg.com/@openmeteo/weather-map-layer@0.0.19/dist/index.js";
 const LIVE_WEATHER_OPEN_METEO_MAP_TILES_BASE_URL = "https://map-tiles.open-meteo.com/data_spatial";
 const LIVE_WEATHER_OPEN_METEO_DOMAIN = "dwd_icon";
@@ -551,7 +552,10 @@ function installLiveWeatherLayers(manifest) {
 function resolveLiveWeatherConfig(manifest) {
   const configured = manifest?.live_weather;
   if (configured?.grid?.latitudes?.length && configured?.grid?.longitudes?.length) {
-    return normalizeLiveWeatherConfig(configured);
+    return normalizeLiveWeatherConfig({
+      ...configured,
+      grid: bestLiveWeatherGrid(manifest, configured.grid),
+    });
   }
 
   const grid = buildLiveWeatherGrid(manifest, LIVE_WEATHER_GRID_COLUMNS);
@@ -587,6 +591,22 @@ function normalizeLiveWeatherConfig(config) {
     batch_points: config?.batch_points || LIVE_WEATHER_BATCH_POINTS,
     forecast_api_fallback: config?.forecast_api_fallback === true,
   };
+}
+
+function bestLiveWeatherGrid(manifest, configuredGrid) {
+  const configuredColumns = Number(configuredGrid?.columns);
+  const configuredRows = Number(configuredGrid?.rows);
+  const configuredCount = Array.isArray(configuredGrid?.latitudes) ? configuredGrid.latitudes.length : 0;
+  if (
+    Number.isFinite(configuredColumns)
+    && configuredColumns >= LIVE_WEATHER_GRID_COLUMNS
+    && Number.isFinite(configuredRows)
+    && configuredRows >= 2
+    && configuredCount === configuredColumns * configuredRows
+  ) {
+    return configuredGrid;
+  }
+  return buildLiveWeatherGrid(manifest, LIVE_WEATHER_GRID_COLUMNS) || configuredGrid;
 }
 
 function buildLiveWeatherGrid(manifest, requestedColumns) {
@@ -1233,6 +1253,7 @@ function drawLiveWeatherLayer(layer, crop) {
   const dw = (drawCrop.right - drawCrop.left) * state.zoom;
   const dh = (drawCrop.bottom - drawCrop.top) * state.zoom;
   ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
   ctx.drawImage(live.canvas, sx, sy, sw, sh, dx, dy, dw, dh);
 }
 
@@ -2091,17 +2112,21 @@ async function fetchOpenMeteoOmWeather(config) {
   const downfall = new Float32Array(total);
   const latitudes = Array.from(grid.latitudes || [], (value) => Number(value));
   const longitudes = Array.from(grid.longitudes || [], (value) => Number(value));
-  await Promise.all(Array.from({ length: total }, async (_, index) => {
-    const latitude = latitudes[index];
-    const longitude = longitudes[index];
-    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
-    const [cloudSample, precipitationSample] = await Promise.all([
-      library.getValueFromLatLong(latitude, longitude, cloudUrl),
-      library.getValueFromLatLong(latitude, longitude, precipitationUrl),
-    ]);
-    cloud[index] = clampPercent(cloudSample?.value);
-    downfall[index] = clampPrecipitationMm(precipitationSample?.value);
-  }));
+  for (let start = 0; start < total; start += LIVE_WEATHER_SAMPLE_BATCH_POINTS) {
+    const end = Math.min(total, start + LIVE_WEATHER_SAMPLE_BATCH_POINTS);
+    await Promise.all(Array.from({ length: end - start }, async (_, offset) => {
+      const index = start + offset;
+      const latitude = latitudes[index];
+      const longitude = longitudes[index];
+      if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
+      const [cloudSample, precipitationSample] = await Promise.all([
+        library.getValueFromLatLong(latitude, longitude, cloudUrl),
+        library.getValueFromLatLong(latitude, longitude, precipitationUrl),
+      ]);
+      cloud[index] = clampPercent(cloudSample?.value);
+      downfall[index] = clampPrecipitationMm(precipitationSample?.value);
+    }));
+  }
   return { cloud_cover: cloud, downfall_coverage: downfall };
 }
 
@@ -2279,24 +2304,60 @@ function createLiveWeatherMetric(metricName, values, columns, rows) {
   for (let index = 0; index < values.length; index += 1) {
     const base = index * 4;
     const value = values[index];
-    if (metricName === "cloud_cover") {
-      const shade = Math.round(232 - (232 - 108) * (value / 100));
-      const alpha = Math.round(176 * (value / 100));
-      imageData.data[base + 0] = shade;
-      imageData.data[base + 1] = shade;
-      imageData.data[base + 2] = shade;
-      imageData.data[base + 3] = alpha;
-    } else {
-      const intensity = Math.sqrt(Math.min(1, value / LIVE_WEATHER_PRECIPITATION_MAX_MM));
-      const alpha = value > 0 ? Math.round(40 + 168 * intensity) : 0;
-      imageData.data[base + 0] = 76;
-      imageData.data[base + 1] = 148;
-      imageData.data[base + 2] = 255;
-      imageData.data[base + 3] = alpha;
-    }
+    const rgba = metricName === "cloud_cover" ? liveCloudColor(value) : livePrecipitationColor(value);
+    imageData.data[base + 0] = rgba[0];
+    imageData.data[base + 1] = rgba[1];
+    imageData.data[base + 2] = rgba[2];
+    imageData.data[base + 3] = rgba[3];
   }
   ctx.putImageData(imageData, 0, 0);
   return { metricName, values, columns, rows, canvas };
+}
+
+function liveCloudColor(value) {
+  const cover = Math.max(0, Math.min(100, Number(value) || 0));
+  if (cover <= 3) return [255, 255, 255, 0];
+  const shade = Math.round(250 - 118 * (cover / 100));
+  const alpha = Math.round(12 + 150 * Math.pow(cover / 100, 0.9));
+  return [shade, shade, shade, alpha];
+}
+
+function livePrecipitationColor(value) {
+  const amount = Number(value) || 0;
+  if (amount < 0.05) return [0, 0, 0, 0];
+  const stops = [
+    [0.05, 134, 205, 250, 48],
+    [0.11, 118, 197, 250, 72],
+    [0.45, 64, 161, 251, 104],
+    [0.95, 0, 96, 233, 132],
+    [2, 0, 177, 236, 158],
+    [4.95, 0, 241, 141, 178],
+    [7.45, 66, 248, 0, 198],
+    [10, 255, 221, 0, 216],
+    [15, 255, 111, 0, 232],
+    [20, 255, 0, 0, 242],
+    [25, 215, 0, 94, 250],
+    [30, 175, 0, 153, 255],
+  ];
+  return interpolateWeatherStops(Math.min(LIVE_WEATHER_PRECIPITATION_MAX_MM, amount), stops);
+}
+
+function interpolateWeatherStops(value, stops) {
+  if (value <= stops[0][0]) return stops[0].slice(1);
+  for (let index = 1; index < stops.length; index += 1) {
+    const previous = stops[index - 1];
+    const next = stops[index];
+    if (value <= next[0]) {
+      const ratio = (value - previous[0]) / Math.max(0.000001, next[0] - previous[0]);
+      return [
+        Math.round(previous[1] + (next[1] - previous[1]) * ratio),
+        Math.round(previous[2] + (next[2] - previous[2]) * ratio),
+        Math.round(previous[3] + (next[3] - previous[3]) * ratio),
+        Math.round(previous[4] + (next[4] - previous[4]) * ratio),
+      ];
+    }
+  }
+  return stops[stops.length - 1].slice(1);
 }
 
 function animalsListUrls(manifest) {

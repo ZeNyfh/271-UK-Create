@@ -136,7 +136,11 @@ test("live weather controls work with older manifests and fetch Open-Meteo", () 
   assert.match(appJs, /https:\/\/api\.open-meteo\.com\/v1\/forecast/);
   assert.match(appJs, /forecast_api_fallback:\s*config\?\.forecast_api_fallback === true/);
   assert.match(appJs, /const DEFAULT_VISIBLE_OVERLAYS = new Set\(\);/);
-  assert.match(appJs, /const LIVE_WEATHER_GRID_COLUMNS = 32;/);
+  assert.match(appJs, /const LIVE_WEATHER_GRID_COLUMNS = 256;/);
+  assert.match(appJs, /const LIVE_WEATHER_SAMPLE_BATCH_POINTS = 8192;/);
+  assert.match(appJs, /function bestLiveWeatherGrid\(manifest, configuredGrid\)/);
+  assert.match(appJs, /grid: bestLiveWeatherGrid\(manifest, configured\.grid\)/);
+  assert.match(appJs, /function livePrecipitationColor\(value\)/);
   assert.match(appJs, /const LIVE_WEATHER_BATCH_POINTS = 128;/);
   assert.match(appJs, /const LIVE_WEATHER_BATCH_DELAY_MS = 350;/);
   assert.match(appJs, /const LIVE_WEATHER_MAX_RETRIES = 4;/);
