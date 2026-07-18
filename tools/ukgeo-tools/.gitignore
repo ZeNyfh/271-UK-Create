@@ -17,3 +17,6 @@ uk_world_data_gb/*
 !uk_world_data_gb/**/*.r16rg
 !uk_world_data_gb/hoverpreviews/
 !uk_world_data_gb/hoverpreviews/**
+!uk_world_data_gb/hoverpreviews/**/*.json
+!uk_world_data_gb/hoverpreviews/**/*.png
+!uk_world_data_gb/hoverpreviews/**/*.webp

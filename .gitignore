@@ -68,6 +68,9 @@ tools/ukgeo-tools/ukgeo-hover-linux
 tools/ukgeo-tools/uk_world_data_gb/*
 !tools/ukgeo-tools/uk_world_data_gb/hoverpreviews/
 !tools/ukgeo-tools/uk_world_data_gb/hoverpreviews/**
+!tools/ukgeo-tools/uk_world_data_gb/hoverpreviews/**/*.json
+!tools/ukgeo-tools/uk_world_data_gb/hoverpreviews/**/*.png
+!tools/ukgeo-tools/uk_world_data_gb/hoverpreviews/**/*.webp
 
 # Local GitHub Pages staging output
 _site/
