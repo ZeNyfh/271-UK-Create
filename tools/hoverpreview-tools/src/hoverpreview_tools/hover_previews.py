@@ -25,7 +25,7 @@ from .weather_overlay import DEFAULT_OPEN_METEO_BASE_URL, build_weather_overlay_
 
 HOVER_PREVIEW_FORMAT = "ukgeo-hoverpreviews-v1"
 HOVER_PREVIEW_INDEX = "hover_manifest.json"
-DEFAULT_TILE_SIZE = 256
+DEFAULT_TILE_SIZE = 512
 VISUAL_TILE_SIZE = DEFAULT_TILE_SIZE
 SUPPORTED_VISUAL_FORMATS = {"png", "webp"}
 PREVIEW_RIVER_WIDTH_SCALE = 0.18

@@ -127,10 +127,12 @@ test("live weather controls work with older manifests and fetch Open-Meteo", () 
   assert.match(appJs, /function britishNationalGridToWgs84\(easting, northing\)/);
   assert.match(appJs, /https:\/\/api\.open-meteo\.com\/v1\/forecast/);
   assert.match(appJs, /const DEFAULT_VISIBLE_OVERLAYS = new Set\(\);/);
+  assert.match(appJs, /const LIVE_WEATHER_PREFETCH_DELAY_MS = 750;/);
   assert.match(appJs, /const LIVE_WEATHER_GRID_COLUMNS = 32;/);
-  assert.match(appJs, /const LIVE_WEATHER_BATCH_POINTS = 96;/);
-  assert.match(appJs, /const LIVE_WEATHER_BATCH_DELAY_MS = 1000;/);
+  assert.match(appJs, /const LIVE_WEATHER_BATCH_POINTS = 128;/);
+  assert.match(appJs, /const LIVE_WEATHER_BATCH_DELAY_MS = 350;/);
   assert.match(appJs, /const LIVE_WEATHER_MAX_RETRIES = 4;/);
+  assert.match(appJs, /fetchLiveWeather\(manifest, \{ prefetch: true \}\)/);
   assert.match(appJs, /url\.searchParams\.set\("current", "cloud_cover,precipitation"\)/);
   assert.doesNotMatch(appJs, /url\.searchParams\.set\("hourly", "precipitation_probability"\)/);
   assert.match(appJs, /async function fetchOpenMeteoBatch\(url\)/);
@@ -142,7 +144,7 @@ test("live weather controls work with older manifests and fetch Open-Meteo", () 
   assert.match(appJs, /input\.checked && layer\.kind === "weather-live"/);
   assert.match(appJs, /function hasEnabledLiveWeatherLayer\(\)/);
   assert.match(appJs, /function stopLiveWeatherRefreshIfUnused\(\)/);
-  assert.match(appJs, /if \(!hasEnabledLiveWeatherLayer\(\)\) return;/);
+  assert.match(appJs, /if \(!prefetch && !hasEnabledLiveWeatherLayer\(\)\) return;/);
   assert.doesNotMatch(appJs, /if \(manifest\.live_weather\) \{\s*state\.mapRendererFallbackReason = "live-weather-2d";\s*replaceWithCanvasRenderer\(\);/);
   assert.match(appJs, /input\.checked && layer\.kind === "animal"/);
   assert.match(appJs, /function ensureAnimalsListLoaded\(manifest\)/);
@@ -157,6 +159,15 @@ test("live weather controls work with older manifests and fetch Open-Meteo", () 
   assert.doesNotMatch(appJs, /createCanvasRenderer\(state\.mapCanvas\);\s*fetchLiveWeather\(manifest\)/);
   assert.match(appJs, /Viewer initialisation failed/);
   assert.match(appJs, /continuing without weather overlays/);
+});
+
+test("hoverpreview defaults use larger tiles to reduce request count", () => {
+  const configYml = fs.readFileSync(path.join(__dirname, "../config.yml"), "utf8");
+  const hoverPreviewsPy = fs.readFileSync(path.join(__dirname, "../src/hoverpreview_tools/hover_previews.py"), "utf8");
+
+  assert.match(configYml, /HOVERPREVIEW_TILE_SIZE:\s*512/);
+  assert.match(configYml, /HOVERPREVIEW_WEATHER_BATCH_POINTS:\s*128/);
+  assert.match(hoverPreviewsPy, /DEFAULT_TILE_SIZE = 512/);
 });
 
 test("site fit view uses the full exported image and treats outside-height ocean as y=62", () => {

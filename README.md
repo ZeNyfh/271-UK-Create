@@ -118,7 +118,7 @@ Useful variants:
 ```bash
 ./generate_hover_previews.sh --regenerate all
 ./generate_hover_previews.sh --regenerate ores,animals,preview
-./generate_hover_previews.sh --workers 1 --tile-size 256
+./generate_hover_previews.sh --workers 1 --tile-size 512
 ```
 
 This reads `tools/hoverpreview-tools/config.yml` section `generate`.

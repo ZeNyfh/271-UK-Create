@@ -40,9 +40,10 @@ const SAMPLE_CROP_SIZE = 512;
 const DEFAULT_RENDERER_PREFERENCE = "auto";
 const FIT_VIEW_PADDING_PX = 72;
 const LIVE_WEATHER_REFRESH_MS = 15 * 60 * 1000;
+const LIVE_WEATHER_PREFETCH_DELAY_MS = 750;
 const LIVE_WEATHER_GRID_COLUMNS = 32;
-const LIVE_WEATHER_BATCH_POINTS = 96;
-const LIVE_WEATHER_BATCH_DELAY_MS = 1000;
+const LIVE_WEATHER_BATCH_POINTS = 128;
+const LIVE_WEATHER_BATCH_DELAY_MS = 350;
 const LIVE_WEATHER_MAX_RETRIES = 4;
 const LIVE_WEATHER_RETRY_BASE_DELAY_MS = 2000;
 const LIVE_WEATHER_PRECIPITATION_MAX_MM = 5;
@@ -336,6 +337,11 @@ async function loadManifest(url) {
 
   elements.empty.hidden = true;
   fitView();
+  if (manifest.live_weather) {
+    window.setTimeout(() => {
+      fetchLiveWeather(manifest, { prefetch: true }).catch((error) => console.warn("[hoverpreview] Live weather prefetch failed", error));
+    }, LIVE_WEATHER_PREFETCH_DELAY_MS);
+  }
   if (elements.loadState) {
     const staticCount = (manifest.layers || []).length;
     const liveCount = manifest.live_weather ? 2 : 0;
@@ -2014,11 +2020,11 @@ function stopLiveWeatherRefreshIfUnused() {
   }
 }
 
-async function fetchLiveWeather(manifest) {
+async function fetchLiveWeather(manifest, { prefetch = false } = {}) {
   const config = manifest?.live_weather;
   const grid = config?.grid;
   if (!config || !grid?.latitudes?.length || !grid?.longitudes?.length) return;
-  if (!hasEnabledLiveWeatherLayer()) return;
+  if (!prefetch && !hasEnabledLiveWeatherLayer()) return;
   if (state.liveWeather.loading) return;
   state.liveWeather.loading = true;
   try {

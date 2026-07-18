@@ -45,7 +45,7 @@ Useful export options:
 ```bash
 ./generate_hover_previews.sh --regenerate height,preview
 ./generate_hover_previews.sh --regenerate all
-./generate_hover_previews.sh --tile-size 256 --workers 8 --visual-format png
+./generate_hover_previews.sh --tile-size 512 --workers 8 --visual-format png
 ./generate_hover_previews.sh --force --clean-stale --profile
 # Set HOVERPREVIEW_DEPLOY_MINIMAL: true in config.yml to trim redundant files.
 ./generate_hover_previews.sh --regenerate preview
