@@ -47,6 +47,10 @@ const LIVE_WEATHER_BATCH_DELAY_MS = 350;
 const LIVE_WEATHER_MAX_RETRIES = 4;
 const LIVE_WEATHER_RETRY_BASE_DELAY_MS = 2000;
 const LIVE_WEATHER_PRECIPITATION_MAX_MM = 5;
+const LIVE_WEATHER_OPEN_METEO_LAYER_SCRIPT_URL = "https://unpkg.com/@openmeteo/weather-map-layer@0.0.19/dist/index.js";
+const LIVE_WEATHER_OPEN_METEO_MAP_TILES_BASE_URL = "https://map-tiles.open-meteo.com/data_spatial";
+const LIVE_WEATHER_OPEN_METEO_DOMAIN = "dwd_icon";
+const LIVE_WEATHER_OPEN_METEO_TIME_STEP = "current_time+1H";
 const RenderMath = globalThis.HoverRenderMath || {};
 const BACKGROUND_ORE_ATTEMPT_MULTIPLIER = 0.1;
 const ORE_AREA_ATTEMPT_MULTIPLIER = 3.0;
@@ -72,6 +76,8 @@ const ORE_ATTEMPT_SETTINGS = {
   veridium: { base: 0, maxBonus: 12 },
   smooth_basalt: { base: 0, maxBonus: 16 },
 };
+
+let openMeteoWeatherMapLayerPromise = null;
 
 const elements = {
   loadState: document.querySelector("#load-state"),
@@ -337,11 +343,6 @@ async function loadManifest(url) {
 
   elements.empty.hidden = true;
   fitView();
-  if (manifest.live_weather) {
-    window.setTimeout(() => {
-      fetchLiveWeather(manifest, { prefetch: true }).catch((error) => console.warn("[hoverpreview] Live weather prefetch failed", error));
-    }, LIVE_WEATHER_PREFETCH_DELAY_MS);
-  }
   if (elements.loadState) {
     const staticCount = (manifest.layers || []).length;
     const liveCount = manifest.live_weather ? 2 : 0;
@@ -549,20 +550,42 @@ function installLiveWeatherLayers(manifest) {
 
 function resolveLiveWeatherConfig(manifest) {
   const configured = manifest?.live_weather;
-  if (configured?.grid?.latitudes?.length && configured?.grid?.longitudes?.length) return configured;
+  if (configured?.grid?.latitudes?.length && configured?.grid?.longitudes?.length) {
+    return normalizeLiveWeatherConfig(configured);
+  }
 
   const grid = buildLiveWeatherGrid(manifest, LIVE_WEATHER_GRID_COLUMNS);
   if (!grid) return null;
-  return {
+  return normalizeLiveWeatherConfig({
     provider: "Open-Meteo",
-    api_base_url: "https://api.open-meteo.com/v1/forecast",
-    weather_model: "auto",
-    batch_points: LIVE_WEATHER_BATCH_POINTS,
     metrics: {
       cloud_cover: { unit: "percent", source: "current.cloud_cover" },
       downfall_coverage: { unit: "mm", source: "current.precipitation" },
     },
     grid,
+  });
+}
+
+function normalizeLiveWeatherConfig(config) {
+  const tileProvider = config?.tile_provider || {};
+  return {
+    ...config,
+    provider: config?.provider || "Open-Meteo",
+    tile_provider: {
+      kind: "openmeteo-om",
+      script_url: tileProvider.script_url || LIVE_WEATHER_OPEN_METEO_LAYER_SCRIPT_URL,
+      data_base_url: tileProvider.data_base_url || LIVE_WEATHER_OPEN_METEO_MAP_TILES_BASE_URL,
+      domain: tileProvider.domain || LIVE_WEATHER_OPEN_METEO_DOMAIN,
+      time_step: tileProvider.time_step || LIVE_WEATHER_OPEN_METEO_TIME_STEP,
+      variables: {
+        cloud_cover: tileProvider.variables?.cloud_cover || "cloud_cover",
+        downfall_coverage: tileProvider.variables?.downfall_coverage || "precipitation",
+      },
+    },
+    api_base_url: config?.api_base_url || "https://api.open-meteo.com/v1/forecast",
+    weather_model: config?.weather_model || "auto",
+    batch_points: config?.batch_points || LIVE_WEATHER_BATCH_POINTS,
+    forecast_api_fallback: config?.forecast_api_fallback === true,
   };
 }
 
@@ -2028,8 +2051,12 @@ async function fetchLiveWeather(manifest, { prefetch = false } = {}) {
   if (state.liveWeather.loading) return;
   state.liveWeather.loading = true;
   try {
-    const payloads = await fetchOpenMeteoWeather(config);
-    const metrics = decodeLiveWeatherMetrics(config, payloads);
+    const metrics = await fetchOpenMeteoOmWeather(config).catch(async (error) => {
+      if (!config.forecast_api_fallback) throw error;
+      console.warn("[hoverpreview] Open-Meteo OM weather failed; using configured forecast API fallback", error);
+      const payloads = await fetchOpenMeteoWeather(config);
+      return decodeLiveWeatherMetrics(config, payloads);
+    });
     state.liveWeather.cloud_cover = createLiveWeatherMetric("cloud_cover", metrics.cloud_cover, grid.columns, grid.rows);
     state.liveWeather.downfall_coverage = createLiveWeatherMetric("downfall_coverage", metrics.downfall_coverage, grid.columns, grid.rows);
     scheduleRender();
@@ -2044,6 +2071,100 @@ async function fetchLiveWeather(manifest, { prefetch = false } = {}) {
       }, LIVE_WEATHER_REFRESH_MS);
     }
   }
+}
+
+async function fetchOpenMeteoOmWeather(config) {
+  const provider = config?.tile_provider;
+  if (!provider || provider.kind !== "openmeteo-om") throw new Error("Open-Meteo OM tile provider is not configured");
+  const library = await loadOpenMeteoWeatherMapLayer(provider.script_url);
+  const grid = config.grid;
+  const cloudUrl = openMeteoOmUrl(provider, provider.variables?.cloud_cover || "cloud_cover");
+  const precipitationUrl = openMeteoOmUrl(provider, provider.variables?.downfall_coverage || "precipitation");
+
+  await Promise.all([
+    primeOpenMeteoOmVariable(library, cloudUrl),
+    primeOpenMeteoOmVariable(library, precipitationUrl),
+  ]);
+
+  const total = Number(grid.rows) * Number(grid.columns);
+  const cloud = new Uint8Array(total);
+  const downfall = new Float32Array(total);
+  const latitudes = Array.from(grid.latitudes || [], (value) => Number(value));
+  const longitudes = Array.from(grid.longitudes || [], (value) => Number(value));
+  await Promise.all(Array.from({ length: total }, async (_, index) => {
+    const latitude = latitudes[index];
+    const longitude = longitudes[index];
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
+    const [cloudSample, precipitationSample] = await Promise.all([
+      library.getValueFromLatLong(latitude, longitude, cloudUrl),
+      library.getValueFromLatLong(latitude, longitude, precipitationUrl),
+    ]);
+    cloud[index] = clampPercent(cloudSample?.value);
+    downfall[index] = clampPrecipitationMm(precipitationSample?.value);
+  }));
+  return { cloud_cover: cloud, downfall_coverage: downfall };
+}
+
+function openMeteoOmUrl(provider, variable) {
+  const base = String(provider.data_base_url || LIVE_WEATHER_OPEN_METEO_MAP_TILES_BASE_URL).replace(/\/+$/, "");
+  const domain = encodeURIComponent(String(provider.domain || LIVE_WEATHER_OPEN_METEO_DOMAIN));
+  const url = new URL(`${base}/${domain}/latest.json`);
+  url.searchParams.set("variable", String(variable));
+  const timeStep = String(provider.time_step || LIVE_WEATHER_OPEN_METEO_TIME_STEP).trim();
+  if (timeStep) url.searchParams.set("time_step", timeStep);
+  return `om://${url.href}`;
+}
+
+async function primeOpenMeteoOmVariable(library, omUrl) {
+  const controller = new AbortController();
+  await library.omProtocol({ url: omUrl, type: "json" }, { signal: controller.signal });
+}
+
+async function loadOpenMeteoWeatherMapLayer(scriptUrl) {
+  if (globalThis.OMWeatherMapLayer?.omProtocol && globalThis.OMWeatherMapLayer?.getValueFromLatLong) {
+    return globalThis.OMWeatherMapLayer;
+  }
+  if (!openMeteoWeatherMapLayerPromise) {
+    openMeteoWeatherMapLayerPromise = loadScript(scriptUrl || LIVE_WEATHER_OPEN_METEO_LAYER_SCRIPT_URL).then(() => {
+      const library = globalThis.OMWeatherMapLayer;
+      if (!library?.omProtocol || !library?.getValueFromLatLong) {
+        throw new Error("Open-Meteo weather-map-layer did not expose the expected OM reader API");
+      }
+      return library;
+    });
+  }
+  return openMeteoWeatherMapLayerPromise;
+}
+
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    const href = new URL(src, location.href).href;
+    const existing = document.querySelector(`script[data-hoverpreview-script="${cssEscape(href)}"]`);
+    if (existing) {
+      if (existing.dataset.loaded === "true") {
+        resolve();
+        return;
+      }
+      existing.addEventListener("load", resolve, { once: true });
+      existing.addEventListener("error", () => reject(new Error(`Failed to load ${href}`)), { once: true });
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = href;
+    script.async = true;
+    script.dataset.hoverpreviewScript = href;
+    script.addEventListener("load", () => {
+      script.dataset.loaded = "true";
+      resolve();
+    }, { once: true });
+    script.addEventListener("error", () => reject(new Error(`Failed to load ${href}`)), { once: true });
+    document.head.append(script);
+  });
+}
+
+function cssEscape(value) {
+  if (globalThis.CSS?.escape) return globalThis.CSS.escape(String(value));
+  return String(value).replace(/["\\]/g, "\\$&");
 }
 
 function liveWeatherPlaceholder(latitude, longitude) {
