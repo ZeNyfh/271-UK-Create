@@ -138,7 +138,13 @@ test("live weather controls work with older manifests and fetch Open-Meteo", () 
   assert.doesNotMatch(appJs, /if \(manifest\.live_weather\) \{\s*state\.mapRendererFallbackReason = "live-weather-2d";\s*replaceWithCanvasRenderer\(\);/);
   assert.match(appJs, /input\.checked && layer\.kind === "animal"/);
   assert.match(appJs, /function ensureAnimalsListLoaded\(manifest\)/);
-  assert.match(appJs, /hasEnabledAnimalLayer\(\) && isAnimalSourceLayer\(entry\.layer\)/);
+  assert.match(appJs, /hasEnabledAnimalLayer\(\) && isAnimalSourceLayer\(entry\?\.layer\)/);
+  assert.match(appJs, /if \(!entry \|\| !shouldLoadSample\(entry\)\) return undefined;/);
+  assert.doesNotMatch(appJs, /layerName === "height" \|\| shouldLoadSample/);
+  assert.doesNotMatch(appJs, /layer\.name !== "height" && \(!entry \|\| !shouldLoadSample\(entry\)\)/);
+  assert.match(appJs, /return Boolean\(entry\?\.enabled \|\| \(hasEnabledAnimalLayer\(\) && isAnimalSourceLayer\(entry\?\.layer\)\)\)/);
+  assert.match(appJs, /function releasePendingLayerRequests\(layerName\)/);
+  assert.match(appJs, /if \(!state\.layers\.get\(layer\.name\)\?\.enabled\) return null;/);
   assert.doesNotMatch(appJs, /loadAnimalsList\(manifest\)\.catch/);
   assert.doesNotMatch(appJs, /createCanvasRenderer\(state\.mapCanvas\);\s*fetchLiveWeather\(manifest\)/);
   assert.match(appJs, /Viewer initialisation failed/);

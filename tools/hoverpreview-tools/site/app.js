@@ -617,6 +617,7 @@ function toggleFor(layer, checked) {
     if (!input.checked) {
       releaseLayerBitmaps(layer.name);
       releaseSample(layer.name);
+      releasePendingLayerRequests(layer.name);
       if (layer.kind === "weather-live") stopLiveWeatherRefreshIfUnused();
     }
     scheduleRender();
@@ -1309,6 +1310,25 @@ function pruneStaleBitmapLoads() {
   }
 }
 
+function releasePendingLayerRequests(layerName) {
+  const layerPrefix = `${layerName}\n`;
+  for (const key of Array.from(state.pendingLayerLoadRequests.keys())) {
+    if (key.startsWith(layerPrefix)) state.pendingLayerLoadRequests.delete(key);
+  }
+  const pending = [];
+  for (const item of state.bitmapLoadQueue) {
+    if (item.key && item.key.startsWith(layerPrefix)) {
+      item.resolve(null);
+    } else {
+      pending.push(item);
+    }
+  }
+  state.bitmapLoadQueue = pending;
+  for (const key of Array.from(state.activeLayerBitmapKeys)) {
+    if (key.startsWith(layerPrefix)) state.activeLayerBitmapKeys.delete(key);
+  }
+}
+
 function layerLoadPriority(layer, mip, region, crop) {
   const layerPriority = layer.kind === "base" ? 0 : layer.kind === "ore" ? 200000 : 100000;
   const factor = Number(mip.factor) || 1;
@@ -1394,9 +1414,11 @@ function intersectImageCrop(crop, decoded) {
 
 async function loadLayerBitmap(layer, mip, region, key, priority) {
   const bitmap = await enqueueBitmapLoad(async () => {
+    if (!state.layers.get(layer.name)?.enabled) return null;
     if (!state.activeLayerBitmapKeys.has(key)) return null;
     const url = layerRegionUrl(layer, mip, region);
     const blob = mip.tiles ? await fetchBlob(url) : await loadSourceBlob(url);
+    if (!state.layers.get(layer.name)?.enabled) return null;
     if (!state.activeLayerBitmapKeys.has(key)) return null;
     if (mip.tiles) return createLayerImageBitmap(blob);
     return createLayerImageBitmap(blob, region.left, region.top, region.right - region.left, region.bottom - region.top);
@@ -1702,6 +1724,7 @@ function bngText(dataX, dataZ) {
 }
 
 function minecraftHeightText(sample) {
+  if (!isLayerEnabled("height")) return "—";
   if (sample.height === undefined) return "loading…";
   if (sample.height === null || sample.minecraftHeight === null || sample.minecraftHeight === undefined) return "62";
   return `${sample.minecraftHeight}`;
@@ -1829,6 +1852,10 @@ function hasEnabledAnimalLayer() {
     if (entry?.layer?.kind === "animal" && entry.enabled) return true;
   }
   return false;
+}
+
+function isLayerEnabled(layerName) {
+  return Boolean(state.layers.get(layerName)?.enabled);
 }
 
 function isAnimalSourceLayer(layer) {
@@ -2431,7 +2458,7 @@ async function loadSample(layer, imageX = null, imageY = null) {
   const load = (async () => {
     const decoded = await enqueueBitmapLoad(async () => {
       const entry = state.layers.get(layer.name);
-      if (layer.name !== "height" && (!entry || !shouldLoadSample(entry))) return null;
+      if (!entry || !shouldLoadSample(entry)) return null;
       const blob = crop.tile
         ? await fetchBlob(sampleRegionUrl(layer, crop))
         : await loadSourceBlob(assetUrl(sampleFile));
@@ -2443,7 +2470,7 @@ async function loadSample(layer, imageX = null, imageY = null) {
       return;
     }
     const entry = state.layers.get(layer.name);
-    if (layer.name !== "height" && (!entry || !shouldLoadSample(entry))) {
+    if (!entry || !shouldLoadSample(entry)) {
       if (typeof decoded.bitmap.close === "function") decoded.bitmap.close();
       return;
     }
@@ -2480,7 +2507,7 @@ async function loadSampleTile(layer, imageX, imageY) {
   const load = (async () => {
     const decoded = await enqueueBitmapLoad(async () => {
       const entry = state.layers.get(layer.name);
-      if (layer.name !== "height" && (!entry || !shouldLoadSample(entry))) return null;
+      if (!entry || !shouldLoadSample(entry)) return null;
       const blob = await fetchBlob(sampleRegionUrl(layer, tile));
       const bitmap = await createImageBitmap(blob);
       return { bitmap, width: bitmap.width, height: bitmap.height };
@@ -2492,7 +2519,7 @@ async function loadSampleTile(layer, imageX, imageY) {
       return;
     }
     const entry = state.layers.get(layer.name);
-    if (layer.name !== "height" && (!entry || !shouldLoadSample(entry))) {
+    if (!entry || !shouldLoadSample(entry)) {
       if (typeof decoded.bitmap.close === "function") decoded.bitmap.close();
       return;
     }
@@ -2625,6 +2652,7 @@ function samplePixel(layerName, imageX, imageY) {
 
 function samplePixelRgba(layerName, imageX, imageY) {
   const entry = state.layers.get(layerName);
+  if (!entry || !shouldLoadSample(entry)) return undefined;
   if (entry?.layer?.kind === "weather-live") {
     const live = state.liveWeather[entry.layer.live_weather_metric];
     if (!live || !Number.isFinite(imageX) || !Number.isFinite(imageY)) return undefined;
@@ -2641,7 +2669,7 @@ function samplePixelRgba(layerName, imageX, imageY) {
     const key = sampleTileCacheKey(entry.layer, tileInfo.tileX, tileInfo.tileY);
     const tile = state.sampleTiles.get(key);
     if (!tile) {
-      if (layerName === "height" || shouldLoadSample(entry)) loadSample(entry.layer, imageX, imageY).catch(() => undefined);
+      loadSample(entry.layer, imageX, imageY).catch(() => undefined);
       return undefined;
     }
     tile.lastUsed = performance.now();
@@ -2652,7 +2680,7 @@ function samplePixelRgba(layerName, imageX, imageY) {
 
   const sample = state.samples.get(layerName);
   if (!sample || !sampleContains(sample, imageX, imageY)) {
-    if (entry && (layerName === "height" || shouldLoadSample(entry))) loadSample(entry.layer, imageX, imageY).catch(() => undefined);
+    loadSample(entry.layer, imageX, imageY).catch(() => undefined);
     return undefined;
   }
   const x = Math.max(0, Math.min(sample.width - 1, Math.floor(imageX) - sample.originX));
@@ -2688,7 +2716,7 @@ function pruneSampleTileCache() {
 }
 
 function shouldLoadSample(entry) {
-  return entry.layer.kind === "ore" || entry.enabled || (hasEnabledAnimalLayer() && isAnimalSourceLayer(entry.layer));
+  return Boolean(entry?.enabled || (hasEnabledAnimalLayer() && isAnimalSourceLayer(entry?.layer)));
 }
 
 async function copyCoordinates(event) {
