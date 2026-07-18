@@ -105,7 +105,7 @@ By default the exporter also writes static metadata that the browser can use to
 fetch live Open-Meteo weather overlays:
 
 - `Cloud coverage`
-- `Rain / precipitation` (coverage from Open-Meteo precipitation probability for the current forecast hour)
+- `Rain / precipitation` (current Open-Meteo precipitation amount)
 
 The browser fetches those overlays at runtime using the exported UKGeo
 georeferencing-derived WGS84 query grid. The site remains static; weather does

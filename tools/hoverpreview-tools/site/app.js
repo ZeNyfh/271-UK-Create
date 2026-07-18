@@ -40,7 +40,8 @@ const SAMPLE_CROP_SIZE = 512;
 const DEFAULT_RENDERER_PREFERENCE = "auto";
 const FIT_VIEW_PADDING_PX = 72;
 const LIVE_WEATHER_REFRESH_MS = 15 * 60 * 1000;
-const LIVE_WEATHER_GRID_COLUMNS = 12;
+const LIVE_WEATHER_GRID_COLUMNS = 32;
+const LIVE_WEATHER_PRECIPITATION_MAX_MM = 5;
 const RenderMath = globalThis.HoverRenderMath || {};
 const BACKGROUND_ORE_ATTEMPT_MULTIPLIER = 0.1;
 const ORE_AREA_ATTEMPT_MULTIPLIER = 3.0;
@@ -535,7 +536,7 @@ function installLiveWeatherLayers(manifest) {
     name: "downfall_coverage",
     kind: "weather-live",
     label: "Rain / precipitation",
-    value_format: "percent",
+    value_format: "precipitation_mm",
     live_weather_metric: "downfall_coverage",
   });
 }
@@ -553,7 +554,7 @@ function resolveLiveWeatherConfig(manifest) {
     batch_points: 64,
     metrics: {
       cloud_cover: { unit: "percent", source: "current.cloud_cover" },
-      downfall_coverage: { unit: "percent", source: "hourly.precipitation_probability[0]" },
+      downfall_coverage: { unit: "mm", source: "current.precipitation" },
     },
     grid,
   };
@@ -1933,6 +1934,11 @@ function overlayValueLabel(layer, value) {
   if (layer?.value_format === "percent") {
     return `${Math.round(Number(value) || 0)}%`;
   }
+  if (layer?.value_format === "precipitation_mm") {
+    const number = Number(value) || 0;
+    if (number < 0.05) return "trace";
+    return `${number.toFixed(number < 1 ? 1 : 0)} mm/h`;
+  }
   return classLabel(layer?.name || "", value);
 }
 
@@ -1983,8 +1989,7 @@ async function fetchOpenMeteoWeather(config) {
     const url = new URL(baseUrl, location.href);
     url.searchParams.set("latitude", batchLatitudes.map((value) => value.toFixed(6)).join(","));
     url.searchParams.set("longitude", batchLongitudes.map((value) => value.toFixed(6)).join(","));
-    url.searchParams.set("current", "cloud_cover");
-    url.searchParams.set("hourly", "precipitation_probability");
+    url.searchParams.set("current", "cloud_cover,precipitation");
     url.searchParams.set("forecast_hours", "1");
     url.searchParams.set("timezone", "GMT");
     url.searchParams.set("timeformat", "unixtime");
@@ -2003,13 +2008,11 @@ async function fetchOpenMeteoWeather(config) {
 function decodeLiveWeatherMetrics(config, payloads) {
   const total = Number(config?.grid?.rows) * Number(config?.grid?.columns);
   const cloud = new Uint8Array(total);
-  const downfall = new Uint8Array(total);
+  const downfall = new Float32Array(total);
   payloads.forEach((location, index) => {
     const current = location?.current || {};
-    const hourly = location?.hourly || {};
-    const probabilities = Array.isArray(hourly.precipitation_probability) ? hourly.precipitation_probability : [];
     cloud[index] = clampPercent(current.cloud_cover);
-    downfall[index] = clampPercent(probabilities.length ? probabilities[0] : 0);
+    downfall[index] = clampPrecipitationMm(current.precipitation);
   });
   return { cloud_cover: cloud, downfall_coverage: downfall };
 }
@@ -2018,6 +2021,12 @@ function clampPercent(value) {
   const number = Number(value);
   if (!Number.isFinite(number)) return 0;
   return Math.max(0, Math.min(100, Math.round(number)));
+}
+
+function clampPrecipitationMm(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return 0;
+  return Math.max(0, number);
 }
 
 function createLiveWeatherMetric(metricName, values, columns, rows) {
@@ -2037,7 +2046,8 @@ function createLiveWeatherMetric(metricName, values, columns, rows) {
       imageData.data[base + 2] = shade;
       imageData.data[base + 3] = alpha;
     } else {
-      const alpha = Math.round(208 * (value / 100));
+      const intensity = Math.min(1, value / LIVE_WEATHER_PRECIPITATION_MAX_MM);
+      const alpha = Math.round(208 * intensity);
       imageData.data[base + 0] = 76;
       imageData.data[base + 1] = 148;
       imageData.data[base + 2] = 255;

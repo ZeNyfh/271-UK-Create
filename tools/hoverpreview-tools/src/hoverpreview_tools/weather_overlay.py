@@ -100,15 +100,12 @@ def fetch_open_meteo_weather_overlay(
         )
         for location in response:
             current = location.get("current") or {}
-            hourly = location.get("hourly") or {}
             cloud = _coerce_percent(current.get("cloud_cover"))
-            hourly_probabilities = hourly.get("precipitation_probability") or []
-            downfall = _coerce_percent(hourly_probabilities[0] if hourly_probabilities else 0)
+            downfall = _coerce_precipitation_mm(current.get("precipitation"))
             cloud_values.append(cloud)
             downfall_values.append(downfall)
             cloud_times.append(_coerce_int(current.get("time")))
-            hourly_times = hourly.get("time") or []
-            downfall_times.append(_coerce_int(hourly_times[0] if hourly_times else None))
+            downfall_times.append(_coerce_int(current.get("time")))
 
     total = grid.rows * grid.columns
     if len(cloud_values) != total or len(downfall_values) != total:
@@ -118,7 +115,7 @@ def fetch_open_meteo_weather_overlay(
 
     return WeatherOverlaySnapshot(
         cloud_cover=np.asarray(cloud_values, dtype=np.uint8).reshape(grid.rows, grid.columns),
-        downfall_coverage=np.asarray(downfall_values, dtype=np.uint8).reshape(grid.rows, grid.columns),
+        downfall_coverage=np.asarray(downfall_values, dtype=np.float32).reshape(grid.rows, grid.columns),
         cloud_observed_at_unix=max((value for value in cloud_times if value is not None), default=None),
         downfall_observed_at_unix=max((value for value in downfall_times if value is not None), default=None),
         api_base_url=api_base_url,
@@ -139,8 +136,7 @@ def _open_meteo_batch_request(
     params = {
         "latitude": ",".join(f"{value:.6f}" for value in latitudes),
         "longitude": ",".join(f"{value:.6f}" for value in longitudes),
-        "current": "cloud_cover",
-        "hourly": "precipitation_probability",
+        "current": "cloud_cover,precipitation",
         "forecast_hours": 1,
         "timezone": "GMT",
         "timeformat": "unixtime",
@@ -162,6 +158,13 @@ def _coerce_percent(value: Any) -> int:
     if not np.isfinite(number):
         return 0
     return int(np.clip(round(number), 0, 100))
+
+
+def _coerce_precipitation_mm(value: Any) -> float:
+    number = float(value or 0)
+    if not np.isfinite(number):
+        return 0.0
+    return float(max(0.0, number))
 
 
 def _coerce_int(value: Any) -> int | None:

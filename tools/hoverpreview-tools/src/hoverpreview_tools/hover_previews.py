@@ -59,6 +59,7 @@ CLOUD_OVERLAY_MAX_SHADE = 232
 CLOUD_OVERLAY_MAX_ALPHA = 176
 DOWNFALL_OVERLAY_COLOR = (76, 148, 255)
 DOWNFALL_OVERLAY_MAX_ALPHA = 208
+DOWNFALL_OVERLAY_MAX_MM = 5.0
 
 
 @dataclass(frozen=True)
@@ -662,7 +663,7 @@ def _live_weather_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
         "batch_points": settings["batch_points"],
         "metrics": {
             "cloud_cover": {"unit": "percent", "source": "current.cloud_cover"},
-            "downfall_coverage": {"unit": "percent", "source": "hourly.precipitation_probability[0]"},
+            "downfall_coverage": {"unit": "mm", "source": "current.precipitation"},
         },
         "grid": {
             "rows": grid.rows,
@@ -737,8 +738,8 @@ def _export_weather_overlay_layers(
             "observed_at_unix": snapshot.cloud_observed_at_unix,
         },
         "downfall_coverage": {
-            "metric": "precipitation_probability",
-            "unit": "percent",
+            "metric": "precipitation",
+            "unit": "mm",
             "observed_at_unix": snapshot.downfall_observed_at_unix,
         },
     }
@@ -761,12 +762,18 @@ def _export_numeric_weather_layer(
 ) -> dict[str, Any]:
     with tempfile.TemporaryDirectory(prefix=f"hoverpreview-{layer_name}-", dir=out) as temp_dir_name:
         temp_dir = Path(temp_dir_name)
+        if layer_name == "downfall_coverage":
+            sample_values = np.clip(values.astype(np.float32), 0, 255).astype(np.uint8)
+            value_format = "precipitation_mm"
+        else:
+            sample_values = values.astype(np.uint8)
+            value_format = "percent"
         sample_source = _create_disk_raster(temp_dir / f"{layer_name}.sample.source.bin", (values.shape[1], values.shape[0]), "L")
-        _render_fitted_u8_sample_raster(values.astype(np.uint8), sample_source)
+        _render_fitted_u8_sample_raster(sample_values, sample_source)
         sample = _resize_disk_raster(sample_source, temp_dir / f"{layer_name}.sample.bin", base_size, Image.Resampling.BILINEAR)
 
         visual_source = _create_disk_raster(temp_dir / f"{layer_name}.visual.source.bin", (values.shape[1], values.shape[0]), "RGBA")
-        render_visual(values.astype(np.uint8), visual_source)
+        render_visual(values, visual_source)
         visual = _resize_disk_raster(visual_source, temp_dir / f"{layer_name}.visual.bin", base_size, Image.Resampling.BILINEAR)
 
         mips = _save_visual_raster_layer(
@@ -803,7 +810,7 @@ def _export_numeric_weather_layer(
         "name": layer_name,
         "kind": "weather",
         "label": label,
-        "value_format": "percent",
+        "value_format": value_format,
         "file": mips[0].get("file"),
         "mips": mips,
         "sample_file": sample_file,
@@ -1071,7 +1078,7 @@ def _render_downfall_overlay_raster(values: np.ndarray, raster: DiskRaster) -> N
         array[...] = 0
         height = min(values.shape[0], raster.height)
         width = min(values.shape[1], raster.width)
-        probability = np.clip(values[:height, :width].astype(np.float32) / 100.0, 0.0, 1.0)
+        probability = np.clip(values[:height, :width].astype(np.float32) / DOWNFALL_OVERLAY_MAX_MM, 0.0, 1.0)
         alpha = np.clip(probability * DOWNFALL_OVERLAY_MAX_ALPHA, 0, DOWNFALL_OVERLAY_MAX_ALPHA).astype(np.uint8)
         view = array[:height, :width]
         view[:, :, 0] = DOWNFALL_OVERLAY_COLOR[0]

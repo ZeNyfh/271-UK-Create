@@ -368,7 +368,7 @@ def test_export_hover_previews_writes_live_weather_query_metadata(tmp_path):
     assert "live_weather" in hover_manifest
     assert hover_manifest["live_weather"]["provider"] == "Open-Meteo"
     assert hover_manifest["live_weather"]["metrics"]["cloud_cover"]["unit"] == "percent"
-    assert hover_manifest["live_weather"]["metrics"]["downfall_coverage"]["source"] == "hourly.precipitation_probability[0]"
+    assert hover_manifest["live_weather"]["metrics"]["downfall_coverage"]["source"] == "current.precipitation"
     assert hover_manifest["live_weather"]["grid"]["rows"] >= 2
     assert hover_manifest["live_weather"]["grid"]["columns"] >= 2
     assert len(hover_manifest["live_weather"]["grid"]["latitudes"]) == (

@@ -126,8 +126,9 @@ test("live weather controls work with older manifests and fetch Open-Meteo", () 
   assert.match(appJs, /function buildLiveWeatherGrid\(manifest, requestedColumns\)/);
   assert.match(appJs, /function britishNationalGridToWgs84\(easting, northing\)/);
   assert.match(appJs, /https:\/\/api\.open-meteo\.com\/v1\/forecast/);
-  assert.match(appJs, /url\.searchParams\.set\("current", "cloud_cover"\)/);
-  assert.match(appJs, /url\.searchParams\.set\("hourly", "precipitation_probability"\)/);
+  assert.match(appJs, /const LIVE_WEATHER_GRID_COLUMNS = 32;/);
+  assert.match(appJs, /url\.searchParams\.set\("current", "cloud_cover,precipitation"\)/);
+  assert.doesNotMatch(appJs, /url\.searchParams\.set\("hourly", "precipitation_probability"\)/);
   assert.match(appJs, /label: "Cloud coverage"/);
   assert.match(appJs, /label: "Rain \/ precipitation"/);
   assert.match(appJs, /input\.checked && layer\.kind === "weather-live"/);
