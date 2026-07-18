@@ -120,6 +120,7 @@ const state = {
   sampleGeneration: 0,
   animals: new Map(),
   animalsLoaded: false,
+  animalsLoading: null,
   animalsLoadError: null,
   measure: null,
   mapCanvas: null,
@@ -300,6 +301,7 @@ async function loadManifest(url) {
   state.layers.clear();
   state.animals.clear();
   state.animalsLoaded = false;
+  state.animalsLoading = null;
   state.animalsLoadError = null;
   resetLiveWeatherState();
   clearBitmapCaches();
@@ -327,12 +329,6 @@ async function loadManifest(url) {
     addLayer(layer);
   }
   installLiveWeatherLayers(manifest);
-  if (manifest.live_weather) {
-    state.mapRendererFallbackReason = "live-weather-2d";
-    replaceWithCanvasRenderer();
-  }
-
-  loadAnimalsList(manifest).catch(() => undefined);
 
   elements.empty.hidden = true;
   fitView();
@@ -606,14 +602,22 @@ function toggleFor(layer, checked) {
     const entry = state.layers.get(layer.name);
     entry.enabled = input.checked;
     if (input.checked && layer.kind === "weather-live" && !state.liveWeather[layer.live_weather_metric]) {
+      if (state.mapRendererMode !== "2d") {
+        state.mapRendererFallbackReason = "live-weather-2d";
+        replaceWithCanvasRenderer();
+      }
       fetchLiveWeather(state.manifest).catch((error) => {
         console.warn("[hoverpreview] Live weather fetch failed", error);
         refreshStatus();
       });
     }
+    if (input.checked && layer.kind === "animal") {
+      ensureAnimalsListLoaded(state.manifest).catch(() => undefined);
+    }
     if (!input.checked) {
       releaseLayerBitmaps(layer.name);
       releaseSample(layer.name);
+      if (layer.kind === "weather-live") stopLiveWeatherRefreshIfUnused();
     }
     scheduleRender();
     refreshStatus();
@@ -1775,12 +1779,13 @@ function statusDetails(sample) {
   const overlays = [];
   const ores = [];
   const animalCandidates = [];
+  const animalFeaturesEnabled = hasEnabledAnimalLayer();
 
   for (const entry of state.layers.values()) {
     if (entry.layer.kind === "base") continue;
 
     const isAnimalLayer = isAnimalSourceLayer(entry.layer);
-    if (!entry.enabled && !isAnimalLayer) continue;
+    if (!entry.enabled && (!isAnimalLayer || !animalFeaturesEnabled)) continue;
 
     const value = samplePixel(
         entry.layer.name,
@@ -1802,7 +1807,7 @@ function statusDetails(sample) {
 
       // Animal lookup must not depend on the overlay being visible. Use the
       // same sampled class plus aliases from the manifest class table.
-      if (isAnimalLayer) {
+      if (animalFeaturesEnabled && isAnimalLayer) {
         animalCandidates.push(...classCandidateValues(entry.layer.name, value));
       }
     }
@@ -1811,10 +1816,19 @@ function statusDetails(sample) {
   const parts = [];
   if (overlays.length) parts.push(overlays.join(" | "));
   if (ores.length) parts.push(`Ores ${ores.join(", ")}`);
-  const animalText = animalsForSample(sample, animalCandidates);
-  if (animalText && animalText !== "—") parts.push(`Animals: ${animalText}`);
+  if (animalFeaturesEnabled) {
+    const animalText = animalsForSample(sample, animalCandidates);
+    if (animalText && animalText !== "—") parts.push(`Animals: ${animalText}`);
+  }
 
   return parts.length ? ` | ${parts.join(" | ")}` : "";
+}
+
+function hasEnabledAnimalLayer() {
+  for (const entry of state.layers.values()) {
+    if (entry?.layer?.kind === "animal" && entry.enabled) return true;
+  }
+  return false;
 }
 
 function isAnimalSourceLayer(layer) {
@@ -1954,10 +1968,26 @@ function resetLiveWeatherState() {
   };
 }
 
+function hasEnabledLiveWeatherLayer() {
+  for (const entry of state.layers.values()) {
+    if (entry?.layer?.kind === "weather-live" && entry.enabled) return true;
+  }
+  return false;
+}
+
+function stopLiveWeatherRefreshIfUnused() {
+  if (hasEnabledLiveWeatherLayer()) return;
+  if (state.liveWeather.timer) {
+    window.clearTimeout(state.liveWeather.timer);
+    state.liveWeather.timer = 0;
+  }
+}
+
 async function fetchLiveWeather(manifest) {
   const config = manifest?.live_weather;
   const grid = config?.grid;
   if (!config || !grid?.latitudes?.length || !grid?.longitudes?.length) return;
+  if (!hasEnabledLiveWeatherLayer()) return;
   if (state.liveWeather.loading) return;
   state.liveWeather.loading = true;
   try {
@@ -1970,9 +2000,12 @@ async function fetchLiveWeather(manifest) {
   } finally {
     state.liveWeather.loading = false;
     if (state.liveWeather.timer) window.clearTimeout(state.liveWeather.timer);
-    state.liveWeather.timer = window.setTimeout(() => {
-      fetchLiveWeather(manifest).catch((error) => console.warn("[hoverpreview] Live weather refresh failed", error));
-    }, LIVE_WEATHER_REFRESH_MS);
+    state.liveWeather.timer = 0;
+    if (hasEnabledLiveWeatherLayer()) {
+      state.liveWeather.timer = window.setTimeout(() => {
+        fetchLiveWeather(manifest).catch((error) => console.warn("[hoverpreview] Live weather refresh failed", error));
+      }, LIVE_WEATHER_REFRESH_MS);
+    }
   }
 }
 
@@ -2077,6 +2110,15 @@ function animalsListUrls(manifest) {
   return urls;
 }
 
+async function ensureAnimalsListLoaded(manifest) {
+  if (state.animalsLoaded) return;
+  if (state.animalsLoading) return state.animalsLoading;
+  state.animalsLoading = loadAnimalsList(manifest).finally(() => {
+    state.animalsLoading = null;
+  });
+  return state.animalsLoading;
+}
+
 async function loadAnimalsList(manifest) {
   // Use a built-in list immediately so the hover UI works even when this page is
   // served from a wrapper path that cannot fetch ./animals.txt. A fetched
@@ -2139,6 +2181,8 @@ function parseAnimalsList(text) {
 }
 
 function animalsForSample(sample, candidates = []) {
+  if (!hasEnabledAnimalLayer()) return "—";
+  ensureAnimalsListLoaded(state.manifest).catch(() => undefined);
   if (!state.animalsLoaded || !state.animals.size) return "—";
 
   const allCandidates = [];
@@ -2644,7 +2688,7 @@ function pruneSampleTileCache() {
 }
 
 function shouldLoadSample(entry) {
-  return entry.layer.kind === "ore" || entry.enabled || isAnimalSourceLayer(entry.layer);
+  return entry.layer.kind === "ore" || entry.enabled || (hasEnabledAnimalLayer() && isAnimalSourceLayer(entry.layer));
 }
 
 async function copyCoordinates(event) {
