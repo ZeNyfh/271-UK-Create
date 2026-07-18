@@ -19,7 +19,7 @@ const DEFAULT_ANIMALS_TEXT = `
 13|coastal_ocean|ocean|sea|beach|coast|minecraft:ocean|ukgeo:coastal_ocean: —
 `;
 const START_STATUS = "Mouse wheel zooms. Middle/right drag pans. Left drag measures distance. Left click copies the current Minecraft coordinates.";
-const DEFAULT_VISIBLE_OVERLAYS = new Set(["surface", "vegetation", "rivers"]);
+const DEFAULT_VISIBLE_OVERLAYS = new Set();
 const DEFAULT_VISIBLE_ORES = new Set(["coal", "iron", "copper", "zinc", "gold"]);
 const MAX_DEVICE_PIXEL_RATIO = 2;
 const DECODE_CHUNK_PIXELS = 192;
@@ -41,6 +41,10 @@ const DEFAULT_RENDERER_PREFERENCE = "auto";
 const FIT_VIEW_PADDING_PX = 72;
 const LIVE_WEATHER_REFRESH_MS = 15 * 60 * 1000;
 const LIVE_WEATHER_GRID_COLUMNS = 32;
+const LIVE_WEATHER_BATCH_POINTS = 96;
+const LIVE_WEATHER_BATCH_DELAY_MS = 1000;
+const LIVE_WEATHER_MAX_RETRIES = 4;
+const LIVE_WEATHER_RETRY_BASE_DELAY_MS = 2000;
 const LIVE_WEATHER_PRECIPITATION_MAX_MM = 5;
 const RenderMath = globalThis.HoverRenderMath || {};
 const BACKGROUND_ORE_ATTEMPT_MULTIPLIER = 0.1;
@@ -547,7 +551,7 @@ function resolveLiveWeatherConfig(manifest) {
     provider: "Open-Meteo",
     api_base_url: "https://api.open-meteo.com/v1/forecast",
     weather_model: "auto",
-    batch_points: 64,
+    batch_points: LIVE_WEATHER_BATCH_POINTS,
     metrics: {
       cloud_cover: { unit: "percent", source: "current.cloud_cover" },
       downfall_coverage: { unit: "mm", source: "current.precipitation" },
@@ -2036,13 +2040,25 @@ async function fetchLiveWeather(manifest) {
   }
 }
 
+function liveWeatherPlaceholder(latitude, longitude) {
+  return {
+    latitude,
+    longitude,
+    current: {
+      cloud_cover: 0,
+      precipitation: 0,
+    },
+  };
+}
+
 async function fetchOpenMeteoWeather(config) {
   const baseUrl = String(config.api_base_url || "https://api.open-meteo.com/v1/forecast");
   const model = String(config.weather_model || "auto").trim();
-  const batchPoints = Math.max(1, Number(config.batch_points) || 64);
+  const batchPoints = Math.max(1, Number(config.batch_points) || LIVE_WEATHER_BATCH_POINTS);
   const latitudes = Array.from(config.grid.latitudes || [], (value) => Number(value));
   const longitudes = Array.from(config.grid.longitudes || [], (value) => Number(value));
   const results = [];
+  const failures = [];
   for (let start = 0; start < latitudes.length; start += batchPoints) {
     const batchLatitudes = latitudes.slice(start, start + batchPoints);
     const batchLongitudes = longitudes.slice(start, start + batchPoints);
@@ -2056,13 +2072,51 @@ async function fetchOpenMeteoWeather(config) {
     if (model && model.toLowerCase() !== "auto") {
       url.searchParams.set("models", model);
     }
-    const response = await fetch(url.href, { cache: "no-store" });
-    if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
-    const payload = await response.json();
-    if (!Array.isArray(payload)) throw new Error(`Expected Open-Meteo multi-location response array, got ${typeof payload}`);
-    results.push(...payload);
+    try {
+      const payload = await fetchOpenMeteoBatch(url);
+      results.push(...payload);
+    } catch (error) {
+      failures.push(error);
+      console.warn("[hoverpreview] Open-Meteo weather batch failed; rendering remaining successful batches", error);
+      for (let index = 0; index < batchLatitudes.length; index += 1) {
+        results.push(liveWeatherPlaceholder(batchLatitudes[index], batchLongitudes[index]));
+      }
+    }
+    if (start + batchPoints < latitudes.length) await delay(LIVE_WEATHER_BATCH_DELAY_MS);
+  }
+  if (failures.length) {
+    console.warn(`[hoverpreview] Open-Meteo weather overlay used ${failures.length} placeholder batch(es) after rate-limit or network failures`);
   }
   return results;
+}
+
+async function fetchOpenMeteoBatch(url) {
+  let lastError = null;
+  for (let attempt = 0; attempt <= LIVE_WEATHER_MAX_RETRIES; attempt += 1) {
+    const response = await fetch(url.href, { cache: "no-store" });
+    if (response.ok) {
+      const payload = await response.json();
+      if (!Array.isArray(payload)) throw new Error(`Expected Open-Meteo multi-location response array, got ${typeof payload}`);
+      return payload;
+    }
+
+    lastError = new Error(`${response.status} ${response.statusText}`);
+    if (response.status !== 429 || attempt >= LIVE_WEATHER_MAX_RETRIES) throw lastError;
+    await delay(openMeteoRetryDelay(response, attempt));
+  }
+  throw lastError || new Error("Open-Meteo request failed");
+}
+
+function openMeteoRetryDelay(response, attempt) {
+  const retryAfter = Number(response.headers.get("Retry-After"));
+  if (Number.isFinite(retryAfter) && retryAfter > 0) {
+    return Math.min(60_000, retryAfter * 1000);
+  }
+  return Math.min(60_000, LIVE_WEATHER_RETRY_BASE_DELAY_MS * 2 ** attempt);
+}
+
+function delay(ms) {
+  return new Promise((resolve) => window.setTimeout(resolve, Math.max(0, Number(ms) || 0)));
 }
 
 function decodeLiveWeatherMetrics(config, payloads) {
@@ -2106,8 +2160,8 @@ function createLiveWeatherMetric(metricName, values, columns, rows) {
       imageData.data[base + 2] = shade;
       imageData.data[base + 3] = alpha;
     } else {
-      const intensity = Math.min(1, value / LIVE_WEATHER_PRECIPITATION_MAX_MM);
-      const alpha = Math.round(208 * intensity);
+      const intensity = Math.sqrt(Math.min(1, value / LIVE_WEATHER_PRECIPITATION_MAX_MM));
+      const alpha = value > 0 ? Math.round(40 + 168 * intensity) : 0;
       imageData.data[base + 0] = 76;
       imageData.data[base + 1] = 148;
       imageData.data[base + 2] = 255;
