@@ -1,6 +1,8 @@
 const FORMAT = "ukgeo-hoverpreviews-v1";
 const DEFAULT_MANIFEST = "hoverpreviews/hover_manifest.json";
 const DEFAULT_ANIMALS_LIST = "animals.txt";
+const SELECTED_LAYERS_COOKIE = "ukgeo_hoverpreview_selected_layers";
+const SELECTED_LAYERS_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
 const DEFAULT_ANIMALS_TEXT = `
 # Built-in fallback used when animals.txt cannot be fetched.
 0|none|unknown: —
@@ -159,6 +161,8 @@ const state = {
     cloud_cover: null,
     downfall_coverage: null,
   },
+  checkboxLayerNames: new Set(),
+  persistedSelectedLayerNames: null,
 };
 
 elements.zoomIn.addEventListener("click", (event) => stepZoomAroundCentre(1, event.shiftKey));
@@ -311,6 +315,8 @@ async function loadManifest(url) {
   state.imageWidth = Number(manifest.image_width);
   state.imageHeight = Number(manifest.image_height);
   state.layers.clear();
+  state.checkboxLayerNames.clear();
+  state.persistedSelectedLayerNames = readSelectedLayersCookie();
   state.animals.clear();
   state.animalsLoaded = false;
   state.animalsLoading = null;
@@ -341,6 +347,7 @@ async function loadManifest(url) {
     addLayer(layer);
   }
   installLiveWeatherLayers(manifest);
+  startRestoredLayerLoads();
 
   elements.empty.hidden = true;
   fitView();
@@ -516,7 +523,7 @@ function fallbackToCanvasRenderer(error) {
 }
 
 function addLayer(layer) {
-  const enabled = isLayerVisibleByDefault(layer);
+  const enabled = isLayerSelected(layer);
   state.layers.set(layer.name, { layer, enabled });
   if (layer.name === "biome_regions") return;
   const controls = layer.kind === "ore"
@@ -528,6 +535,7 @@ function addLayer(layer) {
     console.warn("[hoverpreview] Missing layer control container for layer", layer.name, layer.kind);
     return;
   }
+  state.checkboxLayerNames.add(layer.name);
   controls.append(toggleFor(layer, enabled));
 }
 
@@ -645,6 +653,48 @@ function isLayerVisibleByDefault(layer) {
   return DEFAULT_VISIBLE_OVERLAYS.has(layer.name);
 }
 
+function isLayerSelected(layer) {
+  if (state.persistedSelectedLayerNames instanceof Set) return state.persistedSelectedLayerNames.has(layer.name);
+  return isLayerVisibleByDefault(layer);
+}
+
+function readSelectedLayersCookie() {
+  const value = readCookie(SELECTED_LAYERS_COOKIE);
+  if (value === null) return null;
+  try {
+    const parsed = JSON.parse(value);
+    if (!Array.isArray(parsed)) return null;
+    return new Set(parsed.filter((name) => typeof name === "string" && name.length > 0));
+  } catch {
+    return null;
+  }
+}
+
+function readCookie(name) {
+  const prefix = `${name}=`;
+  for (const part of document.cookie.split(";")) {
+    const cookie = part.trim();
+    if (!cookie.startsWith(prefix)) continue;
+    try {
+      return decodeURIComponent(cookie.slice(prefix.length));
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+function persistSelectedLayerCookie() {
+  const selectedLayers = new Set();
+  for (const layerName of state.checkboxLayerNames) {
+    if (state.layers.get(layerName)?.enabled) selectedLayers.add(layerName);
+  }
+  state.persistedSelectedLayerNames = selectedLayers;
+  const value = encodeURIComponent(JSON.stringify([...selectedLayers].sort()));
+  const secure = location.protocol === "https:" ? "; Secure" : "";
+  document.cookie = `${SELECTED_LAYERS_COOKIE}=${value}; Max-Age=${SELECTED_LAYERS_COOKIE_MAX_AGE_SECONDS}; Path=/; SameSite=Lax${secure}`;
+}
+
 function toggleFor(layer, checked) {
   const label = document.createElement("label");
   label.className = "layer-toggle";
@@ -653,7 +703,9 @@ function toggleFor(layer, checked) {
   input.checked = checked;
   input.addEventListener("change", () => {
     const entry = state.layers.get(layer.name);
+    if (!entry) return;
     entry.enabled = input.checked;
+    persistSelectedLayerCookie();
     if (input.checked && layer.kind === "weather-live" && !state.liveWeather[layer.live_weather_metric]) {
       if (state.mapRendererMode !== "2d") {
         state.mapRendererFallbackReason = "live-weather-2d";
@@ -680,6 +732,22 @@ function toggleFor(layer, checked) {
   name.textContent = layer.label || layer.ore || labelFor(layer.name);
   label.append(input, name);
   return label;
+}
+
+function startRestoredLayerLoads() {
+  if (hasEnabledLiveWeatherLayer()) {
+    if (state.mapRendererMode !== "2d") {
+      state.mapRendererFallbackReason = "live-weather-2d";
+      replaceWithCanvasRenderer();
+    }
+    fetchLiveWeather(state.manifest).catch((error) => {
+      console.warn("[hoverpreview] Live weather fetch failed", error);
+      refreshStatus();
+    });
+  }
+  if (hasEnabledAnimalLayer()) {
+    ensureAnimalsListLoaded(state.manifest).catch(() => undefined);
+  }
 }
 
 function labelFor(name) {

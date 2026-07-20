@@ -2,9 +2,12 @@ package com.ukgeo.realtimelocalisedweather;
 
 import com.ukgeo.realtimelocalisedweather.weather.GameplaySeverity;
 import com.ukgeo.realtimelocalisedweather.weather.MeteorologicalPrecipitation;
+import com.ukgeo.realtimelocalisedweather.weather.ResolvedPrecipitation;
+import com.ukgeo.realtimelocalisedweather.weather.ServerWeatherSnapshot;
 import com.ukgeo.realtimelocalisedweather.weather.WeatherSeverityMapper;
 import com.ukgeo.realtimelocalisedweather.weather.WeatherTileKey;
 import com.ukgeo.realtimelocalisedweather.openmeteo.OpenMeteoParser;
+import java.time.Instant;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.core.registries.Registries;
@@ -31,6 +34,37 @@ final class WeatherMappingTest {
         assertEquals(GameplaySeverity.MODERATE, WeatherSeverityMapper.fromRates(1.2F, 0.0F, 0.0F));
         assertEquals(GameplaySeverity.HEAVY, WeatherSeverityMapper.fromRates(4.0F, 0.0F, 0.0F));
         assertEquals(GameplaySeverity.EXTREME, WeatherSeverityMapper.fromRates(12.0F, 0.0F, 0.0F));
+    }
+
+    @Test
+    void positiveRateCountsAsPrecipitationEvenWithClearWeatherCode() {
+        ServerWeatherSnapshot snapshot = new ServerWeatherSnapshot(
+            Instant.parse("2026-07-18T18:00:00Z"),
+            55.0,
+            -3.0,
+            0,
+            MeteorologicalPrecipitation.NONE,
+            0.1F,
+            0.1F,
+            0.0F,
+            12.0F,
+            80.0F,
+            100.0F,
+            100.0F,
+            100.0F,
+            100.0F,
+            10000.0F,
+            10.0F,
+            180.0F,
+            20.0F,
+            ResolvedPrecipitation.NONE,
+            GameplaySeverity.TRACE,
+            0.0F,
+            false,
+            1L
+        );
+
+        assertTrue(snapshot.hasPrecipitation());
     }
 
     @Test

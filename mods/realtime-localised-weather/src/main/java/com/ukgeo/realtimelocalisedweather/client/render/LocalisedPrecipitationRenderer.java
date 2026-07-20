@@ -24,6 +24,7 @@ public final class LocalisedPrecipitationRenderer {
         }
         int renderDistance = ClientWeatherConfig.PRECIPITATION_RENDER_DISTANCE_BLOCKS.get();
         RenderSystem.enableBlend();
+        RenderSystem.disableCull();
         try {
             Matrix4f modelView = RenderSystem.getModelViewMatrix();
             var builder = Tesselator.getInstance().begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_COLOR);
@@ -38,13 +39,13 @@ public final class LocalisedPrecipitationRenderer {
                         continue;
                     }
                     var weather = sample.get();
-                    if (!weather.snapshot().resolvedPrecipitation().isPrecipitating()) {
+                    if (!weather.snapshot().hasPrecipitation() && weather.interpolatedRate() <= 0.001F) {
                         continue;
                     }
                     if (!minecraft.level.canSeeSky(samplePos.above())) {
                         continue;
                     }
-                    float baseIntensity = Math.max(0.1F, weather.interpolatedRate() / 6.0F);
+                    float baseIntensity = Math.max(0.18F, (float) Math.sqrt(Math.max(0.0F, weather.interpolatedRate())) / 3.0F);
                     float densityMultiplier = weather.snapshot().resolvedPrecipitation().isSnowy()
                         ? ClientWeatherConfig.SNOW_DENSITY_MULTIPLIER.get().floatValue()
                         : ClientWeatherConfig.PRECIPITATION_DENSITY_MULTIPLIER.get().floatValue();
@@ -58,7 +59,7 @@ public final class LocalisedPrecipitationRenderer {
                     float y1 = (float) (topY + 8 - cameraY);
                     float y2 = y1 - length;
                     float z = (float) (samplePos.getZ() + 0.5D - cameraZ);
-                    float alpha = Math.min(0.8F, baseIntensity * densityMultiplier * 0.45F);
+                    float alpha = Math.min(0.85F, Math.max(0.12F, baseIntensity * densityMultiplier * 0.65F));
                     int red = weather.snapshot().resolvedPrecipitation().isSnowy() ? 240 : 160;
                     int green = weather.snapshot().resolvedPrecipitation().isSnowy() ? 240 : 180;
                     int blue = 255;
@@ -74,6 +75,7 @@ public final class LocalisedPrecipitationRenderer {
                 BufferUploader.drawWithShader(meshData);
             }
         } finally {
+            RenderSystem.enableCull();
             RenderSystem.disableBlend();
         }
     }
@@ -96,5 +98,9 @@ public final class LocalisedPrecipitationRenderer {
         builder.addVertex(matrix, x + width, y1, z).setColor(red, green, blue, alpha);
         builder.addVertex(matrix, x + width + slant, y2, z + slant).setColor(red, green, blue, 0);
         builder.addVertex(matrix, x - width + slant, y2, z + slant).setColor(red, green, blue, 0);
+        builder.addVertex(matrix, x, y1, z - width).setColor(red, green, blue, alpha);
+        builder.addVertex(matrix, x, y1, z + width).setColor(red, green, blue, alpha);
+        builder.addVertex(matrix, x + slant, y2, z + width + slant).setColor(red, green, blue, 0);
+        builder.addVertex(matrix, x + slant, y2, z - width + slant).setColor(red, green, blue, 0);
     }
 }

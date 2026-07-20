@@ -4,9 +4,12 @@ import com.mojang.serialization.Codec;
 import com.mojang.serialization.MapCodec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
 import com.ukgeo.worldgen.geo.UkGeoReference;
+import net.minecraft.CrashReport;
+import net.minecraft.ReportedException;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
@@ -22,11 +25,14 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.LongAdder;
+import java.util.function.Supplier;
+import java.util.stream.Collectors;
 import net.minecraft.Util;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
 import net.minecraft.core.HolderSet;
 import net.minecraft.core.Registry;
+import net.minecraft.core.SectionPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.data.worldgen.placement.VegetationPlacements;
@@ -44,6 +50,8 @@ import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.biome.BiomeGenerationSettings;
 import net.minecraft.world.level.biome.BiomeManager;
 import net.minecraft.world.level.biome.BiomeSource;
+import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.animal.axolotl.Axolotl;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.DoublePlantBlock;
@@ -63,6 +71,8 @@ import net.minecraft.world.level.levelgen.XoroshiroRandomSource;
 import net.minecraft.world.level.levelgen.blending.Blender;
 import net.minecraft.world.level.levelgen.carver.ConfiguredWorldCarver;
 import net.minecraft.world.level.levelgen.placement.PlacedFeature;
+import net.minecraft.world.level.levelgen.structure.BoundingBox;
+import net.minecraft.world.level.levelgen.structure.Structure;
 import net.minecraft.world.level.material.Fluids;
 
 public final class UkGeoChunkGenerator extends ChunkGenerator {
@@ -82,6 +92,10 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     private static final boolean ENABLE_NOISE_CAVES = !Boolean.getBoolean("ukgeo.disableNoiseCaves");
     private static final boolean PRESERVE_DELEGATE_NOISE_CAVES = Boolean.getBoolean("ukgeo.preserveDelegateNoiseCaves");
     private static final boolean ENABLE_VANILLA_CARVERS = !Boolean.getBoolean("ukgeo.disableVanillaCarvers");
+    private static final int UNDERGROUND_BIOME_MAX_Y = Integer.getInteger("ukgeo.undergroundBiomeMaxY", 48);
+    private static final int LUSH_CAVES_MAX_Y = Integer.getInteger("ukgeo.lushCavesMaxY", 40);
+    private static final int DEEP_DARK_MAX_Y = Integer.getInteger("ukgeo.deepDarkMaxY", 8);
+    private static final int MOUNTAIN_BIOME_SOURCE_HEIGHT_DECIMETRES = Integer.getInteger("ukgeo.mountainBiomeSourceHeightDecimetres", 4_200);
     private static final boolean ENABLE_DEEP_CARVERS = Boolean.getBoolean("ukgeo.enableUkGeoDeepCaves");
     private static final boolean REQUEST_BIOME_FEATURE_DECORATION = Boolean.getBoolean("ukgeo.enableBiomeFeatureDecoration");
     private static final boolean ENABLE_BIOME_FEATURE_DECORATION = REQUEST_BIOME_FEATURE_DECORATION
@@ -90,9 +104,12 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     private static final boolean DEBUG_STRUCTURE_CLEANUP = Boolean.getBoolean("ukgeo.debugStructureCleanup");
     private static final boolean DEBUG_FULL_TIMING_SPAM = Boolean.getBoolean("ukgeo.debugTimingSpam");
     private static final boolean DEBUG_PERF_SUMMARY = Boolean.getBoolean("ukgeo.debugPerfSummary");
+    private static final boolean FAST_BASE_HEIGHT_QUERIES = !Boolean.getBoolean("ukgeo.disableFastBaseHeightQueries");
+    private static final boolean DEBUG_BASE_HEIGHT_QUERIES = Boolean.getBoolean("ukgeo.debugBaseHeightQueries");
     private static final long SLOW_FILL_FROM_NOISE_WARN_MS = Long.getLong("ukgeo.slowFillFromNoiseWarnMs", 500L);
     private static final long SLOW_APPLY_BIOME_DECORATION_WARN_MS = Long.getLong("ukgeo.slowApplyBiomeDecorationWarnMs", 500L);
     private static final long SLOW_BIOME_DECORATION_WARN_MS = Long.getLong("ukgeo.slowBiomeDecorationWarnMs", 1_000L);
+    private static final long SLOW_BASE_HEIGHT_QUERY_WARN_MS = Long.getLong("ukgeo.slowBaseHeightQueryWarnMs", 50L);
     private static final long FULL_BIOME_DECORATION_AUTO_DISABLE_MS = Long.getLong("ukgeo.fullBiomeDecorationAutoDisableMs", 3_000L);
     private static final boolean ENABLE_SAFE_MODDED_PLANTS = !Boolean.getBoolean("ukgeo.disableSafeModdedPlants");
     private static final boolean ENABLE_ANCIENT_CITY_AIR_CLEANUP = !Boolean.getBoolean("ukgeo.disableAncientCityAirCleanup");
@@ -195,7 +212,11 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     private static final double AMBIENT_FLOWER_CHANCE = 0.11D;
     private static final double AMBIENT_FERN_CHANCE = 0.10D;
     private static final int LUSH_CAVE_SURFACE_MARKER_TRIES = Integer.getInteger("ukgeo.lushCaveSurfaceMarkerTries", 10);
-    private static final double LUSH_CAVE_MARKER_NOISE_THRESHOLD = Double.parseDouble(System.getProperty("ukgeo.lushCavesNoiseThreshold", "0.34"));
+    private static final double LUSH_CAVE_MARKER_CHUNK_CHANCE = Double.parseDouble(System.getProperty("ukgeo.lushCaveMarkerChunkChance", "0.08"));
+    private static final double LUSH_CAVE_MARKER_NOISE_THRESHOLD = Double.parseDouble(System.getProperty("ukgeo.lushCavesNoiseThreshold", "0.68"));
+    private static final boolean ENABLE_LUSH_CAVE_DECORATION = !Boolean.getBoolean("ukgeo.disableLushCaveDecoration");
+    private static final int LUSH_CAVE_MAX_BLOCK_EDITS_PER_CHUNK = Integer.getInteger("ukgeo.lushCaveMaxBlockEditsPerChunk", 1600);
+    private static final int LUSH_CAVE_MAX_AXOLOTLS_PER_CHUNK = Integer.getInteger("ukgeo.lushCaveMaxAxolotlsPerChunk", 2);
     private static final boolean DEBUG_FLORA_TIMINGS = Boolean.getBoolean("ukgeo.debugFloraTimings");
     private static final boolean DEBUG_ORE_PLACEMENT = Boolean.getBoolean("ukgeo.debugOrePlacement");
     private static final boolean DEBUG_HEIGHT_BOUNDS = Boolean.getBoolean("ukgeo.debugHeightBounds");
@@ -301,6 +322,7 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     private final Map<String, OptionalBlock> optionalPlantCache = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<Long, ChunkTerrainPlanner.Plan> chunkPlans = new ConcurrentHashMap<>();
     private static final AtomicBoolean DECORATION_CONFIG_LOGGED = new AtomicBoolean();
+    private static final AtomicBoolean BASE_HEIGHT_QUERY_MODE_LOGGED = new AtomicBoolean();
     private static final AtomicBoolean FULL_BIOME_DECORATION_RUNTIME_DISABLED = new AtomicBoolean();
     private static final AtomicInteger ACTIVE_FULL_BIOME_DECORATIONS = new AtomicInteger();
     private final ConcurrentHashMap<Long, ChunkTerrainPlanner.Plan> decorationWaterPlans = new ConcurrentHashMap<>();
@@ -2374,14 +2396,17 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
             logTiming("primeGenerationHeightmaps.preDecoration", chunk.getPos(), primeStartNanos);
             long vegetationStartNanos = System.nanoTime();
             placeVegetation(chunk, plan);
-            placeAzaleaMarkersAboveLushCaves(chunk, plan);
             logTiming("placeVegetation(plan.preDecoration)", chunk.getPos(), vegetationStartNanos);
         } else {
             long vegetationStartNanos = System.nanoTime();
             placeVegetation(chunk);
-            placeAzaleaMarkersAboveLushCaves(chunk, null);
             logTiming("placeVegetation(fallback.preDecoration)", chunk.getPos(), vegetationStartNanos);
         }
+        long treeStartNanos = System.nanoTime();
+        placeSafeVanillaTrees(level, chunk);
+        placeLushCaveFeatures(level, chunk);
+        placeAzaleaMarkersAboveLushCaves(chunk, plan);
+        logTiming("placeSafeVanillaTreesAndAzaleaMarkers", chunk.getPos(), treeStartNanos);
 
         boolean ranFullBiomeDecoration = false;
         if (ENABLE_BIOME_FEATURE_DECORATION && !FULL_BIOME_DECORATION_RUNTIME_DISABLED.get()) {
@@ -2447,6 +2472,11 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
                 Boolean.getBoolean("ukgeo.disableBiomeFeatureDecoration")
             );
         }
+        if (!ranFullBiomeDecoration) {
+            long structureStartNanos = System.nanoTime();
+            placeStructurePieces(level, chunk, structureManager);
+            logTiming("placeStructurePieces", chunk.getPos(), structureStartNanos);
+        }
         if (ranFullBiomeDecoration) {
             long ancientCityCleanupStartNanos = System.nanoTime();
             cleanupBuriedAncientCityAir(chunk);
@@ -2470,6 +2500,93 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         logTiming("applyBiomeDecoration.total", chunk.getPos(), startNanos);
         logSlowTiming("applyBiomeDecoration.total", chunk.getPos(), elapsedNanos, SLOW_APPLY_BIOME_DECORATION_WARN_MS);
         PERF.maybeLog(chunk.getPos());
+    }
+
+    private void placeStructurePieces(WorldGenLevel level, ChunkAccess chunk, StructureManager structureManager) {
+        ChunkPos chunkPos = chunk.getPos();
+        if (!structureManager.shouldGenerateStructures()) {
+            return;
+        }
+        SectionPos sectionPos = SectionPos.of(chunkPos, level.getMinSection());
+        BlockPos origin = sectionPos.origin();
+        Registry<Structure> registry = level.registryAccess().registryOrThrow(Registries.STRUCTURE);
+        Map<Integer, List<Structure>> structuresByStep = registry.stream().collect(Collectors.groupingBy(structure -> structure.step().ordinal()));
+        WorldgenRandom random = new WorldgenRandom(new XoroshiroRandomSource(RandomSupport.generateUniqueSeed()));
+        long decorationSeed = random.setDecorationSeed(level.getSeed(), origin.getX(), origin.getZ());
+        int maxSteps = GenerationStep.Decoration.values().length;
+        try {
+            for (int step = 0; step < maxSteps; step++) {
+                int structureIndex = 0;
+                for (Structure structure : structuresByStep.getOrDefault(step, Collections.emptyList())) {
+                    random.setFeatureSeed(decorationSeed, structureIndex, step);
+                    Supplier<String> generating = () -> registry.getResourceKey(structure).map(Object::toString).orElseGet(structure::toString);
+                    try {
+                        level.setCurrentlyGenerating(generating);
+                        structureManager.startsForStructure(sectionPos, structure)
+                            .forEach(start -> start.placeInChunk(level, structureManager, this, random, writableArea(chunk), chunkPos));
+                    } catch (Exception exception) {
+                        CrashReport crashReport = CrashReport.forThrowable(exception, "Structure placement");
+                        crashReport.addCategory("Structure").setDetail("Description", generating::get);
+                        throw new ReportedException(crashReport);
+                    }
+                    structureIndex++;
+                }
+            }
+            level.setCurrentlyGenerating(null);
+        } catch (Exception exception) {
+            CrashReport crashReport = CrashReport.forThrowable(exception, "UKGeo structure placement");
+            crashReport.addCategory("Generation")
+                .setDetail("CenterX", chunkPos.x)
+                .setDetail("CenterZ", chunkPos.z)
+                .setDetail("Decoration Seed", decorationSeed);
+            throw new ReportedException(crashReport);
+        }
+    }
+
+    private static BoundingBox writableArea(ChunkAccess chunk) {
+        ChunkPos chunkPos = chunk.getPos();
+        LevelHeightAccessor height = chunk.getHeightAccessorForGeneration();
+        return new BoundingBox(
+            chunkPos.getMinBlockX(),
+            height.getMinBuildHeight() + 1,
+            chunkPos.getMinBlockZ(),
+            chunkPos.getMaxBlockX(),
+            height.getMaxBuildHeight() - 1,
+            chunkPos.getMaxBlockZ()
+        );
+    }
+
+    private void placeSafeVanillaTrees(WorldGenLevel level, ChunkAccess chunk) {
+        Set<ResourceKey<PlacedFeature>> treeFeatures = vanillaTreeFeaturesForChunk(chunk);
+        if (treeFeatures.isEmpty()) {
+            return;
+        }
+        Registry<PlacedFeature> registry = level.registryAccess().registryOrThrow(Registries.PLACED_FEATURE);
+        ChunkPos chunkPos = chunk.getPos();
+        SectionPos sectionPos = SectionPos.of(chunkPos, level.getMinSection());
+        BlockPos origin = sectionPos.origin();
+        WorldgenRandom random = new WorldgenRandom(new XoroshiroRandomSource(RandomSupport.generateUniqueSeed()));
+        long decorationSeed = random.setDecorationSeed(level.getSeed(), origin.getX(), origin.getZ());
+        int featureIndex = 0;
+        for (ResourceKey<PlacedFeature> key : treeFeatures) {
+            PlacedFeature feature = registry.get(key);
+            if (feature == null) {
+                continue;
+            }
+            Supplier<String> generating = () -> key.location().toString();
+            try {
+                level.setCurrentlyGenerating(generating);
+                random.setFeatureSeed(decorationSeed, featureIndex, GenerationStep.Decoration.VEGETAL_DECORATION.ordinal());
+                feature.placeWithBiomeCheck(level, this, random, origin);
+            } catch (Exception exception) {
+                CrashReport crashReport = CrashReport.forThrowable(exception, "Safe UKGeo tree placement");
+                crashReport.addCategory("Feature").setDetail("Description", generating::get);
+                throw new ReportedException(crashReport);
+            } finally {
+                level.setCurrentlyGenerating(null);
+            }
+            featureIndex++;
+        }
     }
 
 
@@ -2902,6 +3019,166 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         }
     }
 
+    private void placeLushCaveFeatures(WorldGenLevel level, ChunkAccess chunk) {
+        RuntimeData data = data();
+        if (!ENABLE_LUSH_CAVE_DECORATION || data == null || LUSH_CAVE_MAX_BLOCK_EDITS_PER_CHUNK <= 0) {
+            return;
+        }
+        ChunkPos pos = chunk.getPos();
+        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+        int minY = Math.max(chunk.getMinBuildHeight() + 1, level.getMinBuildHeight() + 1);
+        int maxY = Math.min(Math.min(chunk.getMaxBuildHeight() - 2, LUSH_CAVES_MAX_Y), UNDERGROUND_BIOME_MAX_Y - 1);
+        if (maxY < minY) {
+            return;
+        }
+        int edits = 0;
+        int axolotls = 0;
+        for (int localX = 0; localX < 16 && edits < LUSH_CAVE_MAX_BLOCK_EDITS_PER_CHUNK; localX++) {
+            int worldX = pos.getMinBlockX() + localX;
+            for (int localZ = 0; localZ < 16 && edits < LUSH_CAVE_MAX_BLOCK_EDITS_PER_CHUNK; localZ++) {
+                int worldZ = pos.getMinBlockZ() + localZ;
+                if (!isLushCaveBiomeAt(data, worldX, maxY, worldZ)) {
+                    continue;
+                }
+                for (int y = minY; y <= maxY && edits < LUSH_CAVE_MAX_BLOCK_EDITS_PER_CHUNK; y++) {
+                    if (!isLushCaveBiomeAt(data, worldX, y, worldZ)) {
+                        continue;
+                    }
+                    cursor.set(localX, y, localZ);
+                    BlockState state = chunk.getBlockState(cursor);
+                    if (!isOpenCaveSpace(state)) {
+                        continue;
+                    }
+                    double floorRoll = hashUnit(worldX, worldZ, y * 31L + 0x4c555348464c4f52L);
+                    if (decorateLushCaveFloor(chunk, cursor, localX, y, localZ, floorRoll)) {
+                        edits++;
+                    }
+                    double ceilingRoll = hashUnit(worldX, worldZ, y * 37L + 0x4c5553484345494cL);
+                    if (decorateLushCaveCeiling(chunk, cursor, localX, y, localZ, ceilingRoll)) {
+                        edits++;
+                    }
+                    BlockState updatedState = chunk.getBlockState(cursor.set(localX, y, localZ));
+                    if (axolotls < LUSH_CAVE_MAX_AXOLOTLS_PER_CHUNK
+                        && updatedState.getFluidState().isSource()
+                        && hashUnit(worldX, worldZ, y * 41L + 0x41584f4c4f544cL) < 0.012D
+                        && spawnAxolotl(level, worldX, y, worldZ)) {
+                        axolotls++;
+                    }
+                }
+            }
+        }
+    }
+
+    private static boolean decorateLushCaveFloor(
+        ChunkAccess chunk,
+        BlockPos.MutableBlockPos cursor,
+        int localX,
+        int y,
+        int localZ,
+        double roll
+    ) {
+        if (y <= chunk.getMinBuildHeight() + 1) {
+            return false;
+        }
+        BlockState below = chunk.getBlockState(cursor.set(localX, y - 1, localZ));
+        if (!isLushCaveReplaceableGround(below)) {
+            return false;
+        }
+        if (roll < 0.46D) {
+            chunk.setBlockState(cursor.set(localX, y - 1, localZ), Blocks.MOSS_BLOCK.defaultBlockState(), false);
+            if (roll < 0.08D && chunk.getBlockState(cursor.set(localX, y, localZ)).isAir()) {
+                chunk.setBlockState(cursor, Blocks.MOSS_CARPET.defaultBlockState(), false);
+            } else if (roll >= 0.08D && roll < 0.14D && chunk.getBlockState(cursor.set(localX, y, localZ)).isAir()) {
+                chunk.setBlockState(cursor, Blocks.AZALEA.defaultBlockState(), false);
+            } else if (roll >= 0.14D && roll < 0.19D && chunk.getBlockState(cursor.set(localX, y, localZ)).isAir()) {
+                chunk.setBlockState(cursor, Blocks.FLOWERING_AZALEA.defaultBlockState(), false);
+            }
+            return true;
+        }
+        if (roll < 0.56D) {
+            chunk.setBlockState(cursor.set(localX, y - 1, localZ), Blocks.CLAY.defaultBlockState(), false);
+            if (chunk.getBlockState(cursor.set(localX, y, localZ)).isAir()) {
+                chunk.setBlockState(cursor, Blocks.WATER.defaultBlockState(), false);
+            }
+            return true;
+        }
+        if (roll < 0.62D && chunk.getBlockState(cursor.set(localX, y, localZ)).isAir()) {
+            chunk.setBlockState(cursor.set(localX, y - 1, localZ), Blocks.CLAY.defaultBlockState(), false);
+            chunk.setBlockState(cursor.set(localX, y, localZ), Blocks.SMALL_DRIPLEAF.defaultBlockState(), false);
+            return true;
+        }
+        if (roll < 0.68D && y + 1 < chunk.getMaxBuildHeight() && chunk.getBlockState(cursor.set(localX, y, localZ)).isAir() && chunk.getBlockState(cursor.set(localX, y + 1, localZ)).isAir()) {
+            chunk.setBlockState(cursor.set(localX, y - 1, localZ), Blocks.MOSS_BLOCK.defaultBlockState(), false);
+            chunk.setBlockState(cursor.set(localX, y, localZ), Blocks.BIG_DRIPLEAF_STEM.defaultBlockState(), false);
+            chunk.setBlockState(cursor.set(localX, y + 1, localZ), Blocks.BIG_DRIPLEAF.defaultBlockState(), false);
+            return true;
+        }
+        return false;
+    }
+
+    private static boolean decorateLushCaveCeiling(
+        ChunkAccess chunk,
+        BlockPos.MutableBlockPos cursor,
+        int localX,
+        int y,
+        int localZ,
+        double roll
+    ) {
+        if (y + 1 >= chunk.getMaxBuildHeight()) {
+            return false;
+        }
+        if (!chunk.getBlockState(cursor.set(localX, y, localZ)).isAir()) {
+            return false;
+        }
+        BlockState above = chunk.getBlockState(cursor.set(localX, y + 1, localZ));
+        if (!isLushCaveReplaceableGround(above)) {
+            return false;
+        }
+        if (roll < 0.025D) {
+            chunk.setBlockState(cursor.set(localX, y, localZ), Blocks.SPORE_BLOSSOM.defaultBlockState(), false);
+            return true;
+        }
+        if (roll < 0.12D) {
+            chunk.setBlockState(cursor.set(localX, y, localZ), Blocks.HANGING_ROOTS.defaultBlockState(), false);
+            return true;
+        }
+        if (roll < 0.20D) {
+            int length = 1 + (int) Math.floor(hashUnit(localX, localZ, y * 43L + 0x56494e45L) * 4.0D);
+            for (int i = 0; i < length && y - i > chunk.getMinBuildHeight(); i++) {
+                cursor.set(localX, y - i, localZ);
+                if (!chunk.getBlockState(cursor).isAir()) {
+                    break;
+                }
+                chunk.setBlockState(cursor, i == 0 ? Blocks.CAVE_VINES.defaultBlockState() : Blocks.CAVE_VINES_PLANT.defaultBlockState(), false);
+            }
+            return true;
+        }
+        return false;
+    }
+
+    private static boolean isLushCaveReplaceableGround(BlockState state) {
+        return state.is(Blocks.STONE)
+            || state.is(Blocks.DEEPSLATE)
+            || state.is(Blocks.TUFF)
+            || state.is(Blocks.GRANITE)
+            || state.is(Blocks.DIORITE)
+            || state.is(Blocks.ANDESITE)
+            || state.is(Blocks.DIRT)
+            || state.is(Blocks.ROOTED_DIRT)
+            || state.is(Blocks.GRASS_BLOCK)
+            || state.is(Blocks.MOSS_BLOCK)
+            || state.is(Blocks.CLAY);
+    }
+
+    private static boolean spawnAxolotl(WorldGenLevel level, int worldX, int y, int worldZ) {
+        Axolotl axolotl = EntityType.AXOLOTL.create(level.getLevel());
+        if (axolotl == null) {
+            return false;
+        }
+        axolotl.moveTo(worldX + 0.5D, y + 0.1D, worldZ + 0.5D, level.getRandom().nextFloat() * 360.0F, 0.0F);
+        return level.addFreshEntity(axolotl);
+    }
+
     private void placeAzaleaMarkersAboveLushCaves(ChunkAccess chunk, ChunkTerrainPlanner.Plan plan) {
         RuntimeData data = data();
         if (data == null || LUSH_CAVE_SURFACE_MARKER_TRIES <= 0) {
@@ -2910,6 +3187,9 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         ChunkPos pos = chunk.getPos();
         long seed = (((long) pos.x) << 32) ^ (pos.z & 0xffffffffL) ^ 0x415a414c4541554bL;
         java.util.Random random = new java.util.Random(seed);
+        if (random.nextDouble() >= LUSH_CAVE_MARKER_CHUNK_CHANCE) {
+            return;
+        }
         BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
         Heightmap surfaceMap = chunk.getOrCreateHeightmapUnprimed(Heightmap.Types.WORLD_SURFACE_WG);
         int maxY = chunk.getMaxBuildHeight() - 1;
@@ -2918,9 +3198,6 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
             int localZ = random.nextInt(16);
             int worldX = pos.getMinBlockX() + localX;
             int worldZ = pos.getMinBlockZ() + localZ;
-            if (!isLushCaveColumn(data, worldX, worldZ)) {
-                continue;
-            }
             if (plan != null) {
                 ChunkTerrainPlanner.ColumnPlan column = plan.columns()[localZ * 16 + localX];
                 if (!column.hasHeightData() || column.river().hasWater() || column.coastalBeach()) {
@@ -2931,6 +3208,9 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
             }
             int top = surfaceMap.getHighestTaken(localX, localZ);
             if (top <= seaLevelY || top + 8 >= maxY) {
+                continue;
+            }
+            if (!hasOpenLushCaveBelow(chunk, cursor, data, localX, top, localZ, worldX, worldZ)) {
                 continue;
             }
             BlockState ground = chunk.getBlockState(cursor.set(localX, top, localZ));
@@ -2947,12 +3227,49 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         }
     }
 
-    private boolean isLushCaveColumn(RuntimeData data, int worldX, int worldZ) {
+    private boolean hasOpenLushCaveBelow(
+        ChunkAccess chunk,
+        BlockPos.MutableBlockPos cursor,
+        RuntimeData data,
+        int localX,
+        int surfaceY,
+        int localZ,
+        int worldX,
+        int worldZ
+    ) {
+        int maxY = Math.min(Math.min(surfaceY - 8, LUSH_CAVES_MAX_Y), UNDERGROUND_BIOME_MAX_Y - 1);
+        int minY = chunk.getMinBuildHeight() + 1;
+        if (maxY < minY) {
+            return false;
+        }
+        for (int y = maxY; y >= minY; y--) {
+            if (!isLushCaveBiomeAt(data, worldX, y, worldZ)) {
+                continue;
+            }
+            BlockState state = chunk.getBlockState(cursor.set(localX, y, localZ));
+            if (isOpenCaveSpace(state)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean isLushCaveBiomeAt(RuntimeData data, int worldX, int blockY, int worldZ) {
+        if (blockY >= UNDERGROUND_BIOME_MAX_Y || blockY > LUSH_CAVES_MAX_Y) {
+            return false;
+        }
         int sourceHeightDecimetres = data.height.sampleDecimetresOrNodata(worldX, worldZ);
         if (sourceHeightDecimetres == R16HeightTileLayer.NODATA) {
             return false;
         }
+        if (sourceHeightDecimetres >= MOUNTAIN_BIOME_SOURCE_HEIGHT_DECIMETRES && blockY <= DEEP_DARK_MAX_Y) {
+            return false;
+        }
         return valueNoise(worldX, worldZ, 0.0045, 0x4341564542494f4dL) > LUSH_CAVE_MARKER_NOISE_THRESHOLD;
+    }
+
+    private static boolean isOpenCaveSpace(BlockState state) {
+        return state.isAir() || state.getFluidState().isSource();
     }
 
     private static boolean isAzaleaGround(BlockState state) {
@@ -5020,16 +5337,77 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         if (cached != null) {
             return cached;
         }
+        long startNanos = System.nanoTime();
         RuntimeData runtime = data();
+        BaseColumnPlan plan;
+        if (FAST_BASE_HEIGHT_QUERIES && runtime != null) {
+            plan = fastBaseColumnPlan(runtime, x, z, minBuildY);
+            logBaseHeightQueryModeOnce("fast");
+            logSlowBaseHeightQuery(x, z, startNanos, "fastBaseColumnPlan");
+            BaseColumnPlan existing = baseColumnCache.putIfAbsent(key, plan);
+            return existing == null ? plan : existing;
+        }
         int surface = surfaceY(x, z);
         boolean hasHeightData = runtime != null && hasHeightData(runtime, null, x, z);
         int vegetation = hasHeightData ? sampleVegetationClass(runtime, x, z) : 0;
         RiverShape river = hasHeightData ? computeSurfaceWaterShape(runtime, null, x, z, surface, minBuildY, vegetation) : RiverShape.none(surface);
         BlockState surfaceRock = hasHeightData ? sampleSurfaceRock(runtime, x, z, surface) : defaultBaseRock(surface);
         BlockState exposedSurfaceRock = ChunkTerrainPlanner.exposedSurfaceRock(x, z, surfaceRock);
-        BaseColumnPlan plan = new BaseColumnPlan(surface, vegetation, river, surfaceRock, exposedSurfaceRock);
+        plan = new BaseColumnPlan(surface, vegetation, river, surfaceRock, exposedSurfaceRock);
+        logBaseHeightQueryModeOnce(runtime == null ? "fallback" : "full");
+        logSlowBaseHeightQuery(x, z, startNanos, runtime == null ? "fallbackBaseColumnPlan" : "fullBaseColumnPlan");
         BaseColumnPlan existing = baseColumnCache.putIfAbsent(key, plan);
         return existing == null ? plan : existing;
+    }
+
+    private BaseColumnPlan fastBaseColumnPlan(RuntimeData data, int x, int z, int minBuildY) {
+        int decimetres = data.height.sampleDecimetresOrNodata(x, z);
+        BlockState surfaceRock = defaultBaseRock(seaLevelY);
+        BlockState exposedSurfaceRock = ChunkTerrainPlanner.exposedSurfaceRock(x, z, surfaceRock);
+        if (decimetres == R16HeightTileLayer.NODATA || decimetres <= 0) {
+            int floorY = Math.max(minBuildY + 1, Math.min(oceanDeepFloorY(), seaLevelY - SHALLOW_WATER_DEPTH));
+            RiverShape water = new RiverShape(true, true, floorY, seaLevelY, Blocks.GRAVEL.defaultBlockState());
+            return new BaseColumnPlan(seaLevelY, 0, water, surfaceRock, exposedSurfaceRock);
+        }
+        int surface = seaLevelY + Math.round((float) fastShapedHeightMetres(decimetres / 10.0));
+        return new BaseColumnPlan(surface, 0, RiverShape.none(surface), defaultBaseRock(surface), ChunkTerrainPlanner.exposedSurfaceRock(x, z, defaultBaseRock(surface)));
+    }
+
+    private double fastShapedHeightMetres(double metres) {
+        double highlandWeight = smoothstep((metres - highlandStartMetres) / (highlandFullMetres - highlandStartMetres));
+        double lowlandWeight = metres <= 0.0 ? 1.0 : 1.0 - Math.clamp(metres / lowlandCeilingMetres, 0.0, 1.0);
+        double scale = heightScale + lowlandExtraScale * lowlandWeight;
+        scale = lerp(scale, highlandScale, highlandWeight);
+        return metres * scale;
+    }
+
+    private static void logBaseHeightQueryModeOnce(String mode) {
+        if (!DEBUG_BASE_HEIGHT_QUERIES && !BASE_HEIGHT_QUERY_MODE_LOGGED.compareAndSet(false, true)) {
+            return;
+        }
+        if (DEBUG_BASE_HEIGHT_QUERIES || BASE_HEIGHT_QUERY_MODE_LOGGED.get()) {
+            UkGeoMod.LOGGER.info(
+                "UKGeo base height query mode={} fastEnabled={} slowWarnMs={} cacheEntries={}",
+                mode,
+                FAST_BASE_HEIGHT_QUERIES,
+                SLOW_BASE_HEIGHT_QUERY_WARN_MS,
+                MAX_BASE_COLUMN_CACHE
+            );
+        }
+    }
+
+    private static void logSlowBaseHeightQuery(int x, int z, long startNanos, String label) {
+        long elapsedNanos = System.nanoTime() - startNanos;
+        if (SLOW_BASE_HEIGHT_QUERY_WARN_MS > 0L && elapsedNanos >= SLOW_BASE_HEIGHT_QUERY_WARN_MS * 1_000_000L) {
+            UkGeoMod.LOGGER.warn(
+                "UKGeo slow base height query {} x={} z={} elapsed={}ms threshold={}ms",
+                label,
+                x,
+                z,
+                elapsedNanos / 1_000_000.0,
+                SLOW_BASE_HEIGHT_QUERY_WARN_MS
+            );
+        }
     }
 
     @Override

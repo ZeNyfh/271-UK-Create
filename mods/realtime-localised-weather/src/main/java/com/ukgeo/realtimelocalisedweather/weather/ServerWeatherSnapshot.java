@@ -28,6 +28,9 @@ public record ServerWeatherSnapshot(
     long revision
 ) {
     public boolean hasPrecipitation() {
-        return resolvedPrecipitation.isPrecipitating();
+        return resolvedPrecipitation.isPrecipitating()
+            || precipitationRateMmPerHour > 0.001F
+            || rainRateMmPerHour > 0.001F
+            || snowfallRateCmPerHour > 0.001F;
     }
 }

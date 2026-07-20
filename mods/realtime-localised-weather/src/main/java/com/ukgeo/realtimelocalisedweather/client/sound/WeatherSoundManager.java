@@ -25,7 +25,7 @@ public final class WeatherSoundManager {
         }
         Minecraft minecraft = Minecraft.getInstance();
         var sample = ClientWeatherManager.sample(event.getEntity().blockPosition());
-        if (sample.isEmpty() || !sample.get().snapshot().resolvedPrecipitation().isPrecipitating()) {
+        if (sample.isEmpty() || !sample.get().snapshot().hasPrecipitation()) {
             return;
         }
         float volume = Math.min(1.0F, 0.15F + sample.get().interpolatedRate() / 8.0F);

@@ -6,6 +6,9 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.ukgeo.realtimelocalisedweather.weather.MeteorologicalPrecipitation;
 import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -34,7 +37,7 @@ public final class OpenMeteoParser {
         return new OpenMeteoResponse.LocationWeather(
             number(root, "latitude"),
             number(root, "longitude"),
-            Instant.parse(requireString(current, "time")),
+            parseOpenMeteoTime(requireString(current, "time")),
             (int) number(current, "weather_code"),
             (float) number(current, "precipitation"),
             (float) number(current, "rain"),
@@ -65,6 +68,18 @@ public final class OpenMeteoParser {
             throw new IllegalArgumentException("Missing string field " + key);
         }
         return object.get(key).getAsString();
+    }
+
+    private static Instant parseOpenMeteoTime(String value) {
+        try {
+            return Instant.parse(value);
+        } catch (DateTimeParseException ignored) {
+            try {
+                return LocalDateTime.parse(value).toInstant(ZoneOffset.UTC);
+            } catch (DateTimeParseException exception) {
+                throw new IllegalArgumentException("Malformed Open-Meteo time " + value, exception);
+            }
+        }
     }
 
     private static double number(JsonObject object, String key) {

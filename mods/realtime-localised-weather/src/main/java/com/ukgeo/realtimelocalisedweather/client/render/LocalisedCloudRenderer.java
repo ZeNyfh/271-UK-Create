@@ -26,6 +26,7 @@ public final class LocalisedCloudRenderer {
         float densityMultiplier = ClientWeatherConfig.CLOUD_DENSITY_MULTIPLIER.get().floatValue();
         poseStack.pushPose();
         RenderSystem.enableBlend();
+        RenderSystem.disableCull();
         try {
             Matrix4f matrix = poseStack.last().pose();
             RenderSystem.defaultBlendFunc();
@@ -40,11 +41,11 @@ public final class LocalisedCloudRenderer {
                         continue;
                     }
                     float cloudCover = sample.get().interpolatedCloudCover() / 100.0F * densityMultiplier;
-                    if (cloudCover < 0.15F) {
+                    if (cloudCover < 0.02F) {
                         continue;
                     }
                     float stormDarkness = sample.get().snapshot().resolvedPrecipitation().supportsThunder() ? 0.45F : 0.0F;
-                    float alpha = Math.min(0.7F, 0.18F + cloudCover * 0.35F);
+                    float alpha = Math.min(0.78F, 0.12F + cloudCover * 0.5F);
                     int colour = (int) (220.0F - stormDarkness * 120.0F - cloudCover * 40.0F);
                     float baseX = (float) (samplePos.getX() - cameraX);
                     float baseZ = (float) (samplePos.getZ() - cameraZ);
@@ -63,6 +64,7 @@ public final class LocalisedCloudRenderer {
                 BufferUploader.drawWithShader(meshData);
             }
         } finally {
+            RenderSystem.enableCull();
             RenderSystem.disableBlend();
             poseStack.popPose();
         }

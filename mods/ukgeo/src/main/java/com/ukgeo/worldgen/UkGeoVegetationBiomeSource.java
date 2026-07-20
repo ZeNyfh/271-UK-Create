@@ -162,7 +162,7 @@ public final class UkGeoVegetationBiomeSource extends BiomeSource {
         if (isHighMountainSourceHeight(sourceHeightDecimetres) && blockY <= Integer.getInteger("ukgeo.deepDarkMaxY", 8)) {
             return deepDark;
         }
-        if (blockY <= Integer.getInteger("ukgeo.lushCavesMaxY", 40) && caveNoise > Double.parseDouble(System.getProperty("ukgeo.lushCavesNoiseThreshold", "0.34"))) {
+        if (blockY <= Integer.getInteger("ukgeo.lushCavesMaxY", 40) && caveNoise > Double.parseDouble(System.getProperty("ukgeo.lushCavesNoiseThreshold", "0.68"))) {
             return lushCaves;
         }
         if (blockY <= Integer.getInteger("ukgeo.dripstoneCavesMaxY", 24) && caveNoise < Double.parseDouble(System.getProperty("ukgeo.dripstoneCavesNoiseThreshold", "-0.52"))) {

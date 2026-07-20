@@ -16,7 +16,7 @@ public final class UkGeoOilIntegration {
     private static final String CREATE_DIESEL_GENERATORS_MOD_ID = "createdieselgenerators";
     private static final String CREATE_DIESEL_GENERATORS_OIL_DATA_CLASS = "com.jesz.createdieselgenerators.world.OilChunksSavedData";
     private static final boolean DEBUG_OIL_GEN = Boolean.getBoolean("ukgeo.debugOilGen");
-    private static final int MAX_OIL_UPDATES_PER_TICK = Integer.getInteger("ukgeo.maxOilUpdatesPerTick", 1024);
+    private static final int MAX_OIL_UPDATES_PER_TICK = Integer.getInteger("ukgeo.maxOilUpdatesPerTick", 64);
 
     private static final ConcurrentHashMap<OilQueueKey, Integer> pendingOilAmounts = new ConcurrentHashMap<>();
     private static volatile boolean createDieselGeneratorsOilLookupAttempted;
@@ -67,12 +67,12 @@ public final class UkGeoOilIntegration {
             try {
                 setOilAmount.get().invoke(null, level, chunkPos, amount);
                 applied++;
-                if (DEBUG_OIL_GEN) {
-                    UkGeoMod.LOGGER.info("UKGeo oil applied dimension={} chunk={} amount={}mB", key.dimension().location(), chunkPos, amount);
-                }
             } catch (ReflectiveOperationException | RuntimeException ex) {
                 UkGeoMod.LOGGER.warn("Could not set Create: Diesel Generators oil amount for chunk {}: {}", chunkPos, ex.getMessage());
             }
+        }
+        if (DEBUG_OIL_GEN && applied > 0) {
+            UkGeoMod.LOGGER.info("UKGeo oil applied {} chunk updates this tick; pending={}", applied, pendingOilAmounts.size());
         }
     }
 

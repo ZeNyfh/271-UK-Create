@@ -5,8 +5,10 @@ import com.mojang.brigadier.arguments.StringArgumentType;
 import com.ukgeo.realtimelocalisedweather.weather.GameplaySeverity;
 import com.ukgeo.realtimelocalisedweather.weather.ResolvedPrecipitation;
 import com.ukgeo.realtimelocalisedweather.weather.WeatherAuthorityMode;
+import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.Component;
+import net.minecraft.world.phys.Vec3;
 import net.neoforged.neoforge.event.RegisterCommandsEvent;
 
 public final class RealtimeWeatherCommands {
@@ -75,11 +77,41 @@ public final class RealtimeWeatherCommands {
                                 return 1;
                             }))))
         );
+        event.getDispatcher().register(
+            Commands.literal("clouds")
+                .executes(context -> sendCloudStatus(context.getSource()))
+        );
+        event.getDispatcher().register(
+            Commands.literal("precipitation")
+                .executes(context -> sendPrecipitationStatus(context.getSource()))
+        );
     }
 
     private static int setMode(net.minecraft.server.level.ServerLevel level, WeatherAuthorityMode mode, net.minecraft.commands.CommandSourceStack source) {
         RealtimeLocalisedWeatherMod.serverWeatherManager().setMode(level, mode);
         source.sendSuccess(() -> Component.literal("Realtime Localised Weather mode set to " + mode + "."), true);
+        return 1;
+    }
+
+    private static int sendCloudStatus(CommandSourceStack source) {
+        Vec3 position = source.getPosition();
+        String message = RealtimeLocalisedWeatherMod.serverWeatherManager().cloudStatus(
+            source.getLevel(),
+            (int) Math.floor(position.x),
+            (int) Math.floor(position.z)
+        );
+        source.sendSuccess(() -> Component.literal(message), false);
+        return 1;
+    }
+
+    private static int sendPrecipitationStatus(CommandSourceStack source) {
+        Vec3 position = source.getPosition();
+        String message = RealtimeLocalisedWeatherMod.serverWeatherManager().precipitationStatus(
+            source.getLevel(),
+            (int) Math.floor(position.x),
+            (int) Math.floor(position.z)
+        );
+        source.sendSuccess(() -> Component.literal(message), false);
         return 1;
     }
 

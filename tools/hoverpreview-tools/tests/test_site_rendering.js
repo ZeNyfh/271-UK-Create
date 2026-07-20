@@ -173,6 +173,26 @@ test("live weather controls work with older manifests and fetch Open-Meteo", () 
   assert.match(appJs, /continuing without weather overlays/);
 });
 
+test("layer checkbox selections persist only selected layer names in a cookie", () => {
+  const appJs = fs.readFileSync(path.join(__dirname, "../site/app.js"), "utf8");
+  const rootIndexHtml = fs.readFileSync(path.join(__dirname, "../../../index.html"), "utf8");
+  const siteIndexHtml = fs.readFileSync(path.join(__dirname, "../site/index.html"), "utf8");
+
+  assert.match(appJs, /const SELECTED_LAYERS_COOKIE = "ukgeo_hoverpreview_selected_layers";/);
+  assert.match(appJs, /state\.persistedSelectedLayerNames = readSelectedLayersCookie\(\);/);
+  assert.match(appJs, /installLiveWeatherLayers\(manifest\);\s*startRestoredLayerLoads\(\);/);
+  assert.match(appJs, /function isLayerSelected\(layer\)/);
+  assert.match(appJs, /function startRestoredLayerLoads\(\)/);
+  assert.match(appJs, /if \(hasEnabledLiveWeatherLayer\(\)\) \{/);
+  assert.match(appJs, /if \(hasEnabledAnimalLayer\(\)\) \{/);
+  assert.match(appJs, /JSON\.stringify\(\[\.\.\.selectedLayers\]\.sort\(\)\)/);
+  assert.match(appJs, /document\.cookie = `\$\{SELECTED_LAYERS_COOKIE\}=\$\{value\}; Max-Age=\$\{SELECTED_LAYERS_COOKIE_MAX_AGE_SECONDS\}; Path=\/; SameSite=Lax\$\{secure\}`;/);
+  assert.doesNotMatch(appJs, /localStorage\.(setItem|removeItem|clear)/);
+  assert.doesNotMatch(appJs, /sessionStorage/);
+  assert.match(rootIndexHtml, /app\.js\?v=20260719-1/);
+  assert.match(siteIndexHtml, /app\.js\?v=20260719-1/);
+});
+
 test("hoverpreview defaults use larger tiles to reduce request count", () => {
   const configYml = fs.readFileSync(path.join(__dirname, "../config.yml"), "utf8");
   const hoverPreviewsPy = fs.readFileSync(path.join(__dirname, "../src/hoverpreview_tools/hover_previews.py"), "utf8");

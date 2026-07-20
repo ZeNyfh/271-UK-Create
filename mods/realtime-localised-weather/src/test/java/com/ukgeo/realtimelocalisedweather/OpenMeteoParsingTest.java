@@ -18,6 +18,12 @@ final class OpenMeteoParsingTest {
     }
 
     @Test
+    void parserTreatsOpenMeteoGmtTimeWithoutOffsetAsUtc() {
+        var response = OpenMeteoParser.parse(TestFixtures.resource("/fixtures/openmeteo/current_gmt_without_offset.json"));
+        assertEquals(java.time.Instant.parse("2026-07-19T00:45:00Z"), response.locations().getFirst().observedAt());
+    }
+
+    @Test
     void parserRejectsMissingFields() {
         IllegalArgumentException exception = assertThrows(IllegalArgumentException.class, () -> OpenMeteoParser.parse(TestFixtures.resource("/fixtures/openmeteo/current_missing_field.json")));
         assertTrue(exception.getMessage().contains("weather_code"));
