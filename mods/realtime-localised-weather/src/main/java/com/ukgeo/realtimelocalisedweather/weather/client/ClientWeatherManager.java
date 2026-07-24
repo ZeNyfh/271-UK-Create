@@ -24,6 +24,8 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.Level;
 
 public final class ClientWeatherManager {
+    /** Revisions in this range are emitted only by the runtime /cloud and /rain visual tests. */
+    private static final long VISUAL_TEST_REVISION = 1_000_000L;
     private static final Map<ResourceKey<Level>, Map<Long, ClientWeatherTile>> TILES = new HashMap<>();
     private static final Map<ResourceKey<Level>, ReferenceData> REFERENCES = new HashMap<>();
     private static final Map<ResourceKey<Level>, WeatherAuthorityMode> MODES = new HashMap<>();
@@ -60,6 +62,11 @@ public final class ClientWeatherManager {
             long packed = pack(tile.tileX(), tile.tileZ());
             ClientWeatherTile previous = dimensionTiles.get(packed);
             ServerWeatherSnapshot previousSnapshot = previous == null ? tile.snapshot() : previous.current();
+            // Debug controls must be literal: `/cloud 100` is a 100% cloud test now,
+            // not a value that eases in over the normal live-weather transition period.
+            if (tile.snapshot().revision() >= VISUAL_TEST_REVISION) {
+                previousSnapshot = tile.snapshot();
+            }
             dimensionTiles.put(
                 packed,
                 new ClientWeatherTile(new WeatherTileKey(dimension, tile.tileX(), tile.tileZ()), previousSnapshot, tile.snapshot(), now, tile.visualSeed())
@@ -89,15 +96,26 @@ public final class ClientWeatherManager {
     }
 
     public static boolean shouldReplaceVanillaWeather() {
-        return ClientWeatherConfig.ENABLED.get()
-            && ClientWeatherConfig.PRECIPITATION_RENDERER.get() == ClientWeatherConfig.PrecipitationRendererMode.CUSTOM
-            && activeMode() != WeatherAuthorityMode.VANILLA;
+        // Ordinary precipitation is intentionally rendered by vanilla LevelRenderer.
+        return false;
     }
 
     public static boolean shouldReplaceClouds() {
-        return ClientWeatherConfig.ENABLED.get()
-            && ClientWeatherConfig.CLOUD_RENDERER.get() == ClientWeatherConfig.CloudRendererMode.REPLACE
-            && activeMode() != WeatherAuthorityMode.VANILLA;
+        return ClientWeatherConfig.ENABLED.get() && hasRealtimeData();
+    }
+
+    /** Keep ownership of the cloud pass while crossing an unloaded/prefetching tile. */
+    public static boolean hasRealtimeData() {
+        Minecraft minecraft = Minecraft.getInstance();
+        if (minecraft.level == null) return false;
+        ResourceKey<Level> dimension = minecraft.level.dimension();
+        Map<Long, ClientWeatherTile> tiles = TILES.get(dimension);
+        return REFERENCES.containsKey(dimension) && tiles != null && !tiles.isEmpty();
+    }
+
+    /** At complete cover the exact vanilla renderer is both visually correct and cheaper. */
+    public static boolean shouldUseNativeClouds(BlockPos position) {
+        return sample(position).map(sample -> sample.interpolatedCloudCover() >= 99.5F).orElse(false);
     }
 
     public static Optional<VisualWeatherSample> sample(BlockPos position) {
@@ -157,6 +175,11 @@ public final class ClientWeatherManager {
             return WeatherAuthorityMode.VANILLA;
         }
         return MODES.getOrDefault(minecraft.level.dimension(), WeatherAuthorityMode.VANILLA);
+    }
+
+    /** Whether the supplied sample originated from the runtime /cloud or /rain test controls. */
+    public static boolean isVisualTestSample(VisualWeatherSample sample) {
+        return sample != null && sample.snapshot().revision() >= VISUAL_TEST_REVISION;
     }
 
     private static ServerWeatherSnapshot snapshotOr(ClientWeatherTile fallback, ClientWeatherTile candidate, long now) {

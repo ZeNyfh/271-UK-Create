@@ -8,6 +8,7 @@ import com.ukgeo.realtimelocalisedweather.weather.WeatherAuthorityMode;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.Component;
+import net.minecraft.core.BlockPos;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.neoforge.event.RegisterCommandsEvent;
 
@@ -80,6 +81,28 @@ public final class RealtimeWeatherCommands {
         event.getDispatcher().register(
             Commands.literal("clouds")
                 .executes(context -> sendCloudStatus(context.getSource()))
+        );
+        event.getDispatcher().register(
+            Commands.literal("rain")
+                .requires(source -> source.hasPermission(2))
+                .then(Commands.argument("percent", IntegerArgumentType.integer(0, 100)).executes(context -> {
+                    int percent = IntegerArgumentType.getInteger(context, "percent");
+                    CommandSourceStack source = context.getSource();
+                    RealtimeLocalisedWeatherMod.serverWeatherManager().applyVisualRainOverride(source.getLevel(), BlockPos.containing(source.getPosition()), percent);
+                    context.getSource().sendSuccess(() -> Component.literal("Rain visual override set to " + percent + "% for this weather tile."), false);
+                    return 1;
+                }))
+        );
+        event.getDispatcher().register(
+            Commands.literal("cloud")
+                .requires(source -> source.hasPermission(2))
+                .then(Commands.argument("percent", IntegerArgumentType.integer(0, 100)).executes(context -> {
+                    int percent = IntegerArgumentType.getInteger(context, "percent");
+                    CommandSourceStack source = context.getSource();
+                    RealtimeLocalisedWeatherMod.serverWeatherManager().applyVisualCloudOverride(source.getLevel(), BlockPos.containing(source.getPosition()), percent);
+                    context.getSource().sendSuccess(() -> Component.literal("Cloud visual override set to " + percent + "% for this weather tile."), false);
+                    return 1;
+                }))
         );
         event.getDispatcher().register(
             Commands.literal("precipitation")

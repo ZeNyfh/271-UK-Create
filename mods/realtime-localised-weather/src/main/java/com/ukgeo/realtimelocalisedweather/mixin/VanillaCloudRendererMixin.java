@@ -15,7 +15,7 @@ public abstract class VanillaCloudRendererMixin {
     @Inject(method = "renderClouds", at = @At("HEAD"), cancellable = true)
     private void realtime_localised_weather$renderClouds(PoseStack poseStack, Matrix4f modelViewMatrix, Matrix4f projectionMatrix, float partialTick, double cameraX, double cameraY, double cameraZ, CallbackInfo callbackInfo) {
         if (ClientWeatherManager.shouldReplaceClouds()) {
-            LocalisedCloudRenderer.render(poseStack, partialTick, cameraX, cameraY, cameraZ);
+            LocalisedCloudRenderer.render(poseStack, modelViewMatrix, projectionMatrix, partialTick, cameraX, cameraY, cameraZ);
             callbackInfo.cancel();
         }
     }

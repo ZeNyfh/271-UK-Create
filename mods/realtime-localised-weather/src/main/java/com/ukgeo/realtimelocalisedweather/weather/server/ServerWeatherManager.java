@@ -181,6 +181,22 @@ public final class ServerWeatherManager implements RegionalWeatherAccess {
         syncPlayers(level, state, true);
     }
 
+    public void applyVisualCloudOverride(ServerLevel level, BlockPos position, int percent) {
+        LevelState state = stateFor(level);
+        state.visualOverrideManager.setCloud(WeatherTileKey.fromBlock(level.dimension(), position.getX(), position.getZ(), ServerWeatherConfig.ZONE_SIZE_BLOCKS.get()), percent);
+        syncPlayers(level, state, true);
+    }
+
+    public void applyVisualRainOverride(ServerLevel level, BlockPos position, int percent) {
+        LevelState state = stateFor(level);
+        state.visualOverrideManager.setRain(WeatherTileKey.fromBlock(level.dimension(), position.getX(), position.getZ(), ServerWeatherConfig.ZONE_SIZE_BLOCKS.get()), percent);
+        syncPlayers(level, state, true);
+    }
+
+    private LevelState stateFor(ServerLevel level) {
+        return levelStates.computeIfAbsent(level.dimension(), ignored -> new LevelState(UkGeoReferenceProvider.get(level).orElseThrow()));
+    }
+
     public String sampleStatus(ServerLevel level, int x, int z) {
         LocalWeatherState weather = getWeatherAt(level, new BlockPos(x, level.getSeaLevel(), z));
         ServerWeatherSnapshot snapshot = weather.snapshot();
@@ -504,8 +520,10 @@ public final class ServerWeatherManager implements RegionalWeatherAccess {
         }
         Optional<WeatherOverrideManager.OverrideEntry> override = state.overrideManager.lookup(key, now);
         if (override.isPresent()) {
-            return override.get().toSnapshot(base, base.revision() + 1L);
+            base = override.get().toSnapshot(base, base.revision() + 1L);
         }
+        Optional<VisualOverrideManager.Entry> visualOverride = state.visualOverrideManager.lookup(key);
+        if (visualOverride.isPresent()) return visualOverride.get().apply(base);
         SereneSeasonSnapshot seasonSnapshot = SereneSeasonsCompat.snapshot(level, level.getBiome(position));
         var resolution = SerenePrecipitationResolver.resolve(base.precipitation(), base.temperatureCelsius(), seasonSnapshot);
         if (resolution.resolvedPrecipitation() == base.resolvedPrecipitation()) {
@@ -747,6 +765,7 @@ public final class ServerWeatherManager implements RegionalWeatherAccess {
         private final Map<WeatherTileKey, CompletableFuture<List<OpenMeteoResponse.LocationWeather>>> pendingFetches = new HashMap<>();
         private final Map<UUID, PlayerSyncState> playerSync = new HashMap<>();
         private final WeatherOverrideManager overrideManager = new WeatherOverrideManager();
+        private final VisualOverrideManager visualOverrideManager = new VisualOverrideManager();
         private UkGeoReference reference;
         private WeatherAuthorityMode mode = ServerWeatherConfig.AUTHORITY_MODE.get();
         private Set<WeatherTileKey> activeTiles = Set.of();
