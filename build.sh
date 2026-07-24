@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-MOD_DIR="/media/zenyfh/GoodHDD/Games/Minecraft/Instances/UK Create (1)/mods"
+ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
+source "$ROOT_DIR/scripts/load-minecraft-instance-config.sh"
+load_minecraft_instance_config "$ROOT_DIR"
 
 cd "$(dirname "$0")/mods/ukgeo"
 ./gradlew build

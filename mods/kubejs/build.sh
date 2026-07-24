@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-INSTANCE_DIR="/media/zenyfh/GoodHDD/Games/Minecraft/Instances/UK Create (1)"
+ROOT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
+source "$ROOT_DIR/scripts/load-minecraft-instance-config.sh"
+load_minecraft_instance_config "$ROOT_DIR"
 TARGET_DIR="$INSTANCE_DIR/kubejs/server_scripts"
 
 cd "$(dirname "$0")"

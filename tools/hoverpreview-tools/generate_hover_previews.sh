@@ -414,18 +414,18 @@ run_height() {
 
   local bng_min_easting bng_min_northing bng_max_easting bng_max_northing world_width world_depth minecraft_min_x minecraft_min_z
   if is_truthy "$INCLUDE_IRELAND"; then
-    bng_min_easting="${BNG_MIN_EASTING:--220000}"
-    bng_min_northing="${BNG_MIN_NORTHING:-0}"
+    bng_min_easting="${BNG_MIN_EASTING:-${BNG_MIN_EASTING_IRELAND:--220000}}"
+    bng_min_northing="${BNG_MIN_NORTHING:-${BNG_MIN_NORTHING_IRELAND:-0}}"
     bng_max_easting="${BNG_MAX_EASTING:-650000}"
     bng_max_northing="${BNG_MAX_NORTHING:-1300000}"
-    world_width="${WORLD_WIDTH:-33462}"
+    world_width="${WORLD_WIDTH:-${WORLD_WIDTH_IRELAND:-33462}}"
     world_depth="${WORLD_DEPTH:-50000}"
   else
     bng_min_easting="${BNG_MIN_EASTING:-0}"
     bng_min_northing="${BNG_MIN_NORTHING:-0}"
     bng_max_easting="${BNG_MAX_EASTING:-650000}"
     bng_max_northing="${BNG_MAX_NORTHING:-1300000}"
-    world_width="${WORLD_WIDTH:-25000}"
+    world_width="${WORLD_WIDTH:-${WORLD_WIDTH_GB:-25000}}"
     world_depth="${WORLD_DEPTH:-50000}"
   fi
   read -r world_width world_depth < <("${UKGEO_ENV[@]}" "$PYTHON" - <<PY

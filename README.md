@@ -180,11 +180,11 @@ The per-mod build scripts generally do two things:
 1. run the Gradle build
 2. copy the produced jar into a local Minecraft instance `mods/` folder
 
-These scripts are machine-specific because they hardcode a local mod directory, typically:
+These scripts are machine-specific because they copy into the configured local Minecraft instance:
 
-- `/media/zenyfh/GoodHDD/Games/Minecraft/Instances/UK Create (1)/mods`
+- [config/minecraft-instance.yml](config/minecraft-instance.yml)
 
-If your local instance path differs, edit each relevant `build.sh` before using it.
+The old `/media/zenyfh/GoodHDD/...` instance path is kept commented in that YAML file. If your local instance path differs, update `instance_dir` and `mod_dir` there before using the build scripts.
 
 The root-level [build.sh](build.sh) is narrower: it builds `mods/ukgeo` and copies only that jar.
 
