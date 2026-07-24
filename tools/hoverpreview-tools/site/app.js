@@ -20,7 +20,7 @@ const DEFAULT_ANIMALS_TEXT = `
 12|rocky|upland|mountain|stony_peaks|minecraft:stony_peaks|ukgeo:rocky: Sheep, Rabbit, Bat
 13|coastal_ocean|ocean|sea|beach|coast|minecraft:ocean|ukgeo:coastal_ocean: —
 `;
-const START_STATUS = "Mouse wheel zooms. Middle/right drag pans. Left drag measures distance. Left click copies the current Minecraft coordinates.";
+const START_STATUS = "Mouse wheel zooms. Left/middle drag pans. Right drag measures distance.";
 const DEFAULT_VISIBLE_OVERLAYS = new Set();
 const DEFAULT_VISIBLE_ORES = new Set(["coal", "iron", "copper", "zinc", "gold"]);
 const MAX_DEVICE_PIXEL_RATIO = 2;
@@ -209,7 +209,7 @@ elements.viewer.addEventListener("pointerdown", (event) => {
       return;
     }
   }
-  if (event.button === 1 || event.button === 2) {
+  if (event.button === 0 || event.button === 1) {
     state.panPointerId = event.pointerId;
     state.panStartX = event.clientX;
     state.panStartY = event.clientY;
@@ -219,7 +219,7 @@ elements.viewer.addEventListener("pointerdown", (event) => {
     event.preventDefault();
     return;
   }
-  if (event.button === 0) {
+  if (event.button === 2) {
     state.measurePointerId = event.pointerId;
     state.measureStart = sampleFromEvent(event);
     state.measureMoved = false;
@@ -261,7 +261,6 @@ elements.viewer.addEventListener("pointerup", (event) => {
   if (state.measurePointerId === event.pointerId) {
     updateMeasurement(event);
     state.measurePointerId = null;
-    if (!state.measureMoved) copyCoordinates(event);
   }
 });
 

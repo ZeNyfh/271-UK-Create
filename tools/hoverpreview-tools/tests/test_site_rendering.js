@@ -92,7 +92,10 @@ test("measurement drag uses client coordinates and no longer depends on removed 
   const stylesCss = fs.readFileSync(path.join(__dirname, "../site/styles.css"), "utf8");
 
   assert.match(appJs, /Math\.abs\(current\.clientX - start\.clientX\) \+ Math\.abs\(current\.clientY - start\.clientY\) >= 4/);
-  assert.match(appJs, /updateMeasurement\(event\);\s*state\.measurePointerId = null;\s*if \(!state\.measureMoved\) copyCoordinates\(event\);/);
+  assert.match(appJs, /if \(event\.button === 0 \|\| event\.button === 1\)/);
+  assert.match(appJs, /if \(event\.button === 2\)/);
+  assert.match(appJs, /updateMeasurement\(event\);\s*state\.measurePointerId = null;/);
+  assert.doesNotMatch(appJs, /if \(!state\.measureMoved\) copyCoordinates\(event\);/);
   assert.doesNotMatch(appJs, /screenX|screenY|scrollX|scrollY|updateScrollbars/);
   assert.doesNotMatch(indexHtml, /scrollbar scrollbar-[xy]/);
   assert.match(indexHtml, /viewport-fit=cover/);
@@ -112,7 +115,7 @@ test("published root page includes the current hover map shell", () => {
   assert.match(rootIndexHtml, /styles\.css\?v=\d{8}-\d+/);
   assert.match(rootIndexHtml, /render_math\.js/);
   assert.doesNotMatch(rootIndexHtml, /scrollbar scrollbar-[xy]/);
-  assert.match(rootIndexHtml, /Left drag measures distance/);
+  assert.match(rootIndexHtml, /Left\/middle drag pans\. Right drag measures distance/);
   assert.match(appJs, /if \(!controls\) \{/);
 });
 

@@ -209,9 +209,8 @@ serving only `site/` do not match the published path layout.
 - Move the pointer over the map to show Minecraft `x/z`, height, tile/cell,
   and British National Grid coordinates.
 - Use the mouse wheel or toolbar buttons to zoom.
-- Middle/right drag the map to pan.
-- Left drag measures a distance; left click copies the Minecraft `x z` pair to
-  the clipboard.
+- Left/middle drag the map to pan.
+- Right drag measures a distance.
 - Use the layer and ore controls to toggle overlays.
 - Use **Show animals** beside the ore control to include or hide habitat animal
   lists in the hover status. Animal lookup uses the vegetation/landcover sample
