@@ -47,6 +47,13 @@ Use JDK 21 specifically. Several module build scripts already try to prefer:
 
 If your local Java is newer, Gradle/userdev tasks may fail. Set `JAVA_HOME` explicitly if needed.
 
+## Full development client
+
+Run `./start-dev.sh` from the repository root. It builds every folder under `mods/`, stages the
+configured modpack into the Realtime Localised Weather Gradle run directory, and launches its
+NeoForge development client. The weather and UKGeo duplicate jars are excluded because Gradle
+loads those directly from the workspace.
+
 ## Configuration model
 
 The current defaults live in:

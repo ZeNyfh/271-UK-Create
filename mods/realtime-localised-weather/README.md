@@ -74,12 +74,6 @@ Open-Meteo attribution: Weather data by [Open-Meteo](https://open-meteo.com/).
 
 ## Installation
 
-## Development client
-
-From this mod directory, run `./start-dev.sh`. It selects the workspace Java 21 setup when
-available, compiles the development classes, and starts the NeoForge client with the development
-run directory (`run/`).
-
 ### Server
 
 1. Install NeoForge 21.1.230 for Minecraft 1.21.1.
