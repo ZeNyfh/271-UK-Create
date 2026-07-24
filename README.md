@@ -49,10 +49,11 @@ If your local Java is newer, Gradle/userdev tasks may fail. Set `JAVA_HOME` expl
 
 ## Full development client
 
-Run `./start-dev.sh` from the repository root. It builds every folder under `mods/`, stages the
-configured modpack into the Realtime Localised Weather Gradle run directory, and launches its
-NeoForge development client. The weather and UKGeo duplicate jars are excluded because Gradle
-loads those directly from the workspace.
+Run `./start-dev.sh` from the repository root. It builds every folder under `mods/`, stages only
+those workspace-built modules into the Realtime Localised Weather Gradle run directory, and
+launches its NeoForge development client. It does not load jars from your configured modpack.
+The weather and UKGeo duplicate jars are excluded because Gradle loads those directly from the
+workspace.
 
 ## Configuration model
 
