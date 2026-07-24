@@ -80,4 +80,4 @@ The implementation ships with conservative defaults aimed at:
 - a 5×5 active grid around a lone player
 - asynchronous refreshes at roughly 15 minute cadence
 - stale-cache survival during temporary network failures
-- custom precipitation and cloud rendering enabled on clients
+- vanilla-style, regionally dense precipitation and 3D cloud rendering enabled on clients

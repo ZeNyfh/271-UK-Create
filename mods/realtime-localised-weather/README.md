@@ -18,7 +18,7 @@ UKGeo is a required dependency. Serene Seasons is optional.
 - The server batches active tile centres into asynchronous Open-Meteo requests.
 - The server owns authoritative regional precipitation, thunder eligibility, gameplay severity, cache state, overrides, and synchronisation.
 - Clients poll the server for the newest authoritative precipitation and cloud coverage snapshots.
-- The client owns local rendering quality, interpolation, precipitation density, cloud geometry, fog, and weather sound mixing.
+- The client uses vanilla rain, snow, and cloud textures with local interpolation, density, fog, and weather sound mixing.
 - Different clients may render different densities while still agreeing on gameplay weather.
 
 ## Weather authority modes
@@ -136,4 +136,4 @@ These options do not change gameplay severity, server rain checks, snow placemen
 - Vanilla weather is replaced only where the weather manager is active in the configured UKGeo overworld.
 - Other dimensions keep vanilla weather behaviour.
 - Serene Seasons foliage colours, crop progression, and season progression are not replaced.
-- The current vertical slice includes custom precipitation and cloud rendering hooks, but production compatibility still depends on in-game validation with the target modpack.
+- Local weather uses vanilla-style textured precipitation and 3D cloud cells; production compatibility still depends on in-game validation with the target modpack.
