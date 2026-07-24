@@ -55,10 +55,10 @@ generate:
   IRON_STAMP: ../ukgeo-tools/uk_world_data_gb/.iron_ore_inputs.sha256
   ORE_RULES: ../ukgeo-tools/examples/ore_rules_625k.yml
   SURFACE_RULES: ../ukgeo-tools/examples/surface_geology_625k.yml
-  WORLD_X_SCALE: 1.0
-  WORLD_Z_SCALE: 1.0
-  # WORLD_X_SCALE: 1.5
-  # WORLD_Z_SCALE: 1.5
+  # WORLD_X_SCALE: 1.0
+  # WORLD_Z_SCALE: 1.0
+  WORLD_X_SCALE: 2.0
+  WORLD_Z_SCALE: 2.0
   BNG_MAX_EASTING: 670000
   WORLD_WIDTH_IRELAND: 34231
   WORLD_WIDTH_GB: 25769
