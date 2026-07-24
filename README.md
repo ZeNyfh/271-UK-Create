@@ -53,7 +53,9 @@ Run `./start-dev.sh` from the repository root. It builds every folder under `mod
 those workspace-built modules into the Realtime Localised Weather Gradle run directory, and
 launches its NeoForge development client. It does not load jars from your configured modpack.
 The weather and UKGeo duplicate jars are excluded because Gradle loads those directly from the
-workspace.
+workspace. It adds only the external runtime integrations required or supported by workspace
+mods: Create, Create Diesel Generators, Create Aeronautics, Create Simulated, WilderNature,
+Jade, Serene Seasons, Sable, Architectury, Curios, and GlitchCore.
 
 ## Configuration model
 

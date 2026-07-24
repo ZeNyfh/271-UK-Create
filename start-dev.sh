@@ -4,6 +4,9 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$ROOT_DIR/scripts/load-minecraft-instance-config.sh"
+load_minecraft_instance_config "$ROOT_DIR"
+
 LOCAL_JAVA="${JAVA_DIR:-$HOME/.jdks/temurin-21.0.11}"
 if [[ -x "$LOCAL_JAVA/bin/java" ]]; then
     export JAVA_HOME="$LOCAL_JAVA"
@@ -29,6 +32,28 @@ for mod_dir in "$ROOT_DIR"/mods/*; do
     while IFS= read -r -d '' jar; do
         cp -f "$jar" "$DEV_MOD_DIR/"
     done < <(find "$mod_dir/build/libs" -maxdepth 1 -type f -name '*.jar' ! -name '*-sources.jar' -print0)
+done
+
+# Only stage external mods that the workspace modules require or explicitly integrate with.
+# Do not broaden this list into a whole-modpack copy.
+SUPPORT_JAR_PATTERNS=(
+    'create-*.jar'
+    'createdieselgenerators-*.jar'
+    'create_aeronautics_*.jar'
+    'create-aeronautics-*.jar'
+    'createsimulated-*.jar'
+    'letsdo-wildernature-*.jar'
+    'Jade-*.jar'
+    'SereneSeasons-*.jar'
+    'sable-*.jar'
+    'architectury-*.jar'
+    'curios-*.jar'
+    'GlitchCore-*.jar'
+)
+for pattern in "${SUPPORT_JAR_PATTERNS[@]}"; do
+    while IFS= read -r -d '' jar; do
+        cp -f "$jar" "$DEV_MOD_DIR/"
+    done < <(find "$MOD_DIR" -maxdepth 1 -type f -name "$pattern" -print0)
 done
 
 if [[ -d "$ROOT_DIR/mods/kubejs/server_scripts" ]]; then
