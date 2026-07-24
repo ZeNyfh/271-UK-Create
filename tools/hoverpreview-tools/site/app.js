@@ -44,7 +44,9 @@ const FIT_VIEW_PADDING_PX = 72;
 const LIVE_WEATHER_REFRESH_MS = 15 * 60 * 1000;
 const LIVE_WEATHER_PREFETCH_DELAY_MS = 750;
 const LIVE_WEATHER_GRID_COLUMNS = 256;
-const LIVE_WEATHER_SAMPLE_BATCH_POINTS = 8192;
+// Keep live weather work below a frame's budget so the map remains responsive while loading.
+const LIVE_WEATHER_SAMPLE_BATCH_POINTS = 512;
+const LIVE_WEATHER_RASTER_BATCH_POINTS = 4096;
 const LIVE_WEATHER_BATCH_POINTS = 128;
 const LIVE_WEATHER_BATCH_DELAY_MS = 350;
 const LIVE_WEATHER_MAX_RETRIES = 4;
@@ -2146,8 +2148,10 @@ async function fetchLiveWeather(manifest, { prefetch = false } = {}) {
       const payloads = await fetchOpenMeteoWeather(config);
       return decodeLiveWeatherMetrics(config, payloads);
     });
-    state.liveWeather.cloud_cover = createLiveWeatherMetric("cloud_cover", metrics.cloud_cover, grid.columns, grid.rows);
-    state.liveWeather.downfall_coverage = createLiveWeatherMetric("downfall_coverage", metrics.downfall_coverage, grid.columns, grid.rows);
+    state.liveWeather.cloud_cover = await createLiveWeatherMetric("cloud_cover", metrics.cloud_cover, grid.columns, grid.rows);
+    scheduleRender();
+    await yieldToBrowser();
+    state.liveWeather.downfall_coverage = await createLiveWeatherMetric("downfall_coverage", metrics.downfall_coverage, grid.columns, grid.rows);
     scheduleRender();
     refreshStatus();
   } finally {
@@ -2194,6 +2198,9 @@ async function fetchOpenMeteoOmWeather(config) {
       cloud[index] = clampPercent(cloudSample?.value);
       downfall[index] = clampPrecipitationMm(precipitationSample?.value);
     }));
+    // Promise completions are still processed on the main thread. Yield between chunks so
+    // pointer/zoom events and rendering are not starved by a large UK-wide sampling grid.
+    if (end < total) await yieldToBrowser();
   }
   return { cloud_cover: cloud, downfall_coverage: downfall };
 }
@@ -2339,6 +2346,13 @@ function delay(ms) {
   return new Promise((resolve) => window.setTimeout(resolve, Math.max(0, Number(ms) || 0)));
 }
 
+function yieldToBrowser() {
+  if (typeof window.requestAnimationFrame === "function") {
+    return new Promise((resolve) => window.requestAnimationFrame(() => resolve()));
+  }
+  return delay(0);
+}
+
 function decodeLiveWeatherMetrics(config, payloads) {
   const total = Number(config?.grid?.rows) * Number(config?.grid?.columns);
   const cloud = new Uint8Array(total);
@@ -2363,20 +2377,24 @@ function clampPrecipitationMm(value) {
   return Math.max(0, number);
 }
 
-function createLiveWeatherMetric(metricName, values, columns, rows) {
+async function createLiveWeatherMetric(metricName, values, columns, rows) {
   const canvas = document.createElement("canvas");
   canvas.width = Math.max(1, columns);
   canvas.height = Math.max(1, rows);
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
   const imageData = ctx.createImageData(canvas.width, canvas.height);
-  for (let index = 0; index < values.length; index += 1) {
-    const base = index * 4;
-    const value = values[index];
-    const rgba = metricName === "cloud_cover" ? liveCloudColor(value) : livePrecipitationColor(value);
-    imageData.data[base + 0] = rgba[0];
-    imageData.data[base + 1] = rgba[1];
-    imageData.data[base + 2] = rgba[2];
-    imageData.data[base + 3] = rgba[3];
+  for (let start = 0; start < values.length; start += LIVE_WEATHER_RASTER_BATCH_POINTS) {
+    const end = Math.min(values.length, start + LIVE_WEATHER_RASTER_BATCH_POINTS);
+    for (let index = start; index < end; index += 1) {
+      const base = index * 4;
+      const value = values[index];
+      const rgba = metricName === "cloud_cover" ? liveCloudColor(value) : livePrecipitationColor(value);
+      imageData.data[base + 0] = rgba[0];
+      imageData.data[base + 1] = rgba[1];
+      imageData.data[base + 2] = rgba[2];
+      imageData.data[base + 3] = rgba[3];
+    }
+    if (end < values.length) await yieldToBrowser();
   }
   ctx.putImageData(imageData, 0, 0);
   return { metricName, values, columns, rows, canvas };
