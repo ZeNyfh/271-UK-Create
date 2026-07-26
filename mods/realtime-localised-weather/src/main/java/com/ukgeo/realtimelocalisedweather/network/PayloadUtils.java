@@ -32,10 +32,6 @@ final class PayloadUtils {
         buffer.writeFloat(snapshot.snowfallRateCmPerHour());
         buffer.writeFloat(snapshot.temperatureCelsius());
         buffer.writeFloat(snapshot.relativeHumidity());
-        buffer.writeFloat(snapshot.totalCloudCover());
-        buffer.writeFloat(snapshot.lowCloudCover());
-        buffer.writeFloat(snapshot.midCloudCover());
-        buffer.writeFloat(snapshot.highCloudCover());
         buffer.writeFloat(snapshot.visibilityMetres());
         buffer.writeFloat(snapshot.windSpeedKmh());
         buffer.writeFloat(snapshot.windDirectionDegrees());
@@ -54,10 +50,6 @@ final class PayloadUtils {
             buffer.readDouble(),
             buffer.readVarInt(),
             readEnum(buffer, MeteorologicalPrecipitation.values()),
-            buffer.readFloat(),
-            buffer.readFloat(),
-            buffer.readFloat(),
-            buffer.readFloat(),
             buffer.readFloat(),
             buffer.readFloat(),
             buffer.readFloat(),

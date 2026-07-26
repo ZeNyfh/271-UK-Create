@@ -27,9 +27,8 @@ public final class WeatherFogController {
         if (sample.isEmpty()) {
             return;
         }
-        float cloud = sample.get().interpolatedCloudCover() / 100.0F;
         float rain = Math.min(1.0F, sample.get().interpolatedRate() / 8.0F);
-        float multiplier = 1.0F - (cloud * 0.2F + rain * 0.25F);
+        float multiplier = 1.0F - (rain * 0.35F);
         event.scaleFarPlaneDistance(Math.max(0.45F, multiplier));
         event.setCanceled(true);
     }

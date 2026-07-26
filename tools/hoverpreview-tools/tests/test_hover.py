@@ -367,7 +367,7 @@ def test_export_hover_previews_writes_live_weather_query_metadata(tmp_path):
     hover_manifest = json.loads((out / "hover_manifest.json").read_text(encoding="utf-8"))
     assert "live_weather" in hover_manifest
     assert hover_manifest["live_weather"]["provider"] == "Open-Meteo"
-    assert hover_manifest["live_weather"]["metrics"]["cloud_cover"]["unit"] == "percent"
+    assert "cloud_cover" not in hover_manifest["live_weather"]["metrics"]
     assert hover_manifest["live_weather"]["metrics"]["downfall_coverage"]["source"] == "current.precipitation"
     assert hover_manifest["live_weather"]["grid"]["rows"] >= 2
     assert hover_manifest["live_weather"]["grid"]["columns"] >= 2

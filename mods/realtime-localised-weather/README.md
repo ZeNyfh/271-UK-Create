@@ -17,8 +17,8 @@ UKGeo is a required dependency. Serene Seasons is optional.
 - The server converts active UKGeo regions from Minecraft block coordinates to British National Grid and then to WGS84 latitude/longitude.
 - The server batches active tile centres into asynchronous Open-Meteo requests.
 - The server owns authoritative regional precipitation, thunder eligibility, gameplay severity, cache state, overrides, and synchronisation.
-- Clients poll the server for the newest authoritative precipitation and cloud coverage snapshots.
-- The client uses vanilla rain, snow, and cloud textures with local interpolation, density, fog, and weather sound mixing.
+- Clients poll the server for the newest authoritative precipitation snapshots.
+- The client uses vanilla rain and snow textures with local interpolation, density, fog, and weather sound mixing.
 - Different clients may render different densities while still agreeing on gameplay weather.
 
 ## Weather authority modes
@@ -47,7 +47,7 @@ Serene Seasons does not create precipitation on its own. If Open-Meteo reports n
 
 - Requests are performed only by the logical server.
 - Multiplayer clients do not contact Open-Meteo.
-- Multiplayer clients poll their Minecraft server for the latest cached tile snapshots and receive server-authoritative cloud/precipitation data.
+- Multiplayer clients poll their Minecraft server for the latest cached tile snapshots and receive server-authoritative precipitation data.
 - Requests use Java 21 `HttpClient.sendAsync`.
 - Cached snapshots remain usable during upstream outages.
 - Expired or failed data are marked stale rather than crashing or freezing the server.
@@ -59,10 +59,6 @@ Open-Meteo variables used:
 - `showers`
 - `snowfall`
 - `weather_code`
-- `cloud_cover`
-- `cloud_cover_low`
-- `cloud_cover_mid`
-- `cloud_cover_high`
 - `visibility`
 - `temperature_2m`
 - `relative_humidity_2m`
@@ -106,7 +102,7 @@ The mod registers `/realtimeweather` commands for operators:
 
 ## Runtime model
 
-- The server does not send particles, cloud meshes, or client fog values.
+- The server does not send particles or client fog values.
 - The client interpolates neighbouring tile snapshots and derives visual density locally.
 - Server gameplay checks are position-aware and dry regions stay dry even if nearby tiles are wet.
 - Regional snow accumulation and lightning are bounded and operate only in loaded chunks.
@@ -117,7 +113,6 @@ Client settings affect visuals only:
 
 - precipitation density
 - snow density
-- cloud density
 - fog
 - sound
 - wind slant
@@ -136,4 +131,4 @@ These options do not change gameplay severity, server rain checks, snow placemen
 - Vanilla weather is replaced only where the weather manager is active in the configured UKGeo overworld.
 - Other dimensions keep vanilla weather behaviour.
 - Serene Seasons foliage colours, crop progression, and season progression are not replaced.
-- Local weather uses vanilla-style textured precipitation and 3D cloud cells; production compatibility still depends on in-game validation with the target modpack.
+- Local weather uses vanilla-style textured precipitation; production compatibility still depends on in-game validation with the target modpack.

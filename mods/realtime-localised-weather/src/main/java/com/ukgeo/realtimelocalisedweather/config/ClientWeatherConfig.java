@@ -10,22 +10,13 @@ public final class ClientWeatherConfig {
         OFF
     }
 
-    public enum CloudRendererMode {
-        REPLACE,
-        OVERLAY,
-        VANILLA
-    }
-
     public static final ModConfigSpec SPEC;
     public static final ModConfigSpec.BooleanValue ENABLED;
     public static final ModConfigSpec.EnumValue<PrecipitationRendererMode> PRECIPITATION_RENDERER;
-    public static final ModConfigSpec.EnumValue<CloudRendererMode> CLOUD_RENDERER;
     public static final ModConfigSpec.DoubleValue TRANSITION_SECONDS;
     public static final ModConfigSpec.IntValue PRECIPITATION_RENDER_DISTANCE_BLOCKS;
-    public static final ModConfigSpec.IntValue CLOUD_RENDER_DISTANCE_BLOCKS;
     public static final ModConfigSpec.DoubleValue PRECIPITATION_DENSITY_MULTIPLIER;
     public static final ModConfigSpec.DoubleValue SNOW_DENSITY_MULTIPLIER;
-    public static final ModConfigSpec.DoubleValue CLOUD_DENSITY_MULTIPLIER;
     public static final ModConfigSpec.IntValue WEATHER_POLL_INTERVAL_TICKS;
     public static final ModConfigSpec.BooleanValue ENABLE_WEATHER_FOG;
     public static final ModConfigSpec.BooleanValue ENABLE_WEATHER_SOUNDS;
@@ -40,13 +31,10 @@ public final class ClientWeatherConfig {
         builder.push("realtime_localised_weather");
         ENABLED = builder.define("enabled", true);
         PRECIPITATION_RENDERER = builder.defineEnum("precipitation_renderer", PrecipitationRendererMode.CUSTOM);
-        CLOUD_RENDERER = builder.defineEnum("cloud_renderer", CloudRendererMode.REPLACE);
         TRANSITION_SECONDS = builder.defineInRange("transition_seconds", 24.0D, 1.0D, 120.0D);
         PRECIPITATION_RENDER_DISTANCE_BLOCKS = builder.defineInRange("precipitation_render_distance_blocks", 128, 16, 512);
-        CLOUD_RENDER_DISTANCE_BLOCKS = builder.defineInRange("cloud_render_distance_blocks", 256, 32, 1024);
         PRECIPITATION_DENSITY_MULTIPLIER = builder.defineInRange("precipitation_density_multiplier", 1.0D, 0.0D, 4.0D);
         SNOW_DENSITY_MULTIPLIER = builder.defineInRange("snow_density_multiplier", 1.0D, 0.0D, 4.0D);
-        CLOUD_DENSITY_MULTIPLIER = builder.defineInRange("cloud_density_multiplier", 1.0D, 0.0D, 4.0D);
         WEATHER_POLL_INTERVAL_TICKS = builder.defineInRange("weather_poll_interval_ticks", 40, 20, 1200);
         ENABLE_WEATHER_FOG = builder.define("enable_weather_fog", true);
         ENABLE_WEATHER_SOUNDS = builder.define("enable_weather_sounds", true);

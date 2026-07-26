@@ -15,6 +15,7 @@ from rich.console import Console
 from tqdm import tqdm
 
 from .manifest import default_u8_layer, read_manifest, write_manifest
+from .raster_memory import U8Raster, maximum_in_place
 from .tiles import write_u8_tile, u8_extension
 
 console = Console()
@@ -43,49 +44,52 @@ def make_coal_resource_tiles(
         width,
         depth,
     )
-    arr = np.zeros((depth, width), dtype=np.uint8)
     datasets, tmp = _resolve_vector_datasets(coal_resources)
     try:
-        bbox = (
-            geo["bng_min_easting"],
-            geo["bng_min_northing"],
-            geo["bng_max_easting"],
-            geo["bng_max_northing"],
-        )
-        for dataset in datasets:
-            for layer_name in _coal_layers(dataset):
-                try:
-                    frame = gpd.read_file(dataset, layer=layer_name, bbox=bbox)
-                except Exception as exc:
-                    console.print(f"[yellow]Skipping {dataset.name}:{layer_name}: {exc}[/yellow]")
-                    continue
-                if frame.empty:
-                    continue
-                if frame.crs and str(frame.crs).upper() != "EPSG:27700":
-                    frame = frame.to_crs("EPSG:27700")
-                shapes = []
-                for _, row in frame.iterrows():
-                    geom = row.geometry
-                    if geom is None or geom.is_empty:
+        with U8Raster((depth, width), tmp_parent=out, label="coal") as arr, U8Raster(
+            (depth, width), tmp_parent=out, label="coal-burn"
+        ) as burned:
+            bbox = (
+                geo["bng_min_easting"],
+                geo["bng_min_northing"],
+                geo["bng_max_easting"],
+                geo["bng_max_northing"],
+            )
+            for dataset in datasets:
+                for layer_name in _coal_layers(dataset):
+                    try:
+                        frame = gpd.read_file(dataset, layer=layer_name, bbox=bbox)
+                    except Exception as exc:
+                        console.print(f"[yellow]Skipping {dataset.name}:{layer_name}: {exc}[/yellow]")
                         continue
-                    score = _score_coal_feature(layer_name, str(row.get("FEATURE", "")), str(row.get("RESOURCES", "")))
-                    if score > 0:
-                        shapes.append((geom, score))
-                if shapes:
-                    burned = rasterize(
-                        shapes,
-                        out_shape=arr.shape,
-                        transform=transform,
-                        fill=0,
-                        dtype=np.uint8,
-                        merge_alg=MergeAlg.replace,
-                    )
-                    arr = np.maximum(arr, burned)
-        manifest.setdefault("ore_layers", {})
-        manifest["ore_layers"][COAL_LAYER_NAME] = default_u8_layer(f"ores/{COAL_LAYER_NAME}")
-        _write_tiles(arr, out / "ores" / COAL_LAYER_NAME, tile_size)
-        if debug_geotiff:
-            _write_debug(debug_geotiff, arr, transform)
+                    if frame.empty:
+                        continue
+                    if frame.crs and str(frame.crs).upper() != "EPSG:27700":
+                        frame = frame.to_crs("EPSG:27700")
+                    shapes = []
+                    for _, row in frame.iterrows():
+                        geom = row.geometry
+                        if geom is None or geom.is_empty:
+                            continue
+                        score = _score_coal_feature(layer_name, str(row.get("FEATURE", "")), str(row.get("RESOURCES", "")))
+                        if score > 0:
+                            shapes.append((geom, score))
+                    if shapes:
+                        burned[:] = 0
+                        rasterize(
+                            shapes,
+                            out=burned,
+                            transform=transform,
+                            fill=0,
+                            dtype=np.uint8,
+                            merge_alg=MergeAlg.replace,
+                        )
+                        maximum_in_place(arr, burned)
+            manifest.setdefault("ore_layers", {})
+            manifest["ore_layers"][COAL_LAYER_NAME] = default_u8_layer(f"ores/{COAL_LAYER_NAME}")
+            _write_tiles(arr, out / "ores" / COAL_LAYER_NAME, tile_size)
+            if debug_geotiff:
+                _write_debug(debug_geotiff, arr, transform)
         write_manifest(manifest_path, manifest)
         console.print("coal: wrote coal resource score tiles")
     finally:

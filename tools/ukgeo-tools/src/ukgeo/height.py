@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
 import io
 import math
+import os
 import zipfile
 
 import numpy as np
@@ -11,7 +13,7 @@ from tqdm import tqdm
 
 from .asc import read_header_from_binary
 from .manifest import default_manifest, write_manifest
-from .tiles import HEIGHT_NODATA, r16_extension, write_r16_tile
+from .tiles import HEIGHT_NODATA, r16_extension, read_r16_tile, resolve_existing_tile, write_r16_tile
 
 console = Console()
 
@@ -35,6 +37,7 @@ def make_height_tiles(
     height_resampling: str = "nearest",
     height_smoothing: str = "none",
     height_deterrace: bool = False,
+    height_jobs: int = 1,
     debug_geotiff: Path | None = None,
 ) -> None:
     height_resampling = _normalise_choice(height_resampling, {"nearest", "bilinear"}, "height_resampling")
@@ -43,11 +46,18 @@ def make_height_tiles(
     padded_depth = math.ceil(world_depth / tile_size) * tile_size
     cells = padded_width * padded_depth
     gib = cells * 2 / (1024**3)
-    console.print(f"[yellow]Height generation currently uses a guarded in-memory mosaic ({gib:.2f} GiB int16 output).[/yellow]")
-    if cells > 2_000_000_000:
-        raise RuntimeError("Requested output is too large for this first implementation; use a smaller extent or implement windowed VRT generation.")
-
-    result = np.full((padded_depth, padded_width), HEIGHT_NODATA, dtype="<i2")
+    height_jobs = max(1, int(height_jobs))
+    disk_backed = cells > 500_000_000
+    source_path = out / ".height-source.i2"
+    processed_path = out / ".height-processed.i2"
+    if disk_backed:
+        console.print(f"[yellow]Using disk-backed height mosaics ({gib:.2f} GiB each, {height_jobs} processing worker(s)).[/yellow]")
+        result = np.memmap(source_path, mode="w+", dtype="<i2", shape=(padded_depth, padded_width))
+        result[:] = HEIGHT_NODATA
+        result.flush()
+        _verify_backing_file(source_path, cells * np.dtype("<i2").itemsize, "source mosaic")
+    else:
+        result = np.full((padded_depth, padded_width), HEIGHT_NODATA, dtype="<i2")
     x_scale = (bng_max_easting - bng_min_easting) / world_width
     y_scale = (bng_max_northing - bng_min_northing) / world_depth
 
@@ -77,8 +87,17 @@ def make_height_tiles(
             decimetres[sampled == header.nodata_value] = HEIGHT_NODATA
         result[z0c:z1c, x0c:x1c] = decimetres
 
+    if disk_backed:
+        result.flush()
+        _verify_backing_file(source_path, cells * np.dtype("<i2").itemsize, "completed source mosaic")
+
     if height_smoothing != "none" or height_deterrace:
-        result = process_height_mosaic(result, smoothing=height_smoothing, deterrace=height_deterrace)
+        result = process_height_mosaic(
+            result, smoothing=height_smoothing, deterrace=height_deterrace,
+            output_path=processed_path if disk_backed else None, jobs=height_jobs,
+        )
+        if disk_backed:
+            _verify_backing_file(processed_path, cells * np.dtype("<i2").itemsize, "processed mosaic")
 
     for tile_z in tqdm(range(padded_depth // tile_size), desc="height tile rows"):
         for tile_x in range(padded_width // tile_size):
@@ -86,7 +105,7 @@ def make_height_tiles(
                 tile_z * tile_size : (tile_z + 1) * tile_size,
                 tile_x * tile_size : (tile_x + 1) * tile_size,
             ]
-            write_r16_tile(out / "height" / f"{tile_x:03d}_{tile_z:03d}{r16_extension()}", tile)
+            _write_verified_height_tile(out / "height" / f"{tile_x:03d}_{tile_z:03d}{r16_extension()}", tile, tile_size)
 
     manifest = default_manifest(
         width=world_width,
@@ -111,6 +130,10 @@ def make_height_tiles(
     write_manifest(out / "manifest.json", manifest)
     if debug_geotiff:
         _write_debug_geotiff(debug_geotiff, result, manifest)
+    if isinstance(result, np.memmap):
+        result.flush()
+    for path in (source_path, processed_path):
+        path.unlink(missing_ok=True)
 
 
 def _normalise_choice(value: str, allowed: set[str], name: str) -> str:
@@ -118,6 +141,35 @@ def _normalise_choice(value: str, allowed: set[str], name: str) -> str:
     if normalised not in allowed:
         raise ValueError(f"{name} must be one of {', '.join(sorted(allowed))}, got {value!r}")
     return normalised
+
+
+def _verify_backing_file(path: Path, expected_bytes: int, label: str) -> None:
+    """Force the kernel to report write failures before the next generation stage begins."""
+    if not path.is_file() or path.stat().st_size != expected_bytes:
+        raise RuntimeError(f"{label} verification failed: {path} has unexpected size")
+    with path.open("rb+") as handle:
+        handle.flush()
+        os.fsync(handle.fileno())
+        # Touch beginning, middle and end after sync so disconnected/failed media is detected now.
+        for offset in (0, max(0, expected_bytes // 2 - 1), max(0, expected_bytes - 1)):
+            if len(os.pread(handle.fileno(), 1, offset)) != 1:
+                raise RuntimeError(f"{label} verification failed: unreadable byte at {offset}")
+
+
+def _write_verified_height_tile(path: Path, tile: np.ndarray, tile_size: int) -> None:
+    expected = np.asarray(tile, dtype="<i2")
+    write_r16_tile(path, expected)
+    resolved = resolve_existing_tile(path)
+    if np.all(expected == HEIGHT_NODATA):
+        if resolved.exists():
+            raise RuntimeError(f"height tile verification failed: empty tile was written at {resolved}")
+        return
+    with resolved.open("rb+") as handle:
+        handle.flush()
+        os.fsync(handle.fileno())
+    actual = read_r16_tile(path, tile_size)
+    if not np.array_equal(actual, expected):
+        raise RuntimeError(f"height tile verification failed: read-back mismatch for {resolved}")
 
 
 def sample_asc_heights(data: np.ndarray, header, xs: np.ndarray, ys: np.ndarray, resampling: str) -> np.ndarray:
@@ -186,18 +238,30 @@ def _sample_asc_bilinear(data: np.ndarray, header, xs: np.ndarray, ys: np.ndarra
     return np.where(denominator > 0.0, numerator / np.maximum(denominator, 1.0e-6), nearest)
 
 
-def process_height_mosaic(data: np.ndarray, *, smoothing: str, deterrace: bool, strip_rows: int = 512) -> np.ndarray:
+def process_height_mosaic(data: np.ndarray, *, smoothing: str, deterrace: bool, strip_rows: int = 512, output_path: Path | None = None, jobs: int = 1) -> np.ndarray:
     smoothing = _normalise_choice(smoothing, {"none", "light", "medium"}, "smoothing")
     if smoothing == "none" and not deterrace:
         return data
 
-    source = np.asarray(data, dtype="<i2")
-    output = source.copy()
+    source = data if isinstance(data, np.memmap) and data.dtype == np.dtype("<i2") else np.asarray(data, dtype="<i2")
+    output = np.memmap(output_path, mode="w+", dtype="<i2", shape=source.shape) if output_path else source.copy()
     height, width = source.shape
-    for z0 in tqdm(range(0, height, strip_rows), desc="height processing rows"):
-        z1 = min(height, z0 + strip_rows)
-        processed = _process_height_strip(source, z0, z1, smoothing=smoothing, deterrace=deterrace)
-        output[z0:z1, :] = processed
+    if isinstance(source, np.memmap):
+        strip_rows = min(strip_rows, max(8, 1_000_000 // max(1, width)))
+    ranges = [(z0, min(height, z0 + strip_rows)) for z0 in range(0, height, strip_rows)]
+
+    def process_range(bounds: tuple[int, int]) -> None:
+        z0, z1 = bounds
+        output[z0:z1, :] = _process_height_strip(source, z0, z1, smoothing=smoothing, deterrace=deterrace)
+
+    if jobs > 1:
+        with ThreadPoolExecutor(max_workers=jobs) as executor:
+            for _ in tqdm(executor.map(process_range, ranges), total=len(ranges), desc="height processing rows"):
+                pass
+    else:
+        for bounds in tqdm(ranges, desc="height processing rows"):
+            process_range(bounds)
+    if isinstance(output, np.memmap): output.flush()
     return output
 
 

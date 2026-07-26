@@ -42,12 +42,11 @@ The server sends:
 The server does not send:
 
 - individual particles
-- cloud meshes
 - fog colour decisions
 - sound volume curves
 - client-only render density
 
-The client derives interpolation, precipitation density, fog, clouds, and sound locally from the synchronized snapshot data.
+The client derives interpolation, precipitation density, fog, and sound locally from the synchronized snapshot data.
 
 ## Sync model
 

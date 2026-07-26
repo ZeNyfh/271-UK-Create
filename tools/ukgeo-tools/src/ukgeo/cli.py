@@ -99,6 +99,7 @@ def make_height_tiles(
     height_resampling: str = typer.Option("nearest", "--height-resampling", help="nearest or bilinear"),
     height_smoothing: str = typer.Option("none", "--height-smoothing", help="none, light, or medium"),
     height_deterrace: bool = typer.Option(False, "--height-deterrace/--no-height-deterrace"),
+    height_jobs: int = typer.Option(1, "--height-jobs", min=1),
     debug_geotiff: Path | None = typer.Option(None, "--debug-geotiff", "--height-debug-geotiff"),
 ) -> None:
     make_height_tiles_impl(
@@ -119,6 +120,7 @@ def make_height_tiles(
         height_resampling=height_resampling,
         height_smoothing=height_smoothing,
         height_deterrace=height_deterrace,
+        height_jobs=height_jobs,
         debug_geotiff=debug_geotiff,
     )
 

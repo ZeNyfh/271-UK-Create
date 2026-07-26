@@ -18,6 +18,7 @@ import com.ukgeo.realtimelocalisedweather.network.WeatherTileRemovePayload;
 import com.ukgeo.realtimelocalisedweather.network.WeatherTileUpdatePayload;
 import com.ukgeo.realtimelocalisedweather.openmeteo.OpenMeteoClient;
 import com.ukgeo.realtimelocalisedweather.openmeteo.OpenMeteoResponse;
+import com.ukgeo.realtimelocalisedweather.weather.MeteorologicalPrecipitation;
 import com.ukgeo.realtimelocalisedweather.weather.GameplaySeverity;
 import com.ukgeo.realtimelocalisedweather.weather.LocalWeatherState;
 import com.ukgeo.realtimelocalisedweather.weather.ResolvedPrecipitation;
@@ -156,7 +157,7 @@ public final class ServerWeatherManager implements RegionalWeatherAccess {
     }
 
     public void setMode(ServerLevel level, WeatherAuthorityMode mode) {
-        levelStates.computeIfAbsent(level.dimension(), ignored -> new LevelState(UkGeoReferenceProvider.get(level).orElseThrow())).mode = mode;
+        requireLevelState(level).mode = mode;
         PacketDistributor.sendToAllPlayers(new WeatherAuthorityModePayload(level.dimension().location().toString(), mode));
     }
 
@@ -168,33 +169,79 @@ public final class ServerWeatherManager implements RegionalWeatherAccess {
     }
 
     public void applyGlobalOverride(ServerLevel level, ResolvedPrecipitation precipitation, GameplaySeverity severity, long durationMillis) {
-        LevelState state = levelStates.computeIfAbsent(level.dimension(), ignored -> new LevelState(UkGeoReferenceProvider.get(level).orElseThrow()));
+        LevelState state = requireLevelState(level);
         state.mode = WeatherAuthorityMode.MANUAL;
         state.overrideManager.setGlobal(precipitation, severity, durationMillis);
         syncPlayers(level, state, true);
     }
 
     public void applyRegionalOverride(ServerLevel level, int tileX, int tileZ, ResolvedPrecipitation precipitation, GameplaySeverity severity, long durationMillis) {
-        LevelState state = levelStates.computeIfAbsent(level.dimension(), ignored -> new LevelState(UkGeoReferenceProvider.get(level).orElseThrow()));
+        LevelState state = requireLevelState(level);
         state.mode = WeatherAuthorityMode.MANUAL;
         state.overrideManager.setTile(new WeatherTileKey(level.dimension(), tileX, tileZ), precipitation, severity, durationMillis);
         syncPlayers(level, state, true);
     }
 
-    public void applyVisualCloudOverride(ServerLevel level, BlockPos position, int percent) {
-        LevelState state = stateFor(level);
-        state.visualOverrideManager.setCloud(WeatherTileKey.fromBlock(level.dimension(), position.getX(), position.getZ(), ServerWeatherConfig.ZONE_SIZE_BLOCKS.get()), percent);
-        syncPlayers(level, state, true);
-    }
-
     public void applyVisualRainOverride(ServerLevel level, BlockPos position, int percent) {
-        LevelState state = stateFor(level);
-        state.visualOverrideManager.setRain(WeatherTileKey.fromBlock(level.dimension(), position.getX(), position.getZ(), ServerWeatherConfig.ZONE_SIZE_BLOCKS.get()), percent);
+        LevelState state = requireLevelState(level);
+        int zoneSize = ServerWeatherConfig.ZONE_SIZE_BLOCKS.get();
+        WeatherTileKey key = WeatherTileKey.fromBlock(level.dimension(), position.getX(), position.getZ(), zoneSize);
+        long now = System.currentTimeMillis();
+        // /rain is a visual debug tool: ensure nearby tiles exist with a base snapshot so the
+        // override can sync even before Open-Meteo has returned live weather for this area.
+        Set<WeatherTileKey> relevant = ActiveTileTracker.collect(
+            level.dimension(),
+            List.of(position),
+            zoneSize,
+            ServerWeatherConfig.ACTIVE_ZONE_RADIUS.get(),
+            ServerWeatherConfig.PREFETCH_ZONE_RADIUS.get()
+        );
+        trackActiveTiles(state, relevant, now);
+        for (WeatherTileKey tileKey : relevant) {
+            ManagedTile tile = state.tiles.get(tileKey);
+            if (tile != null && tile.snapshot == null) {
+                tile.snapshot = placeholderSnapshot();
+            }
+        }
+        state.visualOverrideManager.setRain(key, percent);
         syncPlayers(level, state, true);
     }
 
-    private LevelState stateFor(ServerLevel level) {
-        return levelStates.computeIfAbsent(level.dimension(), ignored -> new LevelState(UkGeoReferenceProvider.get(level).orElseThrow()));
+    private LevelState requireLevelState(ServerLevel level) {
+        LevelState existing = levelStates.get(level.dimension());
+        Optional<UkGeoReference> reference = UkGeoReferenceProvider.get(level);
+        if (existing != null) {
+            reference.ifPresent(value -> existing.reference = value);
+            return existing;
+        }
+        UkGeoReference resolved = reference.orElseThrow(() -> new IllegalStateException(
+            "Realtime Localised Weather is not ready yet (UKGeo reference unavailable). Wait for the world to finish loading, then try again."
+        ));
+        return levelStates.computeIfAbsent(level.dimension(), ignored -> new LevelState(resolved));
+    }
+
+    private static ServerWeatherSnapshot placeholderSnapshot() {
+        return new ServerWeatherSnapshot(
+            Instant.now(),
+            0.0D,
+            0.0D,
+            0,
+            MeteorologicalPrecipitation.NONE,
+            0.0F,
+            0.0F,
+            0.0F,
+            15.0F,
+            70.0F,
+            10000.0F,
+            0.0F,
+            0.0F,
+            0.0F,
+            ResolvedPrecipitation.NONE,
+            GameplaySeverity.TRACE,
+            0.0F,
+            false,
+            0L
+        );
     }
 
     public String sampleStatus(ServerLevel level, int x, int z) {
@@ -203,41 +250,17 @@ public final class ServerWeatherManager implements RegionalWeatherAccess {
         if (snapshot == null) {
             return "No realtime weather snapshot for x=" + x + " z=" + z;
         }
-        return "tile=%d,%d resolved=%s severity=%s rate=%.2fmm/h clouds=%.0f%% temp=%.1fC stale=%s".formatted(
+        return "tile=%d,%d resolved=%s severity=%s rate=%.2fmm/h temp=%.1fC stale=%s".formatted(
             weather.key().tileX(),
             weather.key().tileZ(),
             snapshot.resolvedPrecipitation(),
             snapshot.gameplaySeverity(),
             snapshot.precipitationRateMmPerHour(),
-            snapshot.totalCloudCover(),
             snapshot.temperatureCelsius(),
             snapshot.stale()
         );
     }
 
-    public String cloudStatus(ServerLevel level, int x, int z) {
-        LocalWeatherState weather = ensureWeatherRequestedAt(level, new BlockPos(x, level.getSeaLevel(), z));
-        ServerWeatherSnapshot snapshot = weather.snapshot();
-        if (snapshot == null) {
-            return "Cloud coverage unavailable at x=%d z=%d tile=%d,%d; realtime weather snapshot requested but not loaded yet.".formatted(
-                x,
-                z,
-                weather.key().tileX(),
-                weather.key().tileZ()
-            );
-        }
-        return "Cloud coverage at x=%d z=%d: %.0f%% total (low %.0f%%, mid %.0f%%, high %.0f%%) tile=%d,%d stale=%s".formatted(
-            x,
-            z,
-            snapshot.totalCloudCover(),
-            snapshot.lowCloudCover(),
-            snapshot.midCloudCover(),
-            snapshot.highCloudCover(),
-            weather.key().tileX(),
-            weather.key().tileZ(),
-            snapshot.stale()
-        );
-    }
 
     public String precipitationStatus(ServerLevel level, int x, int z) {
         LocalWeatherState weather = ensureWeatherRequestedAt(level, new BlockPos(x, level.getSeaLevel(), z));
@@ -483,7 +506,7 @@ public final class ServerWeatherManager implements RegionalWeatherAccess {
         float thunderPotential = switch (location.weatherCode()) {
             case 95 -> 0.8F;
             case 96, 99 -> 1.0F;
-            default -> location.cloudCover() >= 90.0F && location.showers() > 0.2F ? 0.35F : 0.0F;
+            default -> location.showers() > 0.2F ? 0.35F : 0.0F;
         };
         return new ServerWeatherSnapshot(
             location.observedAt(),
@@ -496,10 +519,6 @@ public final class ServerWeatherManager implements RegionalWeatherAccess {
             location.snowfall(),
             location.temperature(),
             location.humidity(),
-            location.cloudCover(),
-            location.cloudCoverLow(),
-            location.cloudCoverMid(),
-            location.cloudCoverHigh(),
             location.visibility(),
             location.windSpeed(),
             location.windDirection(),
@@ -515,14 +534,14 @@ public final class ServerWeatherManager implements RegionalWeatherAccess {
     private ServerWeatherSnapshot resolvedSnapshotFor(ServerLevel level, LevelState state, WeatherTileKey key, BlockPos position) {
         long now = System.currentTimeMillis();
         ServerWeatherSnapshot base = state.baseSnapshotFor(key).orElse(null);
+        Optional<VisualOverrideManager.Entry> visualOverride = state.visualOverrideManager.lookup(key);
         if (base == null) {
-            return null;
+            return visualOverride.map(entry -> entry.apply(placeholderSnapshot())).orElse(null);
         }
         Optional<WeatherOverrideManager.OverrideEntry> override = state.overrideManager.lookup(key, now);
         if (override.isPresent()) {
             base = override.get().toSnapshot(base, base.revision() + 1L);
         }
-        Optional<VisualOverrideManager.Entry> visualOverride = state.visualOverrideManager.lookup(key);
         if (visualOverride.isPresent()) return visualOverride.get().apply(base);
         SereneSeasonSnapshot seasonSnapshot = SereneSeasonsCompat.snapshot(level, level.getBiome(position));
         var resolution = SerenePrecipitationResolver.resolve(base.precipitation(), base.temperatureCelsius(), seasonSnapshot);
@@ -540,10 +559,6 @@ public final class ServerWeatherManager implements RegionalWeatherAccess {
             base.snowfallRateCmPerHour(),
             base.temperatureCelsius(),
             base.relativeHumidity(),
-            base.totalCloudCover(),
-            base.lowCloudCover(),
-            base.midCloudCover(),
-            base.highCloudCover(),
             base.visibilityMetres(),
             base.windSpeedKmh(),
             base.windDirectionDegrees(),
@@ -743,10 +758,6 @@ public final class ServerWeatherManager implements RegionalWeatherAccess {
             snapshot.snowfallRateCmPerHour(),
             snapshot.temperatureCelsius(),
             snapshot.relativeHumidity(),
-            snapshot.totalCloudCover(),
-            snapshot.lowCloudCover(),
-            snapshot.midCloudCover(),
-            snapshot.highCloudCover(),
             snapshot.visibilityMetres(),
             snapshot.windSpeedKmh(),
             snapshot.windDirectionDegrees(),

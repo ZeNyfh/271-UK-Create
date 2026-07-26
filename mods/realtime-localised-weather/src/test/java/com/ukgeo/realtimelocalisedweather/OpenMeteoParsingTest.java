@@ -14,7 +14,7 @@ final class OpenMeteoParsingTest {
         assertEquals(55.9533, location.latitude(), 0.0001);
         assertEquals(63, location.weatherCode());
         assertEquals(1.4F, location.precipitation());
-        assertEquals(92.0F, location.cloudCover());
+        assertEquals(6400.0F, location.visibility());
     }
 
     @Test

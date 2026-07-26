@@ -17,6 +17,7 @@ from tqdm import tqdm
 
 from .bgs import resolve_gpkg
 from .manifest import read_manifest, write_manifest
+from .raster_memory import U8Raster, maximum_in_place, row_windows
 from .tiles import HEIGHT_NODATA, read_r16_tile, write_u8_tile, u8_extension, r16_extension
 
 console = Console()
@@ -31,7 +32,7 @@ SOURCE_FLOW_DIRECTION_FIELDS = ("flow_direction", "FLOW_DIRECTION", "direction")
 THINNER_RIVER_DATASETS = {"epa_river_network_routes_ie", "ni_river_segment"}
 THINNER_RIVER_WIDTH_FACTOR = 0.7
 TOP_ORDER_THINNING_FACTORS = (0.5, 1.0 / 1.5, 1.0 / 1.25, 1.0 / 1.125)
-RIVER_RASTER_BATCH_SIZE = 8000
+RIVER_RASTER_BATCH_SIZE = 25000
 PREVIEW_RIVER_WIDTH_SCALE = 0.18
 PREVIEW_RIVER_MAX_RADIUS = 6
 
@@ -67,102 +68,104 @@ def make_river_tiles(
             layer=layer_name,
             bbox=(geo["bng_min_easting"], geo["bng_min_northing"], geo["bng_max_easting"], geo["bng_max_northing"]),
         )
-        arr = np.zeros((depth, width), dtype=np.uint8)
         if frame.empty:
             console.print("[yellow]No river features intersect the manifest extent.[/yellow]")
-        order_arr = np.zeros((depth, width), dtype=np.uint8)
-        half_width_arr = np.zeros((depth, width), dtype=np.uint8)
-        preview_radius_arr = np.zeros((depth, width), dtype=np.uint8)
-        if frame.empty:
-            pass
-        else:
-            if frame.crs and str(frame.crs).upper() != "EPSG:27700":
-                frame = frame.to_crs("EPSG:27700")
-            lines = _extract_lines(frame)
-            strahler = _strahler_widths(lines, manifest, manifest_path.parent)
-            # Fall back to the old fixed-width raster if graph extraction produced no usable line edges.
-            fallback_fixed = not strahler.edges
-            cell_metres = _cell_metres(geo, width, depth)
-            if fallback_fixed:
-                cover_shapes: list[tuple[object, int]] = []
-                width_shapes: list[tuple[object, int]] = []
-                order_shapes: list[tuple[object, int]] = []
-                preview_shapes: list[tuple[object, int]] = []
-                fallback_half_width = max(1, int(round(width_metres / (2.0 * cell_metres)))) if width_metres > 0 else 1
-                for geom in tqdm(frame.geometry, desc="rasterizing fallback rivers"):
-                    if geom is None or geom.is_empty:
-                        continue
-                    if not isinstance(geom, (LineString, MultiLineString)):
-                        continue
-                    if width_metres > 0:
-                        shape = geom.buffer(width_metres / 2.0, cap_style="round", join_style="round")
-                    else:
-                        shape = geom
-                    cover_shapes.append((shape, 255))
-                    width_shapes.append((shape, fallback_half_width))
-                    order_shapes.append((shape, 1))
-                    preview_shapes.append((shape, _preview_radius_for_order(1)))
-                    if len(cover_shapes) >= RIVER_RASTER_BATCH_SIZE:
-                        _rasterize_shape_batches(cover_shapes, arr, transform)
-                        _rasterize_shape_batches(width_shapes, half_width_arr, transform)
-                        _rasterize_shape_batches(order_shapes, order_arr, transform)
-                        _rasterize_shape_batches(preview_shapes, preview_radius_arr, transform)
-                        cover_shapes.clear()
-                        width_shapes.clear()
-                        order_shapes.clear()
-                        preview_shapes.clear()
-                _rasterize_shape_batches(cover_shapes, arr, transform)
-                _rasterize_shape_batches(width_shapes, half_width_arr, transform)
-                _rasterize_shape_batches(order_shapes, order_arr, transform)
-                _rasterize_shape_batches(preview_shapes, preview_radius_arr, transform)
-            else:
-                cover_shapes = []
-                width_shapes = []
-                order_shapes = []
-                preview_shapes = []
-                for edge in tqdm(strahler.edges, desc="rasterizing rivers"):
-                    if edge.line.is_empty:
-                        continue
-                    half_width = max(1, edge.half_width)
-                    buffer_metres = half_width * cell_metres
-                    buffered = edge.line.buffer(buffer_metres, cap_style="round", join_style="round")
-                    cover_shapes.append((buffered, 255))
-                    width_shapes.append((buffered, min(255, half_width)))
-                    order_shapes.append((buffered, min(255, max(1, edge.order))))
-                    preview_shapes.append((buffered, _preview_radius_for_edge(edge)))
-                    if len(cover_shapes) >= RIVER_RASTER_BATCH_SIZE:
-                        _rasterize_shape_batches(cover_shapes, arr, transform)
-                        _rasterize_shape_batches(width_shapes, half_width_arr, transform)
-                        _rasterize_shape_batches(order_shapes, order_arr, transform)
-                        _rasterize_shape_batches(preview_shapes, preview_radius_arr, transform)
-                        cover_shapes.clear()
-                        width_shapes.clear()
-                        order_shapes.clear()
-                        preview_shapes.clear()
-                _rasterize_shape_batches(cover_shapes, arr, transform)
-                _rasterize_shape_batches(width_shapes, half_width_arr, transform)
-                _rasterize_shape_batches(order_shapes, order_arr, transform)
-                _rasterize_shape_batches(preview_shapes, preview_radius_arr, transform)
-        root = out / "water" / "rivers"
-        _write_tiles(arr, root, tile_size)
-        _write_tiles(order_arr, out / "water" / "river_order", tile_size)
-        _write_tiles(half_width_arr, out / "water" / "river_half_width", tile_size)
-        _write_tiles(preview_radius_arr, out / "water" / "river_preview_radius", tile_size)
-        manifest["rivers"] = {
-            "path": "water/rivers",
-            "extension": u8_extension(),
-            "dtype": "uint8",
-            "min": 0,
-            "max": 255,
-            "order_path": "water/river_order",
-            "half_width_path": "water/river_half_width",
-            "preview_radius_path": "water/river_preview_radius",
-            "max_half_width": int(half_width_arr.max()) if half_width_arr.size else 0,
-            "note": "255 marks cells inside variable-width river/watercourse vectors. Widths are derived from source river order where present, otherwise approximate Strahler stream order. Preview radii preserve legacy GB Strahler sizing while allowing thinner ROI minor streams.",
-        }
-        write_manifest(manifest_path, manifest)
-        if debug_geotiff:
-            _write_debug(debug_geotiff, arr, transform)
+        with (
+            U8Raster((depth, width), tmp_parent=out, label="rivers") as arr,
+            U8Raster((depth, width), tmp_parent=out, label="river-order") as order_arr,
+            U8Raster((depth, width), tmp_parent=out, label="river-half-width") as half_width_arr,
+            U8Raster((depth, width), tmp_parent=out, label="river-preview-radius") as preview_radius_arr,
+            U8Raster((depth, width), tmp_parent=out, label="river-burn") as burned,
+        ):
+            if not frame.empty:
+                if frame.crs and str(frame.crs).upper() != "EPSG:27700":
+                    frame = frame.to_crs("EPSG:27700")
+                lines = _extract_lines(frame)
+                strahler = _strahler_widths(lines, manifest, manifest_path.parent)
+                # Fall back to the old fixed-width raster if graph extraction produced no usable line edges.
+                fallback_fixed = not strahler.edges
+                cell_metres = _cell_metres(geo, width, depth)
+                if fallback_fixed:
+                    cover_shapes: list[tuple[object, int]] = []
+                    width_shapes: list[tuple[object, int]] = []
+                    order_shapes: list[tuple[object, int]] = []
+                    preview_shapes: list[tuple[object, int]] = []
+                    fallback_half_width = max(1, int(round(width_metres / (2.0 * cell_metres)))) if width_metres > 0 else 1
+                    for geom in tqdm(frame.geometry, desc="rasterizing fallback rivers"):
+                        if geom is None or geom.is_empty:
+                            continue
+                        if not isinstance(geom, (LineString, MultiLineString)):
+                            continue
+                        if width_metres > 0:
+                            shape = geom.buffer(width_metres / 2.0, cap_style="round", join_style="round")
+                        else:
+                            shape = geom
+                        cover_shapes.append((shape, 255))
+                        width_shapes.append((shape, fallback_half_width))
+                        order_shapes.append((shape, 1))
+                        preview_shapes.append((shape, _preview_radius_for_order(1)))
+                        if len(cover_shapes) >= RIVER_RASTER_BATCH_SIZE:
+                            _rasterize_shape_batches(cover_shapes, arr, transform, burned)
+                            _rasterize_shape_batches(width_shapes, half_width_arr, transform, burned)
+                            _rasterize_shape_batches(order_shapes, order_arr, transform, burned)
+                            _rasterize_shape_batches(preview_shapes, preview_radius_arr, transform, burned)
+                            cover_shapes.clear()
+                            width_shapes.clear()
+                            order_shapes.clear()
+                            preview_shapes.clear()
+                    _rasterize_shape_batches(cover_shapes, arr, transform, burned)
+                    _rasterize_shape_batches(width_shapes, half_width_arr, transform, burned)
+                    _rasterize_shape_batches(order_shapes, order_arr, transform, burned)
+                    _rasterize_shape_batches(preview_shapes, preview_radius_arr, transform, burned)
+                else:
+                    cover_shapes = []
+                    width_shapes = []
+                    order_shapes = []
+                    preview_shapes = []
+                    for edge in tqdm(strahler.edges, desc="rasterizing rivers"):
+                        if edge.line.is_empty:
+                            continue
+                        half_width = max(1, edge.half_width)
+                        buffer_metres = half_width * cell_metres
+                        buffered = edge.line.buffer(buffer_metres, cap_style="round", join_style="round")
+                        cover_shapes.append((buffered, 255))
+                        width_shapes.append((buffered, min(255, half_width)))
+                        order_shapes.append((buffered, min(255, max(1, edge.order))))
+                        preview_shapes.append((buffered, _preview_radius_for_edge(edge)))
+                        if len(cover_shapes) >= RIVER_RASTER_BATCH_SIZE:
+                            _rasterize_shape_batches(cover_shapes, arr, transform, burned)
+                            _rasterize_shape_batches(width_shapes, half_width_arr, transform, burned)
+                            _rasterize_shape_batches(order_shapes, order_arr, transform, burned)
+                            _rasterize_shape_batches(preview_shapes, preview_radius_arr, transform, burned)
+                            cover_shapes.clear()
+                            width_shapes.clear()
+                            order_shapes.clear()
+                            preview_shapes.clear()
+                    _rasterize_shape_batches(cover_shapes, arr, transform, burned)
+                    _rasterize_shape_batches(width_shapes, half_width_arr, transform, burned)
+                    _rasterize_shape_batches(order_shapes, order_arr, transform, burned)
+                    _rasterize_shape_batches(preview_shapes, preview_radius_arr, transform, burned)
+            root = out / "water" / "rivers"
+            _write_tiles(arr, root, tile_size)
+            _write_tiles(order_arr, out / "water" / "river_order", tile_size)
+            _write_tiles(half_width_arr, out / "water" / "river_half_width", tile_size)
+            _write_tiles(preview_radius_arr, out / "water" / "river_preview_radius", tile_size)
+            max_half_width = _u8_max(half_width_arr) if half_width_arr.size else 0
+            manifest["rivers"] = {
+                "path": "water/rivers",
+                "extension": u8_extension(),
+                "dtype": "uint8",
+                "min": 0,
+                "max": 255,
+                "order_path": "water/river_order",
+                "half_width_path": "water/river_half_width",
+                "preview_radius_path": "water/river_preview_radius",
+                "max_half_width": max_half_width,
+                "note": "255 marks cells inside variable-width river/watercourse vectors. Widths are derived from source river order where present, otherwise approximate Strahler stream order. Preview radii preserve legacy GB Strahler sizing while allowing thinner ROI minor streams.",
+            }
+            write_manifest(manifest_path, manifest)
+            if debug_geotiff:
+                _write_debug(debug_geotiff, arr, transform)
     finally:
         if tmp is not None:
             tmp.cleanup()
@@ -191,23 +194,39 @@ def _write_tiles(arr: np.ndarray, root: Path, tile_size: int) -> None:
             write_u8_tile(root / f"{tile_x:03d}_{tile_z:03d}{u8_extension()}", tile)
 
 
+def _u8_max(arr: np.ndarray) -> int:
+    maximum = 0
+    for window in row_windows(arr.shape[0]):
+        maximum = max(maximum, int(arr[window].max()))
+    return maximum
+
+
+def _zero_u8(arr: np.ndarray) -> None:
+    for window in row_windows(arr.shape[0]):
+        arr[window] = 0
+    if isinstance(arr, np.memmap):
+        arr.flush()
+
+
 def _rasterize_shape_batches(
     shapes: list[tuple[object, int]],
     out: np.ndarray,
     transform,
+    burned: np.ndarray,
 ) -> None:
     if not shapes:
         return
-    batch = rasterize(
+    _zero_u8(burned)
+    rasterize(
         shapes,
-        out_shape=out.shape,
+        out=burned,
         transform=transform,
         fill=0,
         dtype=np.uint8,
         merge_alg=MergeAlg.replace,
         all_touched=True,
     )
-    np.maximum(out, batch, out=out)
+    maximum_in_place(out, burned)
 
 
 def _write_debug(path: Path, arr: np.ndarray, transform) -> None:

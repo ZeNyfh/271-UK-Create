@@ -54,13 +54,10 @@ Client-side controls:
 
 - `enabled`
 - `precipitation_renderer`
-- `cloud_renderer`
 - `transition_seconds`
 - `precipitation_render_distance_blocks`
-- `cloud_render_distance_blocks`
 - `precipitation_density_multiplier`
 - `snow_density_multiplier`
-- `cloud_density_multiplier`
 - `weather_poll_interval_ticks`: how often the client asks the server for the newest weather tile snapshots
 - `enable_weather_fog`
 - `enable_weather_sounds`
@@ -80,4 +77,4 @@ The implementation ships with conservative defaults aimed at:
 - a 5×5 active grid around a lone player
 - asynchronous refreshes at roughly 15 minute cadence
 - stale-cache survival during temporary network failures
-- vanilla-style, regionally dense precipitation and 3D cloud rendering enabled on clients
+- vanilla-style, regionally dense precipitation rendering enabled on clients

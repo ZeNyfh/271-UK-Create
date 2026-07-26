@@ -129,7 +129,8 @@ fi
   --axis-scale-z "${WORLD_Z_SCALE:-1.0}" \
   --height-resampling bilinear \
   --height-smoothing light \
-  --height-deterrace
+  --height-deterrace \
+  --height-jobs "${HEIGHT_JOBS:-1}"
 
 "$UKGEO" mask-height-to-bgs-land \
   --bgs "$BGS_GEOLOGY_ZIP" \

@@ -1,6 +1,5 @@
 package com.ukgeo.realtimelocalisedweather.weather.client;
 
-import com.ukgeo.realtimelocalisedweather.config.ClientWeatherConfig;
 import com.ukgeo.realtimelocalisedweather.network.TileSnapshotPayload;
 import com.ukgeo.realtimelocalisedweather.network.UkGeoReferencePayload;
 import com.ukgeo.realtimelocalisedweather.network.WeatherAuthorityModePayload;
@@ -24,7 +23,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.Level;
 
 public final class ClientWeatherManager {
-    /** Revisions in this range are emitted only by the runtime /cloud and /rain visual tests. */
+    /** Revisions in this range are emitted only by the runtime /rain visual tests. */
     private static final long VISUAL_TEST_REVISION = 1_000_000L;
     private static final Map<ResourceKey<Level>, Map<Long, ClientWeatherTile>> TILES = new HashMap<>();
     private static final Map<ResourceKey<Level>, ReferenceData> REFERENCES = new HashMap<>();
@@ -62,7 +61,7 @@ public final class ClientWeatherManager {
             long packed = pack(tile.tileX(), tile.tileZ());
             ClientWeatherTile previous = dimensionTiles.get(packed);
             ServerWeatherSnapshot previousSnapshot = previous == null ? tile.snapshot() : previous.current();
-            // Debug controls must be literal: `/cloud 100` is a 100% cloud test now,
+            // Debug controls must be literal: `/rain 50` is a 50% rain test now,
             // not a value that eases in over the normal live-weather transition period.
             if (tile.snapshot().revision() >= VISUAL_TEST_REVISION) {
                 previousSnapshot = tile.snapshot();
@@ -100,22 +99,12 @@ public final class ClientWeatherManager {
         return false;
     }
 
-    public static boolean shouldReplaceClouds() {
-        return ClientWeatherConfig.ENABLED.get() && hasRealtimeData();
-    }
-
-    /** Keep ownership of the cloud pass while crossing an unloaded/prefetching tile. */
     public static boolean hasRealtimeData() {
         Minecraft minecraft = Minecraft.getInstance();
         if (minecraft.level == null) return false;
         ResourceKey<Level> dimension = minecraft.level.dimension();
         Map<Long, ClientWeatherTile> tiles = TILES.get(dimension);
         return REFERENCES.containsKey(dimension) && tiles != null && !tiles.isEmpty();
-    }
-
-    /** At complete cover the exact vanilla renderer is both visually correct and cheaper. */
-    public static boolean shouldUseNativeClouds(BlockPos position) {
-        return sample(position).map(sample -> sample.interpolatedCloudCover() >= 99.5F).orElse(false);
     }
 
     public static Optional<VisualWeatherSample> sample(BlockPos position) {
@@ -154,15 +143,7 @@ public final class ClientWeatherManager {
             offsetX,
             offsetZ
         );
-        float cloud = WeatherMath.bilinear(
-            centerSnapshot.totalCloudCover(),
-            east.totalCloudCover(),
-            south.totalCloudCover(),
-            southEast.totalCloudCover(),
-            offsetX,
-            offsetZ
-        );
-        return Optional.of(new VisualWeatherSample(centerSnapshot, rate, cloud, referenceData.zoneSizeBlocks));
+        return Optional.of(new VisualWeatherSample(centerSnapshot, rate, referenceData.zoneSizeBlocks));
     }
 
     public static String lastServerProtocol() {
@@ -177,7 +158,7 @@ public final class ClientWeatherManager {
         return MODES.getOrDefault(minecraft.level.dimension(), WeatherAuthorityMode.VANILLA);
     }
 
-    /** Whether the supplied sample originated from the runtime /cloud or /rain test controls. */
+    /** Whether the supplied sample originated from the runtime /rain test controls. */
     public static boolean isVisualTestSample(VisualWeatherSample sample) {
         return sample != null && sample.snapshot().revision() >= VISUAL_TEST_REVISION;
     }
@@ -200,6 +181,6 @@ public final class ClientWeatherManager {
         }
     }
 
-    public record VisualWeatherSample(ServerWeatherSnapshot snapshot, float interpolatedRate, float interpolatedCloudCover, int zoneSizeBlocks) {
+    public record VisualWeatherSample(ServerWeatherSnapshot snapshot, float interpolatedRate, int zoneSizeBlocks) {
     }
 }

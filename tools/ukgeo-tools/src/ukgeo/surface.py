@@ -15,6 +15,7 @@ from tqdm import tqdm
 
 from .bgs import resolve_gpkg
 from .manifest import read_manifest, write_manifest
+from .raster_memory import U8Raster, replace_nonzero_in_place
 from .tiles import write_u8_tile, u8_extension
 
 console = Console()
@@ -42,62 +43,65 @@ def make_surface_geology_tiles(*, bgs: Path, rules: Path, manifest_path: Path, o
     if not classes:
         raise ValueError("surface geology rules must define classes")
 
-    arr = np.zeros((depth, width), dtype=np.uint8)
     gpkg, tmp = resolve_gpkg(bgs)
     try:
-        for class_name, class_config in classes.items():
-            class_id = int(class_config.get("id", 0))
-            if class_id == 0:
-                continue
-            shapes = []
-            for layer_name in class_config.get("layers", []):
-                try:
-                    frame = gpd.read_file(
-                        gpkg,
-                        layer=layer_name,
-                        bbox=(geo["bng_min_easting"], geo["bng_min_northing"], geo["bng_max_easting"], geo["bng_max_northing"]),
-                    )
-                except Exception as exc:
-                    console.print(f"[yellow]Skipping {layer_name}: {exc}[/yellow]")
+        with U8Raster((depth, width), tmp_parent=out, label="surface") as arr, U8Raster(
+            (depth, width), tmp_parent=out, label="surface-burn"
+        ) as burned:
+            for class_name, class_config in classes.items():
+                class_id = int(class_config.get("id", 0))
+                if class_id == 0:
                     continue
-                if frame.empty:
-                    continue
-                if frame.crs and str(frame.crs).upper() != "EPSG:27700":
-                    frame = frame.to_crs("EPSG:27700")
-                fields = class_config.get("fields") or [c for c in frame.columns if c != frame.geometry.name]
-                available_fields = [c for c in fields if c in frame.columns]
-                if available_fields:
-                    text = frame[available_fields].fillna("").map(str).agg(" ".join, axis=1).str.lower()
-                else:
-                    text = frame.geometry.astype(str).str.lower()
-                keywords = class_config.get("keywords", [])
-                pattern = re.compile("|".join(re.escape(k.lower()) for k in keywords)) if keywords else None
-                mask = text.str.contains(pattern, na=False) if pattern else np.zeros(len(frame), dtype=bool)
-                shapes.extend((geom, class_id) for geom in frame.loc[mask, frame.geometry.name] if geom is not None and not geom.is_empty)
-            if shapes:
-                burned = rasterize(shapes, out_shape=arr.shape, transform=transform, fill=0, dtype=np.uint8, merge_alg=MergeAlg.replace)
-                arr[burned > 0] = burned[burned > 0]
-                console.print(f"{class_name}: burned {len(shapes)} features as id {class_id}")
+                shapes = []
+                for layer_name in class_config.get("layers", []):
+                    try:
+                        frame = gpd.read_file(
+                            gpkg,
+                            layer=layer_name,
+                            bbox=(geo["bng_min_easting"], geo["bng_min_northing"], geo["bng_max_easting"], geo["bng_max_northing"]),
+                        )
+                    except Exception as exc:
+                        console.print(f"[yellow]Skipping {layer_name}: {exc}[/yellow]")
+                        continue
+                    if frame.empty:
+                        continue
+                    if frame.crs and str(frame.crs).upper() != "EPSG:27700":
+                        frame = frame.to_crs("EPSG:27700")
+                    fields = class_config.get("fields") or [c for c in frame.columns if c != frame.geometry.name]
+                    available_fields = [c for c in fields if c in frame.columns]
+                    if available_fields:
+                        text = frame[available_fields].fillna("").map(str).agg(" ".join, axis=1).str.lower()
+                    else:
+                        text = frame.geometry.astype(str).str.lower()
+                    keywords = class_config.get("keywords", [])
+                    pattern = re.compile("|".join(re.escape(k.lower()) for k in keywords)) if keywords else None
+                    mask = text.str.contains(pattern, na=False) if pattern else np.zeros(len(frame), dtype=bool)
+                    shapes.extend((geom, class_id) for geom in frame.loc[mask, frame.geometry.name] if geom is not None and not geom.is_empty)
+                if shapes:
+                    burned[:] = 0
+                    rasterize(shapes, out=burned, transform=transform, fill=0, dtype=np.uint8, merge_alg=MergeAlg.replace)
+                    replace_nonzero_in_place(arr, burned)
+                    console.print(f"{class_name}: burned {len(shapes)} features as id {class_id}")
 
-        root = out / "geology" / "surface"
-        _write_tiles(arr, root, tile_size)
-        manifest["surface_geology"] = {
-            "path": "geology/surface",
-            "extension": u8_extension(),
-            "dtype": "uint8",
-            "classes": {
-                str(int(cfg.get("id", 0))): {
-                    "name": name,
-                    "block": cfg.get("block", "minecraft:stone"),
-                    "fallback_block": cfg.get("fallback_block", "minecraft:stone"),
-                    "color": cfg.get("color", "#777777"),
+            root = out / "geology" / "surface"
+            _write_tiles(arr, root, tile_size)
+            manifest["surface_geology"] = {
+                "path": "geology/surface",
+                "extension": u8_extension(),
+                "dtype": "uint8",
+                "classes": {
+                    str(int(cfg.get("id", 0))): {
+                        "name": name,
+                        "block": cfg.get("block", "minecraft:stone"),
+                        "fallback_block": cfg.get("fallback_block", "minecraft:stone"),
+                        "color": cfg.get("color", "#777777"),
+                    }
+                    for name, cfg in classes.items()
                 }
-                for name, cfg in classes.items()
-            },
-        }
-        write_manifest(manifest_path, manifest)
-        if debug_geotiff:
-            _write_debug(debug_geotiff, arr, transform)
+            }
+            write_manifest(manifest_path, manifest)
+            if debug_geotiff:
+                _write_debug(debug_geotiff, arr, transform)
     finally:
         if tmp is not None:
             tmp.cleanup()

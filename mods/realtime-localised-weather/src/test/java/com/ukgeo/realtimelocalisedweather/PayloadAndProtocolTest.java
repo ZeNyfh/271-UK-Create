@@ -24,7 +24,8 @@ final class PayloadAndProtocolTest {
 
     @Test
     void protocolVersionMismatchIsRejected() {
-        assertTrue(ProtocolVersions.isCompatible("rlw-2"));
+        assertTrue(ProtocolVersions.isCompatible("rlw-3"));
+        assertFalse(ProtocolVersions.isCompatible("rlw-2"));
         assertFalse(ProtocolVersions.isCompatible("rlw-1"));
         assertFalse(ProtocolVersions.isCompatible("rlw-0"));
         assertFalse(ProtocolVersions.isCompatible("other"));

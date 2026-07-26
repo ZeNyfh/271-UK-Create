@@ -23,9 +23,7 @@ class WeatherOverlayGrid:
 
 @dataclass(frozen=True)
 class WeatherOverlaySnapshot:
-    cloud_cover: np.ndarray
     downfall_coverage: np.ndarray
-    cloud_observed_at_unix: int | None
     downfall_observed_at_unix: int | None
     api_base_url: str
     weather_model: str
@@ -83,9 +81,7 @@ def fetch_open_meteo_weather_overlay(
     if not latitudes:
         raise ValueError("Weather overlay grid is empty")
 
-    cloud_values: list[int] = []
-    downfall_values: list[int] = []
-    cloud_times: list[int] = []
+    downfall_values: list[float] = []
     downfall_times: list[int] = []
 
     for start in range(0, len(latitudes), max(1, int(batch_points))):
@@ -100,23 +96,18 @@ def fetch_open_meteo_weather_overlay(
         )
         for location in response:
             current = location.get("current") or {}
-            cloud = _coerce_percent(current.get("cloud_cover"))
             downfall = _coerce_precipitation_mm(current.get("precipitation"))
-            cloud_values.append(cloud)
             downfall_values.append(downfall)
-            cloud_times.append(_coerce_int(current.get("time")))
             downfall_times.append(_coerce_int(current.get("time")))
 
     total = grid.rows * grid.columns
-    if len(cloud_values) != total or len(downfall_values) != total:
+    if len(downfall_values) != total:
         raise ValueError(
-            f"Open-Meteo returned {len(cloud_values)} cloud values and {len(downfall_values)} downfall values for a {grid.rows}x{grid.columns} grid"
+            f"Open-Meteo returned {len(downfall_values)} downfall values for a {grid.rows}x{grid.columns} grid"
         )
 
     return WeatherOverlaySnapshot(
-        cloud_cover=np.asarray(cloud_values, dtype=np.uint8).reshape(grid.rows, grid.columns),
         downfall_coverage=np.asarray(downfall_values, dtype=np.float32).reshape(grid.rows, grid.columns),
-        cloud_observed_at_unix=max((value for value in cloud_times if value is not None), default=None),
         downfall_observed_at_unix=max((value for value in downfall_times if value is not None), default=None),
         api_base_url=api_base_url,
         weather_model=weather_model,
@@ -136,7 +127,7 @@ def _open_meteo_batch_request(
     params = {
         "latitude": ",".join(f"{value:.6f}" for value in latitudes),
         "longitude": ",".join(f"{value:.6f}" for value in longitudes),
-        "current": "cloud_cover,precipitation",
+        "current": "precipitation",
         "forecast_hours": 1,
         "timezone": "GMT",
         "timeformat": "unixtime",
@@ -151,13 +142,6 @@ def _open_meteo_batch_request(
     if not isinstance(payload, list):
         raise ValueError(f"Expected Open-Meteo list response for multi-location query, got {type(payload).__name__}")
     return payload
-
-
-def _coerce_percent(value: Any) -> int:
-    number = float(value or 0)
-    if not np.isfinite(number):
-        return 0
-    return int(np.clip(round(number), 0, 100))
 
 
 def _coerce_precipitation_mm(value: Any) -> float:

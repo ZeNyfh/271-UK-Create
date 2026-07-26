@@ -160,7 +160,6 @@ const state = {
   liveWeather: {
     timer: 0,
     loading: false,
-    cloud_cover: null,
     downfall_coverage: null,
   },
   checkboxLayerNames: new Set(),
@@ -543,13 +542,6 @@ function addLayer(layer) {
 function installLiveWeatherLayers(manifest) {
   if (!manifest?.live_weather?.grid?.latitudes?.length) return;
   addLayer({
-    name: "cloud_cover",
-    kind: "weather-live",
-    label: "Cloud coverage",
-    value_format: "percent",
-    live_weather_metric: "cloud_cover",
-  });
-  addLayer({
     name: "downfall_coverage",
     kind: "weather-live",
     label: "Rain / precipitation",
@@ -572,7 +564,6 @@ function resolveLiveWeatherConfig(manifest) {
   return normalizeLiveWeatherConfig({
     provider: "Open-Meteo",
     metrics: {
-      cloud_cover: { unit: "percent", source: "current.cloud_cover" },
       downfall_coverage: { unit: "mm", source: "current.precipitation" },
     },
     grid,
@@ -591,7 +582,6 @@ function normalizeLiveWeatherConfig(config) {
       domain: tileProvider.domain || LIVE_WEATHER_OPEN_METEO_DOMAIN,
       time_step: tileProvider.time_step || LIVE_WEATHER_OPEN_METEO_TIME_STEP,
       variables: {
-        cloud_cover: tileProvider.variables?.cloud_cover || "cloud_cover",
         downfall_coverage: tileProvider.variables?.downfall_coverage || "precipitation",
       },
     },
@@ -2113,7 +2103,6 @@ function resetLiveWeatherState() {
   state.liveWeather = {
     timer: 0,
     loading: false,
-    cloud_cover: null,
     downfall_coverage: null,
   };
 }
@@ -2147,9 +2136,6 @@ async function fetchLiveWeather(manifest, { prefetch = false } = {}) {
       const payloads = await fetchOpenMeteoWeather(config);
       return decodeLiveWeatherMetrics(config, payloads);
     });
-    state.liveWeather.cloud_cover = await createLiveWeatherMetric("cloud_cover", metrics.cloud_cover, grid.columns, grid.rows);
-    scheduleRender();
-    await yieldToBrowser();
     state.liveWeather.downfall_coverage = await createLiveWeatherMetric("downfall_coverage", metrics.downfall_coverage, grid.columns, grid.rows);
     scheduleRender();
     refreshStatus();
@@ -2170,16 +2156,11 @@ async function fetchOpenMeteoOmWeather(config) {
   if (!provider || provider.kind !== "openmeteo-om") throw new Error("Open-Meteo OM tile provider is not configured");
   const library = await loadOpenMeteoWeatherMapLayer(provider.script_url);
   const grid = config.grid;
-  const cloudUrl = openMeteoOmUrl(provider, provider.variables?.cloud_cover || "cloud_cover");
   const precipitationUrl = openMeteoOmUrl(provider, provider.variables?.downfall_coverage || "precipitation");
 
-  await Promise.all([
-    primeOpenMeteoOmVariable(library, cloudUrl),
-    primeOpenMeteoOmVariable(library, precipitationUrl),
-  ]);
+  await primeOpenMeteoOmVariable(library, precipitationUrl);
 
   const total = Number(grid.rows) * Number(grid.columns);
-  const cloud = new Uint8Array(total);
   const downfall = new Float32Array(total);
   const latitudes = Array.from(grid.latitudes || [], (value) => Number(value));
   const longitudes = Array.from(grid.longitudes || [], (value) => Number(value));
@@ -2190,18 +2171,14 @@ async function fetchOpenMeteoOmWeather(config) {
       const latitude = latitudes[index];
       const longitude = longitudes[index];
       if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
-      const [cloudSample, precipitationSample] = await Promise.all([
-        library.getValueFromLatLong(latitude, longitude, cloudUrl),
-        library.getValueFromLatLong(latitude, longitude, precipitationUrl),
-      ]);
-      cloud[index] = clampPercent(cloudSample?.value);
+      const precipitationSample = await library.getValueFromLatLong(latitude, longitude, precipitationUrl);
       downfall[index] = clampPrecipitationMm(precipitationSample?.value);
     }));
     // Promise completions are still processed on the main thread. Yield between chunks so
     // pointer/zoom events and rendering are not starved by a large UK-wide sampling grid.
     if (end < total) await yieldToBrowser();
   }
-  return { cloud_cover: cloud, downfall_coverage: downfall };
+  return { downfall_coverage: downfall };
 }
 
 function openMeteoOmUrl(provider, variable) {
@@ -2271,7 +2248,6 @@ function liveWeatherPlaceholder(latitude, longitude) {
     latitude,
     longitude,
     current: {
-      cloud_cover: 0,
       precipitation: 0,
     },
   };
@@ -2291,7 +2267,7 @@ async function fetchOpenMeteoWeather(config) {
     const url = new URL(baseUrl, location.href);
     url.searchParams.set("latitude", batchLatitudes.map((value) => value.toFixed(6)).join(","));
     url.searchParams.set("longitude", batchLongitudes.map((value) => value.toFixed(6)).join(","));
-    url.searchParams.set("current", "cloud_cover,precipitation");
+    url.searchParams.set("current", "precipitation");
     url.searchParams.set("forecast_hours", "1");
     url.searchParams.set("timezone", "GMT");
     url.searchParams.set("timeformat", "unixtime");
@@ -2354,20 +2330,12 @@ function yieldToBrowser() {
 
 function decodeLiveWeatherMetrics(config, payloads) {
   const total = Number(config?.grid?.rows) * Number(config?.grid?.columns);
-  const cloud = new Uint8Array(total);
   const downfall = new Float32Array(total);
   payloads.forEach((location, index) => {
     const current = location?.current || {};
-    cloud[index] = clampPercent(current.cloud_cover);
     downfall[index] = clampPrecipitationMm(current.precipitation);
   });
-  return { cloud_cover: cloud, downfall_coverage: downfall };
-}
-
-function clampPercent(value) {
-  const number = Number(value);
-  if (!Number.isFinite(number)) return 0;
-  return Math.max(0, Math.min(100, Math.round(number)));
+  return { downfall_coverage: downfall };
 }
 
 function clampPrecipitationMm(value) {
@@ -2387,7 +2355,7 @@ async function createLiveWeatherMetric(metricName, values, columns, rows) {
     for (let index = start; index < end; index += 1) {
       const base = index * 4;
       const value = values[index];
-      const rgba = metricName === "cloud_cover" ? liveCloudColor(value) : livePrecipitationColor(value);
+      const rgba = livePrecipitationColor(value);
       imageData.data[base + 0] = rgba[0];
       imageData.data[base + 1] = rgba[1];
       imageData.data[base + 2] = rgba[2];
@@ -2397,14 +2365,6 @@ async function createLiveWeatherMetric(metricName, values, columns, rows) {
   }
   ctx.putImageData(imageData, 0, 0);
   return { metricName, values, columns, rows, canvas };
-}
-
-function liveCloudColor(value) {
-  const cover = Math.max(0, Math.min(100, Number(value) || 0));
-  if (cover <= 3) return [255, 255, 255, 0];
-  const shade = Math.round(250 - 118 * (cover / 100));
-  const alpha = Math.round(12 + 150 * Math.pow(cover / 100, 0.9));
-  return [shade, shade, shade, alpha];
 }
 
 function livePrecipitationColor(value) {

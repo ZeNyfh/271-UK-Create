@@ -8,8 +8,7 @@
     "ServerLevelWeatherMixin"
   ],
   "client": [
-    "VanillaPrecipitationRendererMixin",
-    "VanillaCloudRendererMixin"
+    "VanillaPrecipitationRendererMixin"
   ],
   "injectors": {
     "defaultRequire": 1

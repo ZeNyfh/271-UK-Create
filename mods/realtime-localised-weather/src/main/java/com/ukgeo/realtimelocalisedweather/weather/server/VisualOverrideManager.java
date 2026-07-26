@@ -12,23 +12,16 @@ final class VisualOverrideManager {
     private final AtomicLong revisions = new AtomicLong(1_000_000L);
     private volatile Entry visualTestEntry;
 
-    void setCloud(com.ukgeo.realtimelocalisedweather.weather.WeatherTileKey key, int percent) {
-        Entry entry = visualTestEntry;
-        visualTestEntry = new Entry(percent, entry == null ? null : entry.rainPercent(), revisions.incrementAndGet());
-    }
-
     void setRain(com.ukgeo.realtimelocalisedweather.weather.WeatherTileKey key, int percent) {
-        Entry entry = visualTestEntry;
-        visualTestEntry = new Entry(entry == null ? null : entry.cloudPercent(), percent, revisions.incrementAndGet());
+        visualTestEntry = new Entry(percent, revisions.incrementAndGet());
     }
 
     Optional<Entry> lookup(com.ukgeo.realtimelocalisedweather.weather.WeatherTileKey key) {
         return Optional.ofNullable(visualTestEntry);
     }
 
-    record Entry(Integer cloudPercent, Integer rainPercent, long revision) {
+    record Entry(Integer rainPercent, long revision) {
         ServerWeatherSnapshot apply(ServerWeatherSnapshot base) {
-            float cloud = cloudPercent == null ? base.totalCloudCover() : cloudPercent;
             // The client maps live millimetres/hour logarithmically to vanilla's rain gradient.
             // Invert that mapping here so /rain 50 is a genuine 50% visual test rather than
             // almost-full rain caused by feeding it 6 mm/h.
@@ -41,7 +34,7 @@ final class VisualOverrideManager {
             return new ServerWeatherSnapshot(
                 base.observedAt(), base.latitude(), base.longitude(), base.weatherCode(), meteorological,
                 rainRate, raining ? rainRate : 0.0F, 0.0F, base.temperatureCelsius(), base.relativeHumidity(),
-                cloud, cloud, cloud, cloud, base.visibilityMetres(), base.windSpeedKmh(), base.windDirectionDegrees(), base.windGustKmh(),
+                base.visibilityMetres(), base.windSpeedKmh(), base.windDirectionDegrees(), base.windGustKmh(),
                 precipitation, raining ? GameplaySeverity.MODERATE : GameplaySeverity.TRACE, raining ? base.thunderPotential() : 0.0F,
                 base.stale(), Math.max(base.revision() + 1L, revision)
             );

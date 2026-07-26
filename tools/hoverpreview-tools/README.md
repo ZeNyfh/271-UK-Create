@@ -104,7 +104,6 @@ full/cropped sample images where tile metadata is missing.
 By default the exporter also writes static metadata that the browser can use to
 fetch live Open-Meteo weather overlays:
 
-- `Cloud coverage`
 - `Rain / precipitation` (current Open-Meteo precipitation amount)
 
 The browser fetches those overlays at runtime using the exported UKGeo

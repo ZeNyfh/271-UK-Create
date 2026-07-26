@@ -4,7 +4,7 @@
   "realtime_localised_weather.command.override": "Realtime Localised Weather override applied.",
   "realtime_localised_weather.command.override.cleared": "Realtime Localised Weather override cleared.",
   "realtime_localised_weather.command.refresh": "Realtime Localised Weather refresh requested.",
-  "realtime_localised_weather.command.sample": "Tile %s weather: %s %s %.2f mm/h clouds %.0f%% temp %.1fC stale=%s",
+  "realtime_localised_weather.command.sample": "Tile %s weather: %s %s %.2f mm/h temp %.1fC stale=%s",
   "realtime_localised_weather.protocol.missing_client": "Realtime Localised Weather is required on the client and server.",
   "realtime_localised_weather.protocol.missing_server": "This server does not provide the required Realtime Localised Weather protocol.",
   "realtime_localised_weather.protocol.version_mismatch": "Realtime Localised Weather protocol mismatch. Client=%s server=%s",

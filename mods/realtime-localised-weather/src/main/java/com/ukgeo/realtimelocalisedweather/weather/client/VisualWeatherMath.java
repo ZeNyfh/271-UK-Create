@@ -16,11 +16,6 @@ public final class VisualWeatherMath {
         return WeatherMath.clamp01(interpolateRainLevel(millimetresPerHour) * Math.max(0.0F, densityMultiplier));
     }
 
-    public static float cloudCoverageToUnit(float percent, float densityMultiplier) {
-        if (!Float.isFinite(percent)) return 0.0F;
-        return WeatherMath.clamp01(percent / 100.0F * Math.max(0.0F, densityMultiplier));
-    }
-
     private static float interpolateRainLevel(float rate) {
         if (rate >= RAIN_RATE_ANCHORS[RAIN_RATE_ANCHORS.length - 1]) return 1.0F;
         for (int index = 1; index < RAIN_RATE_ANCHORS.length; index++) {

@@ -79,28 +79,18 @@ public final class RealtimeWeatherCommands {
                             }))))
         );
         event.getDispatcher().register(
-            Commands.literal("clouds")
-                .executes(context -> sendCloudStatus(context.getSource()))
-        );
-        event.getDispatcher().register(
             Commands.literal("rain")
                 .requires(source -> source.hasPermission(2))
                 .then(Commands.argument("percent", IntegerArgumentType.integer(0, 100)).executes(context -> {
                     int percent = IntegerArgumentType.getInteger(context, "percent");
                     CommandSourceStack source = context.getSource();
-                    RealtimeLocalisedWeatherMod.serverWeatherManager().applyVisualRainOverride(source.getLevel(), BlockPos.containing(source.getPosition()), percent);
-                    context.getSource().sendSuccess(() -> Component.literal("Rain visual override set to " + percent + "% for this weather tile."), false);
-                    return 1;
-                }))
-        );
-        event.getDispatcher().register(
-            Commands.literal("cloud")
-                .requires(source -> source.hasPermission(2))
-                .then(Commands.argument("percent", IntegerArgumentType.integer(0, 100)).executes(context -> {
-                    int percent = IntegerArgumentType.getInteger(context, "percent");
-                    CommandSourceStack source = context.getSource();
-                    RealtimeLocalisedWeatherMod.serverWeatherManager().applyVisualCloudOverride(source.getLevel(), BlockPos.containing(source.getPosition()), percent);
-                    context.getSource().sendSuccess(() -> Component.literal("Cloud visual override set to " + percent + "% for this weather tile."), false);
+                    try {
+                        RealtimeLocalisedWeatherMod.serverWeatherManager().applyVisualRainOverride(source.getLevel(), BlockPos.containing(source.getPosition()), percent);
+                    } catch (IllegalStateException exception) {
+                        source.sendFailure(Component.literal(exception.getMessage()));
+                        return 0;
+                    }
+                    source.sendSuccess(() -> Component.literal("Rain visual override set to " + percent + "% for this weather tile."), false);
                     return 1;
                 }))
         );
@@ -111,21 +101,16 @@ public final class RealtimeWeatherCommands {
     }
 
     private static int setMode(net.minecraft.server.level.ServerLevel level, WeatherAuthorityMode mode, net.minecraft.commands.CommandSourceStack source) {
-        RealtimeLocalisedWeatherMod.serverWeatherManager().setMode(level, mode);
+        try {
+            RealtimeLocalisedWeatherMod.serverWeatherManager().setMode(level, mode);
+        } catch (IllegalStateException exception) {
+            source.sendFailure(Component.literal(exception.getMessage()));
+            return 0;
+        }
         source.sendSuccess(() -> Component.literal("Realtime Localised Weather mode set to " + mode + "."), true);
         return 1;
     }
 
-    private static int sendCloudStatus(CommandSourceStack source) {
-        Vec3 position = source.getPosition();
-        String message = RealtimeLocalisedWeatherMod.serverWeatherManager().cloudStatus(
-            source.getLevel(),
-            (int) Math.floor(position.x),
-            (int) Math.floor(position.z)
-        );
-        source.sendSuccess(() -> Component.literal(message), false);
-        return 1;
-    }
 
     private static int sendPrecipitationStatus(CommandSourceStack source) {
         Vec3 position = source.getPosition();
@@ -139,7 +124,12 @@ public final class RealtimeWeatherCommands {
     }
 
     private static int applyOverride(com.mojang.brigadier.context.CommandContext<net.minecraft.commands.CommandSourceStack> context, ResolvedPrecipitation precipitation, GameplaySeverity severity, long durationMillis) {
-        RealtimeLocalisedWeatherMod.serverWeatherManager().applyGlobalOverride(context.getSource().getLevel(), precipitation, severity, durationMillis);
+        try {
+            RealtimeLocalisedWeatherMod.serverWeatherManager().applyGlobalOverride(context.getSource().getLevel(), precipitation, severity, durationMillis);
+        } catch (IllegalStateException exception) {
+            context.getSource().sendFailure(Component.literal(exception.getMessage()));
+            return 0;
+        }
         context.getSource().sendSuccess(() -> Component.literal("Realtime Localised Weather override applied."), true);
         return 1;
     }

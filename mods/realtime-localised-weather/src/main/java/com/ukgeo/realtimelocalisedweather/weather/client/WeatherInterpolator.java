@@ -19,11 +19,6 @@ public final class WeatherInterpolator {
         return WeatherMath.lerp(tile.previous().precipitationRateMmPerHour(), tile.current().precipitationRateMmPerHour(), delta);
     }
 
-    public static float interpolateCloud(ClientWeatherTile tile, long nowMillis) {
-        float delta = temporalLerpFactor(tile.transitionStartedAtMillis(), nowMillis);
-        return WeatherMath.lerp(tile.previous().totalCloudCover(), tile.current().totalCloudCover(), delta);
-    }
-
     public static ServerWeatherSnapshot interpolateSnapshot(ClientWeatherTile tile, long nowMillis) {
         float delta = temporalLerpFactor(tile.transitionStartedAtMillis(), nowMillis);
         ServerWeatherSnapshot previous = tile.previous();
@@ -40,10 +35,6 @@ public final class WeatherInterpolator {
             WeatherMath.lerp(previous.snowfallRateCmPerHour(), current.snowfallRateCmPerHour(), delta),
             WeatherMath.lerp(previous.temperatureCelsius(), current.temperatureCelsius(), delta),
             WeatherMath.lerp(previous.relativeHumidity(), current.relativeHumidity(), delta),
-            WeatherMath.lerp(previous.totalCloudCover(), current.totalCloudCover(), delta),
-            WeatherMath.lerp(previous.lowCloudCover(), current.lowCloudCover(), delta),
-            WeatherMath.lerp(previous.midCloudCover(), current.midCloudCover(), delta),
-            WeatherMath.lerp(previous.highCloudCover(), current.highCloudCover(), delta),
             WeatherMath.lerp(previous.visibilityMetres(), current.visibilityMetres(), delta),
             WeatherMath.lerp(previous.windSpeedKmh(), current.windSpeedKmh(), delta),
             WeatherMath.lerp(previous.windDirectionDegrees(), current.windDirectionDegrees(), delta),

@@ -54,9 +54,6 @@ ANIMAL_LAYER_COLORS: dict[str, tuple[int, int, int]] = {
     "minecraft:fox": (191, 72, 49),
 }
 
-CLOUD_OVERLAY_MIN_SHADE = 108
-CLOUD_OVERLAY_MAX_SHADE = 232
-CLOUD_OVERLAY_MAX_ALPHA = 176
 DOWNFALL_OVERLAY_COLOR = (76, 148, 255)
 DOWNFALL_OVERLAY_MAX_ALPHA = 208
 DOWNFALL_OVERLAY_MAX_MM = 5.0
@@ -662,7 +659,6 @@ def _live_weather_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
         "timeout_seconds": settings["timeout_seconds"],
         "batch_points": settings["batch_points"],
         "metrics": {
-            "cloud_cover": {"unit": "percent", "source": "current.cloud_cover"},
             "downfall_coverage": {"unit": "mm", "source": "current.precipitation"},
         },
         "grid": {
@@ -697,20 +693,6 @@ def _export_weather_overlay_layers(
         timeout_seconds=settings["timeout_seconds"],
         batch_points=settings["batch_points"],
     )
-    cloud_layer = _export_numeric_weather_layer(
-        out,
-        values=snapshot.cloud_cover,
-        base_size=base_size,
-        layer_name="cloud_cover",
-        label="Cloud cover",
-        preview_tile_size=preview_tile_size,
-        visual_format=visual_format,
-        encoder_workers=encoder_workers,
-        force=force,
-        tile_batch_rows=tile_batch_rows,
-        write_full_images=write_full_images,
-        render_visual=_render_cloud_overlay_raster,
-    )
     downfall_layer = _export_numeric_weather_layer(
         out,
         values=snapshot.downfall_coverage,
@@ -725,18 +707,13 @@ def _export_weather_overlay_layers(
         write_full_images=write_full_images,
         render_visual=_render_downfall_overlay_raster,
     )
-    layers.extend([cloud_layer, downfall_layer])
+    layers.extend([downfall_layer])
     return {
         "provider": "Open-Meteo",
         "api_base_url": snapshot.api_base_url,
         "weather_model": snapshot.weather_model,
         "grid_rows": snapshot.grid_rows,
         "grid_columns": snapshot.grid_columns,
-        "cloud_cover": {
-            "metric": "cloud_cover",
-            "unit": "percent",
-            "observed_at_unix": snapshot.cloud_observed_at_unix,
-        },
         "downfall_coverage": {
             "metric": "precipitation",
             "unit": "mm",
@@ -1047,26 +1024,6 @@ def _render_animal_overlay_raster(values: np.ndarray, entity_id: str, raster: Di
         view = array[:height, :width]
         view[:, :, :3] = np.array(_animal_overlay_color(entity_id), dtype=np.uint8)
         view[:, :, 3] = np.clip(score * 168, 0, 196).astype(np.uint8)
-        array.flush()
-    finally:
-        del array
-
-
-def _render_cloud_overlay_raster(values: np.ndarray, raster: DiskRaster) -> None:
-    array = _open_disk_raster(raster, write=True)
-    try:
-        array[...] = 0
-        height = min(values.shape[0], raster.height)
-        width = min(values.shape[1], raster.width)
-        coverage = np.clip(values[:height, :width].astype(np.float32) / 100.0, 0.0, 1.0)
-        shade = CLOUD_OVERLAY_MAX_SHADE - (CLOUD_OVERLAY_MAX_SHADE - CLOUD_OVERLAY_MIN_SHADE) * coverage
-        alpha = np.clip(coverage * CLOUD_OVERLAY_MAX_ALPHA, 0, CLOUD_OVERLAY_MAX_ALPHA).astype(np.uint8)
-        view = array[:height, :width]
-        gray = np.clip(shade, 0, 255).astype(np.uint8)
-        view[:, :, 0] = gray
-        view[:, :, 1] = gray
-        view[:, :, 2] = gray
-        view[:, :, 3] = alpha
         array.flush()
     finally:
         del array
