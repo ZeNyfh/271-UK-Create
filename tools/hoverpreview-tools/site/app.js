@@ -20,7 +20,7 @@ const DEFAULT_ANIMALS_TEXT = `
 12|rocky|upland|mountain|stony_peaks|minecraft:stony_peaks|ukgeo:rocky: Sheep, Rabbit, Bat
 13|coastal_ocean|ocean|sea|beach|coast|minecraft:ocean|ukgeo:coastal_ocean: —
 `;
-const START_STATUS = "Mouse wheel zooms. Left/middle drag pans. Right drag measures distance.";
+const START_STATUS = "Mouse wheel zooms. Left/middle drag pans. Right click copies coordinates. Right drag measures distance.";
 const DEFAULT_VISIBLE_OVERLAYS = new Set();
 const DEFAULT_VISIBLE_ORES = new Set(["coal", "iron", "copper", "zinc", "gold"]);
 const MAX_DEVICE_PIXEL_RATIO = 2;
@@ -259,6 +259,7 @@ elements.viewer.addEventListener("pointerup", (event) => {
   }
   if (state.measurePointerId === event.pointerId) {
     updateMeasurement(event);
+    if (!state.measureMoved) copyCoordinates(event);
     state.measurePointerId = null;
   }
 });

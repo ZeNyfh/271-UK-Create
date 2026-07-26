@@ -209,6 +209,7 @@ serving only `site/` do not match the published path layout.
   and British National Grid coordinates.
 - Use the mouse wheel or toolbar buttons to zoom.
 - Left/middle drag the map to pan.
+- Right click copies Minecraft coordinates.
 - Right drag measures a distance.
 - Use the layer and ore controls to toggle overlays.
 - Use **Show animals** beside the ore control to include or hide habitat animal

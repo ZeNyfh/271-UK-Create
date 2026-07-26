@@ -85,12 +85,13 @@ public final class RealtimeWeatherCommands {
                     int percent = IntegerArgumentType.getInteger(context, "percent");
                     CommandSourceStack source = context.getSource();
                     try {
+                        // Debug-only visual rain amount for the local weather chunk; does not require UKGeo location data.
                         RealtimeLocalisedWeatherMod.serverWeatherManager().applyVisualRainOverride(source.getLevel(), BlockPos.containing(source.getPosition()), percent);
                     } catch (IllegalStateException exception) {
                         source.sendFailure(Component.literal(exception.getMessage()));
                         return 0;
                     }
-                    source.sendSuccess(() -> Component.literal("Rain visual override set to " + percent + "% for this weather tile."), false);
+                    source.sendSuccess(() -> Component.literal("Debug rain set to " + percent + "% for this weather chunk."), false);
                     return 1;
                 }))
         );

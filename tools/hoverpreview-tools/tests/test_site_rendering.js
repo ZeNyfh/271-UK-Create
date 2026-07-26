@@ -94,8 +94,8 @@ test("measurement drag uses client coordinates and no longer depends on removed 
   assert.match(appJs, /Math\.abs\(current\.clientX - start\.clientX\) \+ Math\.abs\(current\.clientY - start\.clientY\) >= 4/);
   assert.match(appJs, /if \(event\.button === 0 \|\| event\.button === 1\)/);
   assert.match(appJs, /if \(event\.button === 2\)/);
-  assert.match(appJs, /updateMeasurement\(event\);\s*state\.measurePointerId = null;/);
-  assert.doesNotMatch(appJs, /if \(!state\.measureMoved\) copyCoordinates\(event\);/);
+  assert.match(appJs, /updateMeasurement\(event\);\s*if \(!state\.measureMoved\) copyCoordinates\(event\);\s*state\.measurePointerId = null;/);
+  assert.match(appJs, /Right click copies coordinates\. Right drag measures distance/);
   assert.doesNotMatch(appJs, /screenX|screenY|scrollX|scrollY|updateScrollbars/);
   assert.doesNotMatch(indexHtml, /scrollbar scrollbar-[xy]/);
   assert.match(indexHtml, /viewport-fit=cover/);
@@ -115,7 +115,7 @@ test("published root page includes the current hover map shell", () => {
   assert.match(rootIndexHtml, /styles\.css\?v=\d{8}-\d+/);
   assert.match(rootIndexHtml, /render_math\.js/);
   assert.doesNotMatch(rootIndexHtml, /scrollbar scrollbar-[xy]/);
-  assert.match(rootIndexHtml, /Left\/middle drag pans\. Right drag measures distance/);
+  assert.match(rootIndexHtml, /Left\/middle drag pans\. Right click copies coordinates\. Right drag measures distance/);
   assert.match(appJs, /if \(!controls\) \{/);
 });
 
@@ -192,8 +192,8 @@ test("layer checkbox selections persist only selected layer names in a cookie", 
   assert.match(appJs, /document\.cookie = `\$\{SELECTED_LAYERS_COOKIE\}=\$\{value\}; Max-Age=\$\{SELECTED_LAYERS_COOKIE_MAX_AGE_SECONDS\}; Path=\/; SameSite=Lax\$\{secure\}`;/);
   assert.doesNotMatch(appJs, /localStorage\.(setItem|removeItem|clear)/);
   assert.doesNotMatch(appJs, /sessionStorage/);
-  assert.match(rootIndexHtml, /app\.js\?v=20260726-1/);
-  assert.match(siteIndexHtml, /app\.js\?v=20260726-1/);
+  assert.match(rootIndexHtml, /app\.js\?v=20260726-2/);
+  assert.match(siteIndexHtml, /app\.js\?v=20260726-2/);
 });
 
 test("hoverpreview defaults use larger tiles to reduce request count", () => {

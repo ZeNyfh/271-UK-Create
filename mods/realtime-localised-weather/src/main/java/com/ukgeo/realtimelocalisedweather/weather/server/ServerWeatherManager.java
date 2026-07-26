@@ -183,12 +183,13 @@ public final class ServerWeatherManager implements RegionalWeatherAccess {
     }
 
     public void applyVisualRainOverride(ServerLevel level, BlockPos position, int percent) {
-        LevelState state = requireLevelState(level);
+        // /rain is a visual debug tool and must work even when UKGeo location data is unavailable.
+        LevelState state = requireLevelState(level, true);
         int zoneSize = ServerWeatherConfig.ZONE_SIZE_BLOCKS.get();
         WeatherTileKey key = WeatherTileKey.fromBlock(level.dimension(), position.getX(), position.getZ(), zoneSize);
         long now = System.currentTimeMillis();
-        // /rain is a visual debug tool: ensure nearby tiles exist with a base snapshot so the
-        // override can sync even before Open-Meteo has returned live weather for this area.
+        // Ensure nearby tiles exist with a base snapshot so the override can sync even before
+        // Open-Meteo has returned live weather for this area.
         Set<WeatherTileKey> relevant = ActiveTileTracker.collect(
             level.dimension(),
             List.of(position),
@@ -208,16 +209,22 @@ public final class ServerWeatherManager implements RegionalWeatherAccess {
     }
 
     private LevelState requireLevelState(ServerLevel level) {
+        return requireLevelState(level, false);
+    }
+
+    private LevelState requireLevelState(ServerLevel level, boolean allowMissingUkGeoReference) {
         LevelState existing = levelStates.get(level.dimension());
         Optional<UkGeoReference> reference = UkGeoReferenceProvider.get(level);
         if (existing != null) {
             reference.ifPresent(value -> existing.reference = value);
             return existing;
         }
-        UkGeoReference resolved = reference.orElseThrow(() -> new IllegalStateException(
-            "Realtime Localised Weather is not ready yet (UKGeo reference unavailable). Wait for the world to finish loading, then try again."
-        ));
-        return levelStates.computeIfAbsent(level.dimension(), ignored -> new LevelState(resolved));
+        if (reference.isEmpty() && !allowMissingUkGeoReference) {
+            throw new IllegalStateException(
+                "Realtime Localised Weather is not ready yet (UKGeo reference unavailable). Wait for the world to finish loading, then try again."
+            );
+        }
+        return levelStates.computeIfAbsent(level.dimension(), ignored -> new LevelState(reference.orElse(null)));
     }
 
     private static ServerWeatherSnapshot placeholderSnapshot() {
@@ -417,6 +424,9 @@ public final class ServerWeatherManager implements RegionalWeatherAccess {
             if (!priorityMissingTile || !state.fetchFailureBackoff.isZero()) {
                 return;
             }
+        }
+        if (state.reference == null) {
+            return;
         }
         Duration staleAfter = Duration.ofHours(ServerWeatherConfig.STALE_CACHE_HOURS.get());
         List<WeatherTileKey> required = new ArrayList<>();
@@ -704,21 +714,41 @@ public final class ServerWeatherManager implements RegionalWeatherAccess {
 
     private void sendProtocolAndReference(ServerPlayer player, LevelState state) {
         PacketDistributor.sendToPlayer(player, new WeatherProtocolPayload(RealtimeLocalisedWeatherMod.PROTOCOL_VERSION, RealtimeLocalisedWeatherMod.MOD_VERSION));
-        PacketDistributor.sendToPlayer(player, new UkGeoReferencePayload(
-            player.serverLevel().dimension().location().toString(),
-            state.reference.crs(),
-            state.reference.minecraftMinX(),
-            state.reference.minecraftMinZ(),
-            state.reference.minecraftMaxX(),
-            state.reference.minecraftMaxZ(),
-            state.reference.bngMinEasting(),
-            state.reference.bngMinNorthing(),
-            state.reference.bngMaxEasting(),
-            state.reference.bngMaxNorthing(),
-            state.reference.rasterWidth(),
-            state.reference.rasterDepth(),
-            ServerWeatherConfig.ZONE_SIZE_BLOCKS.get()
-        ));
+        UkGeoReference reference = state.reference;
+        if (reference != null) {
+            PacketDistributor.sendToPlayer(player, new UkGeoReferencePayload(
+                player.serverLevel().dimension().location().toString(),
+                reference.crs(),
+                reference.minecraftMinX(),
+                reference.minecraftMinZ(),
+                reference.minecraftMaxX(),
+                reference.minecraftMaxZ(),
+                reference.bngMinEasting(),
+                reference.bngMinNorthing(),
+                reference.bngMaxEasting(),
+                reference.bngMaxNorthing(),
+                reference.rasterWidth(),
+                reference.rasterDepth(),
+                ServerWeatherConfig.ZONE_SIZE_BLOCKS.get()
+            ));
+        } else {
+            // Fallback for /rain debug before UKGeo reference exists. Client sampling only needs zone size.
+            PacketDistributor.sendToPlayer(player, new UkGeoReferencePayload(
+                player.serverLevel().dimension().location().toString(),
+                "EPSG:27700",
+                Integer.MIN_VALUE / 4,
+                Integer.MIN_VALUE / 4,
+                Integer.MAX_VALUE / 4,
+                Integer.MAX_VALUE / 4,
+                0.0D,
+                0.0D,
+                1.0D,
+                1.0D,
+                1,
+                1,
+                ServerWeatherConfig.ZONE_SIZE_BLOCKS.get()
+            ));
+        }
         PacketDistributor.sendToPlayer(player, new WeatherAuthorityModePayload(player.serverLevel().dimension().location().toString(), state.mode));
     }
 
@@ -789,7 +819,7 @@ public final class ServerWeatherManager implements RegionalWeatherAccess {
         private String currentSubSeason = "unknown";
 
         private LevelState(UkGeoReference reference) {
-            this.reference = reference;
+            this.reference = reference; // may be null for /rain debug before UKGeo is ready
         }
 
         private Optional<ServerWeatherSnapshot> baseSnapshotFor(WeatherTileKey key) {
