@@ -14,6 +14,8 @@ final class PackedRegionTileReader {
     private static final int VERSION = 1;
     private static final int HEADER_BYTES = 28;
     private static final int ENTRY_BYTES = 12;
+    private static final int REGION_FILE_CACHE_ENTRIES = Math.max(0, Integer.getInteger("ukgeo.regionFileCacheEntries", 16));
+    private static final TileCache<Path, byte[]> REGION_FILE_CACHE = new TileCache<>(Math.max(1, REGION_FILE_CACHE_ENTRIES));
 
     private PackedRegionTileReader() {
     }
@@ -30,7 +32,7 @@ final class PackedRegionTileReader {
         if (!Files.exists(regionPath)) {
             return defaultTile(tileBytes, bytesPerCell, defaultValue);
         }
-        byte[] file = Files.readAllBytes(regionPath);
+        byte[] file = readRegionFile(regionPath);
         if (file.length < HEADER_BYTES) {
             throw new IOException(regionPath + " is too small to be a UKGeo packed region");
         }
@@ -70,6 +72,13 @@ final class PackedRegionTileReader {
             return payload;
         }
         return inflate(regionPath, payload, tileBytes);
+    }
+
+    private static byte[] readRegionFile(Path regionPath) throws IOException {
+        if (REGION_FILE_CACHE_ENTRIES <= 0) {
+            return Files.readAllBytes(regionPath);
+        }
+        return REGION_FILE_CACHE.get(regionPath.toAbsolutePath().normalize(), Files::readAllBytes);
     }
 
     private static byte[] inflate(Path path, byte[] payload, int expectedSize) throws IOException {

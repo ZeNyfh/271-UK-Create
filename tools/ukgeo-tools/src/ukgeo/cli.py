@@ -12,6 +12,7 @@ from .asc import iter_nested_asc_headers
 from .animal_habitats import make_animal_habitat_tiles as make_animal_habitat_tiles_impl
 from .bgs import likely_geology_fields, resolve_gpkg
 from .coal import make_coal_resource_tiles as make_coal_resource_tiles_impl
+from .clc import make_clc_wms_vegetation_tiles as make_clc_wms_vegetation_tiles_impl
 from .coords import (
     DEFAULT_MINECRAFT_MIN_X,
     DEFAULT_MINECRAFT_MIN_Z,
@@ -23,6 +24,7 @@ from .cop30_height import add_cop30_height_tiles as add_cop30_height_tiles_impl
 from .height import make_height_tiles as make_height_tiles_impl
 from .gold import harvest_gold_occurrences as harvest_gold_occurrences_impl
 from .gold import make_gold_occurrence_tiles as make_gold_occurrence_tiles_impl
+from .egdi import add_egdi_surface_geology_tiles as add_egdi_surface_geology_tiles_impl
 from .landmask import mask_height_to_bgs_land as mask_height_to_bgs_land_impl
 from .manifest import read_manifest, write_manifest
 from .ore_image_overlay import apply_named_svg_ore_overlays as apply_named_svg_ore_overlays_impl
@@ -265,6 +267,27 @@ def make_surface_geology_tiles(
     make_surface_geology_tiles_impl(bgs=bgs, rules=rules, manifest_path=manifest, out=out, debug_geotiff=debug_geotiff)
 
 
+@app.command("add-egdi-surface-geology-tiles")
+def add_egdi_surface_geology_tiles(
+    manifest: Path = typer.Option(..., "--manifest"),
+    out: Path = typer.Option(..., "--out"),
+    cache_dir: Path = typer.Option(..., "--cache-dir"),
+    feature_type: list[str] = typer.Option(["ms:geologicunitview"], "--feature-type"),
+    fill_only: bool = typer.Option(True, "--fill-only/--replace-nonzero", help="Only fill cells where the existing surface geology class is 0."),
+    page_size: int = typer.Option(5000, "--page-size", help="WFS features per paged request."),
+    wfs_url: str = typer.Option("https://maps.europe-geology.eu/wfs/", "--wfs-url"),
+) -> None:
+    add_egdi_surface_geology_tiles_impl(
+        manifest_path=manifest,
+        out=out,
+        cache_dir=cache_dir,
+        feature_types=feature_type,
+        fill_only=fill_only,
+        page_size=page_size,
+        wfs_url=wfs_url,
+    )
+
+
 @app.command("add-osni-height-tiles")
 def add_osni_height_tiles(
     osni_dtm: Path = typer.Option(..., "--osni-dtm"),
@@ -329,8 +352,27 @@ def make_river_tiles(
     layer: str | None = typer.Option(None, "--layer"),
     width_metres: float = typer.Option(30.0, "--width-metres"),
     debug_geotiff: Path | None = typer.Option(None, "--debug-geotiff"),
+    resume_memmaps: bool = typer.Option(
+        False,
+        "--resume-memmaps",
+        help="Reopen orphaned .rivers-* / .river-* memmaps under --out instead of allocating fresh zeroed rasters.",
+    ),
+    skip_edges: int = typer.Option(
+        0,
+        "--skip-edges",
+        help="Skip the first N edges when resuming (must be a multiple of the 25000-edge flush batch size).",
+    ),
 ) -> None:
-    make_river_tiles_impl(rivers=rivers, manifest_path=manifest, out=out, layer=layer, width_metres=width_metres, debug_geotiff=debug_geotiff)
+    make_river_tiles_impl(
+        rivers=rivers,
+        manifest_path=manifest,
+        out=out,
+        layer=layer,
+        width_metres=width_metres,
+        debug_geotiff=debug_geotiff,
+        resume_memmaps=resume_memmaps,
+        skip_edges=skip_edges,
+    )
 
 
 @app.command("make-vegetation-tiles")
@@ -361,6 +403,38 @@ def make_vegetation_tiles(
         biome_region_min_area_cells=biome_region_min_area_cells,
         debug_geotiff=debug_geotiff,
         jobs=jobs,
+    )
+
+
+@app.command("make-clc-wms-vegetation-tiles")
+def make_clc_wms_vegetation_tiles(
+    manifest: Path = typer.Option(..., "--manifest"),
+    out: Path = typer.Option(..., "--out"),
+    cache_dir: Path = typer.Option(..., "--cache-dir"),
+    cell_metres: float = typer.Option(50.0, "--cell-metres", help="Vegetation raster cell size in metres."),
+    max_request_size: int = typer.Option(4096, "--max-request-size", help="Maximum WMS request width/height in pixels."),
+    generate_biome_regions: bool = typer.Option(True, "--generate-biome-regions/--no-generate-biome-regions"),
+    biome_region_factor: int = typer.Option(8, "--biome-region-factor"),
+    biome_region_smoothing_passes: int = typer.Option(2, "--biome-region-smoothing-passes"),
+    biome_region_min_area_cells: int = typer.Option(3, "--biome-region-min-area-cells"),
+    wms_url: str = typer.Option(
+        "https://image.discomap.eea.europa.eu/arcgis/services/Corine/CLC2018_WM/MapServer/WMSServer",
+        "--wms-url",
+    ),
+    layer: str = typer.Option("12", "--layer"),
+) -> None:
+    make_clc_wms_vegetation_tiles_impl(
+        manifest_path=manifest,
+        out=out,
+        cache_dir=cache_dir,
+        cell_metres=cell_metres,
+        max_request_size=max_request_size,
+        generate_biome_regions=generate_biome_regions,
+        biome_region_factor=biome_region_factor,
+        biome_region_smoothing_passes=biome_region_smoothing_passes,
+        biome_region_min_area_cells=biome_region_min_area_cells,
+        wms_url=wms_url,
+        layer=layer,
     )
 
 

@@ -6,14 +6,20 @@ from shapely.geometry import LineString, MultiLineString
 
 from ukgeo.rivers import (
     _Edge,
+    _InputLine,
+    _apply_axis_scale_to_half_widths,
+    _apply_gb_width_adjustments,
     _coerce_source_order,
     _dataset_half_width,
     _extract_lines,
+    _horizontal_axis_scale,
     _irish_preview_radius_for_order,
     _normalize_computed_order_to_source_scale,
+    _apply_output_width_scale,
     _preview_radius_for_edge,
     _preview_radius_for_half_width,
     _preview_radius_for_order,
+    _strahler_widths,
     _thin_top_order_half_widths,
 )
 
@@ -136,18 +142,33 @@ def test_dataset_half_width_only_thins_irish_datasets():
     assert _dataset_half_width(1, "ni_river_segment") == 1
 
 
-def test_thin_top_order_half_widths_scales_top_four_order_levels():
+def test_thin_top_order_half_widths_scales_top_four_order_levels_for_irish_datasets_only():
     edges = [
-        _Edge(LineString([(0, 0), (1, 1)]), 8, 20),
-        _Edge(LineString([(0, 0), (1, 1)]), 7, 18),
-        _Edge(LineString([(0, 0), (1, 1)]), 6, 16),
-        _Edge(LineString([(0, 0), (1, 1)]), 5, 14),
-        _Edge(LineString([(0, 0), (1, 1)]), 4, 12),
+        _Edge(LineString([(0, 0), (1, 1)]), 8, 20, "epa_river_network_routes_ie"),
+        _Edge(LineString([(0, 0), (1, 1)]), 7, 18, "epa_river_network_routes_ie"),
+        _Edge(LineString([(0, 0), (1, 1)]), 6, 16, "epa_river_network_routes_ie"),
+        _Edge(LineString([(0, 0), (1, 1)]), 5, 14, "epa_river_network_routes_ie"),
+        _Edge(LineString([(0, 0), (1, 1)]), 4, 12, "epa_river_network_routes_ie"),
+        _Edge(LineString([(0, 0), (1, 1)]), 8, 20, "os_open_rivers_gb"),
     ]
 
     _thin_top_order_half_widths(edges)
 
-    assert [edge.half_width for edge in edges] == [10, 12, 13, 12, 12]
+    assert [edge.half_width for edge in edges[:5]] == [10, 12, 13, 12, 12]
+    assert edges[5].half_width == 20
+
+
+def test_apply_gb_width_adjustments_keeps_order_one_and_boosts_larger_gb_rivers():
+    edges = [
+        _Edge(LineString([(0, 0), (1, 1)]), 1, 4, "os_open_rivers_gb"),
+        _Edge(LineString([(0, 0), (1, 1)]), 2, 8, "os_open_rivers_gb"),
+        _Edge(LineString([(0, 0), (1, 1)]), 5, 28, "os_open_rivers_gb"),
+        _Edge(LineString([(0, 0), (1, 1)]), 5, 28, "ni_river_segment"),
+    ]
+
+    _apply_gb_width_adjustments(edges, 2.0)
+
+    assert [edge.half_width for edge in edges] == [4, 10, 42, 28]
 
 
 def test_normalize_computed_order_to_source_scale_compresses_to_source_max():
@@ -184,3 +205,83 @@ def test_preview_radius_for_edge_uses_gb_order_but_keeps_ni_half_width_mode():
     assert _preview_radius_for_edge(gb) == 5
     assert _preview_radius_for_edge(ni) == _preview_radius_for_half_width(9)
     assert _preview_radius_for_edge(roi) == 0
+
+
+def _test_manifest(**axis_scale: float) -> dict:
+    scale_x = axis_scale.get("x", 1.0)
+    scale_z = axis_scale.get("z", 1.0)
+    return {
+        "tile_size": 512,
+        "georeferencing": {
+            "bng_min_easting": 0,
+            "bng_max_easting": 1000,
+            "bng_min_northing": 0,
+            "bng_max_northing": 1000,
+        },
+        "world": {"width": 100, "depth": 100, "padded_width": 512, "padded_depth": 512},
+        "height": {"path": "height", "extension": ".r16"},
+        "axis_scale": {"x": scale_x, "z": scale_z},
+    }
+
+
+def test_horizontal_axis_scale_averages_xz_and_floors_at_one():
+    assert _horizontal_axis_scale({}) == 1.0
+    assert _horizontal_axis_scale({"axis_scale": {"x": 2.0, "z": 2.0}}) == 2.0
+    assert _horizontal_axis_scale({"axis_scale": {"x": 2.0, "z": 1.0}}) == 1.5
+    assert _horizontal_axis_scale({"axis_scale": {"x": 0.5, "z": 0.5}}) == 1.0
+
+
+def test_apply_axis_scale_to_half_widths_doubles_for_2x_world():
+    edges = [
+        _Edge(LineString([(0, 0), (1, 1)]), 1, 2),
+        _Edge(LineString([(0, 0), (1, 1)]), 4, 10),
+    ]
+    _apply_axis_scale_to_half_widths(edges, 2.0)
+    assert [edge.half_width for edge in edges] == [4, 20]
+
+
+def test_apply_output_width_scale_thins_generated_rivers_to_one_third():
+    edges = [
+        _Edge(LineString([(0, 0), (1, 1)]), 1, 1),
+        _Edge(LineString([(0, 0), (1, 1)]), 2, 4),
+        _Edge(LineString([(0, 0), (1, 1)]), 5, 80),
+    ]
+    _apply_output_width_scale(edges)
+    assert [edge.half_width for edge in edges] == [1, 1, 13]
+
+
+def test_strahler_keeps_gb_orders_when_irish_source_orders_are_present(tmp_path):
+    gb = [
+        _InputLine(LineString([(0, 100), (50, 50)]), None, "os_open_rivers_gb", "N1", "N2", "in direction"),
+        _InputLine(LineString([(100, 100), (50, 50)]), None, "os_open_rivers_gb", "N3", "N2", "in direction"),
+        _InputLine(LineString([(50, 50), (50, 0)]), None, "os_open_rivers_gb", "N2", "N4", "in direction"),
+    ]
+    # Degenerate a==b edge used to misalign zip(lines, raw_edges) before the fix.
+    degen = _InputLine(LineString([(0, 0), (1, 1)]), None, "os_open_rivers_gb", "SAME", "SAME", "in direction")
+    ie = [
+        _InputLine(LineString([(200, 100), (200, 0)]), 7, "epa_river_network_routes_ie", None, None, None),
+        _InputLine(LineString([(210, 80), (200, 40)]), 6, "epa_river_network_routes_ie", None, None, None),
+        _InputLine(LineString([(190, 80), (200, 40)]), 6, "epa_river_network_routes_ie", None, None, None),
+        _InputLine(LineString([(200, 40), (200, 0)]), 7, "epa_river_network_routes_ie", None, None, None),
+    ]
+
+    result = _strahler_widths(gb + [degen] + ie, _test_manifest(x=1.0, z=1.0), tmp_path)
+    gb_orders = sorted({edge.order for edge in result.edges if edge.source_dataset == "os_open_rivers_gb"})
+    ie_orders = sorted({edge.order for edge in result.edges if edge.source_dataset == "epa_river_network_routes_ie"})
+
+    assert max(gb_orders) >= 2
+    assert ie_orders == [6, 7]
+
+
+def test_strahler_scales_half_widths_with_axis_scale(tmp_path):
+    lines = [
+        _InputLine(LineString([(0, 100), (50, 50)]), None, "os_open_rivers_gb", "N1", "N2", "in direction"),
+        _InputLine(LineString([(100, 100), (50, 50)]), None, "os_open_rivers_gb", "N3", "N2", "in direction"),
+        _InputLine(LineString([(50, 50), (50, 0)]), None, "os_open_rivers_gb", "N2", "N4", "in direction"),
+    ]
+    one_x = _strahler_widths(lines, _test_manifest(x=1.0, z=1.0), tmp_path)
+    two_x = _strahler_widths(lines, _test_manifest(x=2.0, z=2.0), tmp_path)
+
+    assert [edge.order for edge in one_x.edges] == [edge.order for edge in two_x.edges]
+    assert [edge.half_width for edge in one_x.edges] == [1, 1, 1]
+    assert [edge.half_width for edge in two_x.edges] == [1, 1, 2]

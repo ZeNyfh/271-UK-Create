@@ -15,7 +15,7 @@ public final class R16HeightTileLayer {
 
     private final TileManifest manifest;
     private final TileGrid grid;
-    private final TileCache<TileCoord, short[]> cache = new TileCache<>(96);
+    private final TileCache<TileCoord, short[]> cache = new TileCache<>(Math.max(1, Integer.getInteger("ukgeo.heightTileCacheEntries", 192)));
 
     public R16HeightTileLayer(TileManifest manifest) {
         this.manifest = manifest;

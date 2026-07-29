@@ -10,7 +10,7 @@ import shutil
 import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from typing import Any
 
 import numpy as np
@@ -643,6 +643,331 @@ def export_hover_previews(
         _clean_stale_outputs(out, layers)
     if deploy_minimal:
         _prune_deploy_minimal_outputs(out)
+    if profile and progress is None:
+        for step, seconds in timings:
+            print(f"{step}: {seconds:.3f}s")
+    return out
+
+
+def export_hover_preview_layers(
+    root: Path,
+    out: Path,
+    layers_to_export: Iterable[str],
+    *,
+    tile_size: int | None = None,
+    workers: int | None = None,
+    visual_format: str | None = None,
+    force: bool = True,
+    profile: bool = False,
+    write_full_images: bool = False,
+    tile_batch_rows: int = DEFAULT_TILE_BATCH_ROWS,
+    progress: Callable[[str], None] | None = None,
+) -> Path:
+    """Regenerate a limited set of hover preview layers and merge them into the existing index."""
+    selected = {layer.strip() for layer in layers_to_export if layer.strip()}
+    supported = {"surface", "vegetation", "biome_regions", "rivers"}
+    unknown = selected - supported
+    if unknown:
+        raise ValueError(f"Unsupported incremental hover preview layer(s): {', '.join(sorted(unknown))}")
+    if not selected:
+        raise ValueError("No hover preview layers selected")
+
+    index_path = out / HOVER_PREVIEW_INDEX
+    if not index_path.exists():
+        raise ValueError(f"{index_path} does not exist; run a full hover preview export once before using incremental layer export")
+
+    manifest = read_manifest(root / "manifest.json")
+    with index_path.open("r", encoding="utf-8") as fh:
+        index = json.load(fh)
+
+    source_tile_size = int(manifest["tile_size"])
+    scale = int(index.get("scale", 1))
+    preview_tile_size = _validate_tile_size(tile_size or int(index.get("tile_pyramid", {}).get("tile_size", DEFAULT_TILE_SIZE)))
+    encoder_workers = _resolve_workers(workers)
+    visual_format = (visual_format or index.get("tile_pyramid", {}).get("visual_format", "png")).lower().strip()
+    if visual_format not in SUPPORTED_VISUAL_FORMATS:
+        raise ValueError(f"Unsupported visual format {visual_format!r}; expected one of {sorted(SUPPORTED_VISUAL_FORMATS)}")
+    tile_batch_rows = max(1, int(tile_batch_rows))
+    base_size = (int(index["image_width"]), int(index["image_height"]))
+    tiles_x = math.ceil(int(manifest["world"]["padded_width"]) / source_tile_size)
+    tiles_z = math.ceil(int(manifest["world"]["padded_depth"]) / source_tile_size)
+    timings: list[tuple[str, float]] = []
+
+    def report(step: str) -> None:
+        if progress is not None:
+            progress(step)
+
+    def timed(step: str) -> Callable[[], None]:
+        start = time.perf_counter()
+
+        def done() -> None:
+            if profile:
+                timings.append((step, time.perf_counter() - start))
+
+        return done
+
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "layers").mkdir(parents=True, exist_ok=True)
+    (out / "samples").mkdir(parents=True, exist_ok=True)
+    (out / "mips").mkdir(parents=True, exist_ok=True)
+
+    new_layers: dict[str, dict[str, Any]] = {}
+
+    if "surface" in selected:
+        if "surface_geology" not in manifest:
+            raise ValueError("Manifest has no surface_geology layer")
+        report("surface")
+        done = timed("surface")
+        values = _read_u8_preview(root, manifest["surface_geology"], tiles_x, tiles_z, source_tile_size, scale, missing_ok=False)
+        with tempfile.TemporaryDirectory(prefix="hoverpreview-surface-", dir=out) as temp_dir_name:
+            temp_dir = Path(temp_dir_name)
+            visual = _create_disk_raster(temp_dir / "surface.visual.bin", base_size, "RGBA")
+            _render_categorical_overlay_raster(values, manifest["surface_geology"].get("classes", {}), alpha=166, transparent_zero=True, raster=visual)
+            sample = _create_disk_raster(temp_dir / "surface.sample.bin", base_size, "L")
+            _render_fitted_u8_sample_raster(values, sample)
+            mips = _save_visual_raster_layer(
+                out,
+                visual,
+                "layers/surface",
+                tile_size=preview_tile_size,
+                visual_format=visual_format,
+                workers=encoder_workers,
+                force=force,
+                resampling=Image.Resampling.NEAREST,
+                tile_batch_rows=tile_batch_rows,
+                write_full_images=write_full_images,
+            )
+            sample_file = "samples/surface_u8.png" if write_full_images else None
+            if write_full_images and sample_file is not None:
+                _save_disk_raster_image(out / sample_file, sample, "png", force=force)
+            sample_tiles = _save_sample_raster_tiles(
+                out,
+                sample,
+                "samples/surface_u8.png",
+                tile_size=preview_tile_size,
+                encoding="u8",
+                workers=encoder_workers,
+                force=force,
+                tile_batch_rows=tile_batch_rows,
+            )
+            _delete_disk_raster(visual)
+            _delete_disk_raster(sample)
+        new_layers["surface"] = {
+            "name": "surface",
+            "kind": "overlay",
+            "file": mips[0].get("file"),
+            "mips": mips,
+            "sample_file": sample_file,
+            "sample_tiles": sample_tiles,
+        }
+        del values
+        gc.collect()
+        done()
+
+    if "vegetation" in selected:
+        if "vegetation" not in manifest:
+            raise ValueError("Manifest has no vegetation layer")
+        report("vegetation")
+        done = timed("vegetation")
+        values = read_vegetation_preview(root, manifest, scale, missing_ok=False)
+        with tempfile.TemporaryDirectory(prefix="hoverpreview-vegetation-", dir=out) as temp_dir_name:
+            temp_dir = Path(temp_dir_name)
+            visual = _create_disk_raster(temp_dir / "vegetation.visual.bin", base_size, "RGBA")
+            _render_categorical_overlay_raster(values, manifest["vegetation"].get("classes", {}), alpha=176, transparent_zero=True, raster=visual)
+            sample = _create_disk_raster(temp_dir / "vegetation.sample.bin", base_size, "L")
+            _render_fitted_u8_sample_raster(values, sample)
+            mips = _save_visual_raster_layer(
+                out,
+                visual,
+                "layers/vegetation",
+                tile_size=preview_tile_size,
+                visual_format=visual_format,
+                workers=encoder_workers,
+                force=force,
+                resampling=Image.Resampling.NEAREST,
+                tile_batch_rows=tile_batch_rows,
+                write_full_images=write_full_images,
+            )
+            sample_file = "samples/vegetation_u8.png" if write_full_images else None
+            if write_full_images and sample_file is not None:
+                _save_disk_raster_image(out / sample_file, sample, "png", force=force)
+            sample_tiles = _save_sample_raster_tiles(
+                out,
+                sample,
+                "samples/vegetation_u8.png",
+                tile_size=preview_tile_size,
+                encoding="u8",
+                workers=encoder_workers,
+                force=force,
+                tile_batch_rows=tile_batch_rows,
+            )
+            _delete_disk_raster(visual)
+            _delete_disk_raster(sample)
+        new_layers["vegetation"] = {
+            "name": "vegetation",
+            "kind": "overlay",
+            "file": mips[0].get("file"),
+            "mips": mips,
+            "sample_file": sample_file,
+            "sample_tiles": sample_tiles,
+        }
+        del values
+        gc.collect()
+        done()
+
+    if "biome_regions" in selected:
+        if "biome_regions" not in manifest:
+            raise ValueError("Manifest has no biome_regions layer")
+        report("biome_regions")
+        done = timed("biome_regions")
+        values = read_cell_u8_preview(root, manifest, "biome_regions", scale, missing_ok=False)
+        with tempfile.TemporaryDirectory(prefix="hoverpreview-biome-regions-", dir=out) as temp_dir_name:
+            temp_dir = Path(temp_dir_name)
+            visual_source = _create_disk_raster(temp_dir / "biome_regions.source.bin", (values.shape[1], values.shape[0]), "RGBA")
+            _render_categorical_overlay_raster(values, manifest["biome_regions"].get("classes", {}), alpha=150, transparent_zero=True, raster=visual_source)
+            visual = _resize_disk_raster(visual_source, temp_dir / "biome_regions.visual.bin", base_size, Image.Resampling.BILINEAR)
+            sample = _create_disk_raster(temp_dir / "biome_regions.sample.bin", base_size, "L")
+            _render_fitted_u8_sample_raster(values, sample)
+            mips = _save_visual_raster_layer(
+                out,
+                visual,
+                "layers/biome_regions",
+                tile_size=preview_tile_size,
+                visual_format=visual_format,
+                workers=encoder_workers,
+                force=force,
+                resampling=Image.Resampling.NEAREST,
+                tile_batch_rows=tile_batch_rows,
+                write_full_images=write_full_images,
+            )
+            sample_file = "samples/biome_regions_u8.png" if write_full_images else None
+            if write_full_images and sample_file is not None:
+                _save_disk_raster_image(out / sample_file, sample, "png", force=force)
+            sample_tiles = _save_sample_raster_tiles(
+                out,
+                sample,
+                "samples/biome_regions_u8.png",
+                tile_size=preview_tile_size,
+                encoding="u8",
+                workers=encoder_workers,
+                force=force,
+                tile_batch_rows=tile_batch_rows,
+            )
+            _delete_disk_raster(visual_source)
+            _delete_disk_raster(visual)
+            _delete_disk_raster(sample)
+        new_layers["biome_regions"] = {
+            "name": "biome_regions",
+            "kind": "overlay",
+            "label": "Biome Regions",
+            "file": mips[0].get("file"),
+            "mips": mips,
+            "sample_file": sample_file,
+            "sample_tiles": sample_tiles,
+        }
+        del values
+        gc.collect()
+        done()
+
+    if "rivers" in selected:
+        if "rivers" not in manifest:
+            raise ValueError("Manifest has no rivers layer")
+        report("rivers")
+        done = timed("rivers")
+        values = _read_u8_preview(root, river_u8_layer(manifest["rivers"]), tiles_x, tiles_z, source_tile_size, scale, missing_ok=False)
+        width_values, width_metadata = _read_river_width_preview(root, manifest, tiles_x, tiles_z, source_tile_size, scale)
+        with tempfile.TemporaryDirectory(prefix="hoverpreview-rivers-", dir=out) as temp_dir_name:
+            temp_dir = Path(temp_dir_name)
+            visual = _create_disk_raster(temp_dir / "rivers.visual.bin", base_size, "RGBA")
+            _render_river_overlay_raster(values, width_values, width_metadata["source"], visual)
+            sample = _create_disk_raster(temp_dir / "rivers.sample.bin", base_size, "L")
+            _render_fitted_u8_sample_raster(values, sample)
+            mips = _save_visual_raster_layer(
+                out,
+                visual,
+                "layers/rivers",
+                tile_size=preview_tile_size,
+                visual_format=visual_format,
+                workers=encoder_workers,
+                force=force,
+                resampling=Image.Resampling.BILINEAR,
+                mip_alpha_gamma=RIVER_MIP_ALPHA_GAMMA,
+                mip_alpha_cutoff=RIVER_MIP_ALPHA_CUTOFF,
+                mip_alpha_transform_min_factor=4,
+                tile_batch_rows=tile_batch_rows,
+                write_full_images=write_full_images,
+            )
+            sample_file = "samples/rivers_u8.png" if write_full_images else None
+            if write_full_images and sample_file is not None:
+                _save_disk_raster_image(out / sample_file, sample, "png", force=force)
+            sample_tiles = _save_sample_raster_tiles(
+                out,
+                sample,
+                "samples/rivers_u8.png",
+                tile_size=preview_tile_size,
+                encoding="u8",
+                workers=encoder_workers,
+                force=force,
+                tile_batch_rows=tile_batch_rows,
+            )
+            _delete_disk_raster(visual)
+            _delete_disk_raster(sample)
+        new_layers["rivers"] = {
+            "name": "rivers",
+            "kind": "overlay",
+            "file": mips[0].get("file"),
+            "mips": mips,
+            "sample_file": sample_file,
+            "sample_tiles": sample_tiles,
+            "preview": width_metadata,
+        }
+        del values, width_values
+        gc.collect()
+        done()
+
+    existing_layers = [layer for layer in index.get("layers", []) if layer.get("name") not in new_layers]
+    merged_layers: list[dict[str, Any]] = []
+    for layer in index.get("layers", []):
+        name = layer.get("name")
+        if name in new_layers:
+            merged_layers.append(new_layers.pop(name))
+        elif name not in selected:
+            merged_layers.append(layer)
+    merged_layers.extend(new_layers.values())
+    if not merged_layers:
+        merged_layers = existing_layers
+
+    report("manifest")
+    index["layers"] = merged_layers
+    index["surface_geology"] = manifest.get("surface_geology", {})
+    index["vegetation"] = manifest.get("vegetation", {})
+    index["biome_regions"] = manifest.get("biome_regions", {})
+    index["tile_pyramid"] = {
+        **index.get("tile_pyramid", {}),
+        "tile_size": preview_tile_size,
+        "visual_format": visual_format,
+        "sample_format": "png",
+    }
+    generation = dict(index.get("generation", {}))
+    generation.update(
+        {
+            "incremental_layers": sorted(selected),
+            "tile_size": preview_tile_size,
+            "workers": encoder_workers,
+            "tile_batch_rows": tile_batch_rows,
+            "visual_format": visual_format,
+            "force": force,
+            "write_full_images": write_full_images,
+            "cache_buster": str(time.time_ns()),
+        }
+    )
+    if profile:
+        generation["timings_seconds"] = {step: round(seconds, 3) for step, seconds in timings}
+    index["generation"] = generation
+    with index_path.open("w", encoding="utf-8") as fh:
+        json.dump(index, fh, indent=2)
+        fh.write("\n")
+    _write_cache_metadata(out, index["generation"], merged_layers)
     if profile and progress is None:
         for step, seconds in timings:
             print(f"{step}: {seconds:.3f}s")

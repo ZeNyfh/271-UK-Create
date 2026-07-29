@@ -63,19 +63,20 @@ tools/ukgeo-tools/ukgeo-hover-linux
 /.aiassistant
 /.ai
 
-# Keep the generated hover preview website data publishable on GitHub Pages.
-!tools/ukgeo-tools/uk_world_data_gb/
-tools/ukgeo-tools/uk_world_data_gb/*
-!tools/ukgeo-tools/uk_world_data_gb/hoverpreviews/
-!tools/ukgeo-tools/uk_world_data_gb/hoverpreviews/**
-!tools/ukgeo-tools/uk_world_data_gb/hoverpreviews/**/*.json
-!tools/ukgeo-tools/uk_world_data_gb/hoverpreviews/**/*.png
-!tools/ukgeo-tools/uk_world_data_gb/hoverpreviews/**/*.webp
+# Generated world tiles / hoverpreviews stay local. Publish as zip archives under
+# data/ instead of tens of thousands of region files (see data/README.md).
+tools/ukgeo-tools/uk_world_data_gb/
+tools/ukgeo-tools/uk_world_data_gb.backup*/
+tools/ukgeo-tools/uk_world_data_gb.rebuild*/
+
+# Allow the published world-data / hoverpreview archives (LFS via .gitattributes).
+!data/uk_world_data_gb.zip
+!data/uk_world_data_gb.zip.part*
+!data/uk_world_data_gb_hoverpreviews.zip
 
 # Local GitHub Pages staging output
 _site/
 *.gz
-/tools/ukgeo-tools/uk_world_data_gb/ores/iron
 /graphify-out
 /.graphify-test-kubejs
 /.graphify-runs

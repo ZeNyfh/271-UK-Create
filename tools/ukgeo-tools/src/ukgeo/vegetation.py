@@ -42,7 +42,7 @@ BIOME_REGION_CLASSES: dict[int, dict[str, str]] = {
 BIOME_REGION_CLASSES[0] = {"name": "ocean", "color": "#1f4f7a"}
 BIOME_REGION_CLASSES[10] = {"name": "freshwater", "color": "#2b8fc6"}
 
-BIOME_REGION_DEFAULT_FACTOR = 8
+BIOME_REGION_DEFAULT_FACTOR = 6
 BIOME_REGION_HARD_CLASSES = {0, 10}
 BIOME_REGION_CLASS_GROUPS = {
     1: "woodland",
@@ -275,7 +275,7 @@ def resample_blocks_to_cells(block_data: np.ndarray, cell_blocks: int) -> np.nda
 
 
 def clean_vegetation_grid(grid: np.ndarray, *, smoothing: str = "light", freshwater_class: int = 10) -> np.ndarray:
-    """Remove obvious non-freshwater vegetation speckles while preserving freshwater exactly."""
+    """Remove obvious vegetation speckles and clean raw freshwater masks for runtime lake carving."""
     mode = smoothing.lower()
     if mode == "none":
         return grid.astype(np.uint8, copy=True)
@@ -285,7 +285,7 @@ def clean_vegetation_grid(grid: np.ndarray, *, smoothing: str = "light", freshwa
     result = grid.astype(np.uint8, copy=True)
     for _ in range(passes):
         result = _majority_smooth_nonfreshwater(result, freshwater_class=freshwater_class)
-    result[grid == freshwater_class] = np.uint8(freshwater_class)
+    result = _clean_freshwater_grid(result, mode=mode, freshwater_class=freshwater_class)
     return result
 
 
@@ -293,7 +293,7 @@ def generate_biome_region_grid(
     grid: np.ndarray,
     *,
     region_factor: int = BIOME_REGION_DEFAULT_FACTOR,
-    smoothing_passes: int = 2,
+    smoothing_passes: int = 4,
     min_area_cells: int = 3,
 ) -> np.ndarray:
     """Derive a coarse, Minecraft-biome-oriented vegetation region raster.
@@ -309,7 +309,74 @@ def generate_biome_region_grid(
     regions = _remove_small_region_components(regions, min_area_cells=max(1, int(min_area_cells)))
     for _ in range(max(0, int(smoothing_passes))):
         regions = _smooth_biome_region_boundaries(regions)
+    regions = _remove_small_region_components(regions, min_area_cells=max(1, int(min_area_cells)))
     return regions.astype(np.uint8, copy=False)
+
+
+def _clean_freshwater_grid(grid: np.ndarray, *, mode: str, freshwater_class: int) -> np.ndarray:
+    result = grid.copy()
+    min_area_cells = 6 if mode == "light" else 18
+    boundary_passes = 2 if mode == "light" else 3
+    result = _remove_small_freshwater_components(result, freshwater_class=freshwater_class, min_area_cells=min_area_cells)
+    for _ in range(boundary_passes):
+        result = _smooth_freshwater_boundaries(result, freshwater_class=freshwater_class)
+    result = _remove_small_freshwater_components(result, freshwater_class=freshwater_class, min_area_cells=min_area_cells)
+    return result
+
+
+def _remove_small_freshwater_components(grid: np.ndarray, *, freshwater_class: int, min_area_cells: int) -> np.ndarray:
+    height, width = grid.shape
+    if height == 0 or width == 0:
+        return grid.copy()
+    result = grid.copy()
+    visited = np.zeros((height, width), dtype=bool)
+    for z in range(height):
+        for x in range(width):
+            if visited[z, x] or int(result[z, x]) != freshwater_class:
+                continue
+            component, neighbours = _collect_component(result, visited, x, z, freshwater_class)
+            if len(component) >= max(1, int(min_area_cells)):
+                continue
+            replacement = _dominant_nonfreshwater_neighbour(neighbours, fallback=0, freshwater_class=freshwater_class)
+            for cy, cx in component:
+                result[cy, cx] = np.uint8(replacement)
+    return result
+
+
+def _smooth_freshwater_boundaries(grid: np.ndarray, *, freshwater_class: int) -> np.ndarray:
+    height, width = grid.shape
+    output = grid.copy()
+    if height == 0 or width == 0:
+        return output
+    padded = np.pad(grid, ((1, 1), (1, 1)), mode="edge")
+    for z in range(height):
+        for x in range(width):
+            block = padded[z : z + 3, x : x + 3]
+            window = block.ravel()
+            freshwater_mask = block == freshwater_class
+            freshwater_count = int(np.count_nonzero(freshwater_mask))
+            current = int(grid[z, x])
+            north = bool(freshwater_mask[0, 1])
+            south = bool(freshwater_mask[2, 1])
+            west = bool(freshwater_mask[1, 0])
+            east = bool(freshwater_mask[1, 2])
+            orthogonal_count = int(north) + int(south) + int(west) + int(east)
+            diagonal_count = freshwater_count - orthogonal_count - int(current == freshwater_class)
+            if current == freshwater_class:
+                if orthogonal_count >= 2 or freshwater_count >= 5:
+                    continue
+                if orthogonal_count == 1 and diagonal_count >= 2:
+                    continue
+                replacement = _dominant_nonfreshwater_neighbour(window.tolist(), fallback=0, freshwater_class=freshwater_class)
+                if replacement != freshwater_class:
+                    output[z, x] = np.uint8(replacement)
+                continue
+            if current == 0:
+                continue
+            corner_fill = (north and west) or (north and east) or (south and west) or (south and east)
+            if (orthogonal_count >= 3 or (corner_fill and freshwater_count >= 5)) and int(np.count_nonzero(window == 0)) == 0:
+                output[z, x] = np.uint8(freshwater_class)
+    return output
 
 
 def _coarsen_biome_regions(grid: np.ndarray, factor: int) -> np.ndarray:
@@ -437,23 +504,34 @@ def _dominant_neighbour_class(neighbours: list[int], *, fallback: int) -> int:
     return int(counts.argmax())
 
 
+def _dominant_nonfreshwater_neighbour(neighbours: list[int], *, fallback: int, freshwater_class: int) -> int:
+    if not neighbours:
+        return fallback
+    counts = np.bincount(np.asarray(neighbours, dtype=np.uint8), minlength=256)
+    counts[freshwater_class] = 0
+    if int(counts.max()) <= 0:
+        return fallback
+    return int(counts.argmax())
+
+
 def _smooth_biome_region_boundaries(grid: np.ndarray) -> np.ndarray:
     height, width = grid.shape
     output = grid.copy()
     if height == 0 or width == 0:
         return output
-    padded = np.pad(grid, ((1, 1), (1, 1)), mode="edge")
+    padded = np.pad(grid, ((2, 2), (2, 2)), mode="edge")
     for z in range(height):
         for x in range(width):
             current = int(grid[z, x])
             if current in BIOME_REGION_HARD_CLASSES:
                 continue
-            window = padded[z : z + 3, x : x + 3].ravel()
+            window = padded[z : z + 5, x : x + 5].ravel()
             counts = np.bincount(window, minlength=256)
             for hard_class in BIOME_REGION_HARD_CLASSES:
                 counts[hard_class] = 0
             best = int(counts.argmax())
-            if best != current and int(counts[best]) >= 6:
+            current_count = int(counts[current])
+            if best != current and int(counts[best]) >= max(10, current_count + 4):
                 output[z, x] = np.uint8(best)
     return output
 

@@ -4,7 +4,9 @@ runtime:
 generate:
   UKGEO_TOOLS_DIR: ../ukgeo-tools
   ROOT: ../ukgeo-tools/uk_world_data_gb
-  MAX_SIZE: 9000
+  # 2x world (axis_scale 2.0 => ~68k x 100k) needs ~18000 to keep preview
+  # sampling scale=6, matching the old 1x world's 9000/scale=6 sharpness.
+  MAX_SIZE: 18000
   STYLE: auto
   HOVERPREVIEW_GPU: auto
   HOVERPREVIEW_TILE_SIZE: 512

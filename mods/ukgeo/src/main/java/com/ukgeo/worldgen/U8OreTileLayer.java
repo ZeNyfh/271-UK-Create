@@ -15,7 +15,7 @@ public final class U8OreTileLayer {
     private final int cellBlocks;
     private final int paddedWidth;
     private final int paddedDepth;
-    private final TileCache<TileCoord, byte[]> cache = new TileCache<>(96);
+    private final TileCache<TileCoord, byte[]> cache;
 
     public U8OreTileLayer(TileManifest manifest, String oreName, String path) {
         this(manifest, oreName, path, 1, manifest.paddedWidth, manifest.paddedDepth);
@@ -31,6 +31,7 @@ public final class U8OreTileLayer {
         this.cellBlocks = Math.max(1, cellBlocks);
         this.paddedWidth = paddedWidth;
         this.paddedDepth = paddedDepth;
+        this.cache = new TileCache<>(cacheEntriesFor(oreName));
     }
 
     public OptionalInt sample(int x, int z) {
@@ -71,5 +72,13 @@ public final class U8OreTileLayer {
 
     public String cacheStats() {
         return oreName + ":" + cache.stats();
+    }
+
+    private static int cacheEntriesFor(String oreName) {
+        int defaultEntries = switch (oreName) {
+            case "vegetation", "biome_regions", "surface_geology", "rivers", "river_half_width", "river_order" -> 192;
+            default -> 96;
+        };
+        return Math.max(1, Integer.getInteger("ukgeo.u8TileCacheEntries." + oreName, Integer.getInteger("ukgeo.u8TileCacheEntries", defaultEntries)));
     }
 }

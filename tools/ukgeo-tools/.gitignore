@@ -8,15 +8,12 @@ build/
 uk_world_data*/
 *.png
 
-# Keep the generated hover preview website data publishable on GitHub Pages.
-!uk_world_data_gb/
-uk_world_data_gb/*
-!uk_world_data_gb/manifest.json
-!uk_world_data_gb/**/
-!uk_world_data_gb/**/*.u8rg
-!uk_world_data_gb/**/*.r16rg
-!uk_world_data_gb/hoverpreviews/
-!uk_world_data_gb/hoverpreviews/**
-!uk_world_data_gb/hoverpreviews/**/*.json
-!uk_world_data_gb/hoverpreviews/**/*.png
-!uk_world_data_gb/hoverpreviews/**/*.webp
+# Generated world tiles live on disk for local/runtime use, but are published as
+# zip archives under ../../data/ (see data/README.md). Do not track individual
+# region/hoverpreview files — they break git push.
+uk_world_data_gb/
+uk_world_data_gb.backup*/
+uk_world_data_gb.rebuild*/
+
+# River processing scratch caches
+uk_world_data_gb/.river-*/

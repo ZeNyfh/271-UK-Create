@@ -8,7 +8,7 @@ from rich.progress import BarColumn, Progress, TaskProgressColumn, TextColumn, T
 
 from ukgeo.manifest import read_manifest
 
-from .hover_previews import export_hover_previews, hover_preview_steps
+from .hover_previews import export_hover_preview_layers, export_hover_previews, hover_preview_steps
 
 app = typer.Typer(no_args_is_help=True)
 console = Console()
@@ -47,13 +47,15 @@ def export_cmd(
     profile: bool = typer.Option(False, "--profile", help="Print rough per-layer export timings."),
     write_full_images: bool = typer.Option(False, "--write-full-images", help="Also write combined full-size layer/sample images. The viewer only requires tiles, so leaving this off lowers memory and disk usage."),
     tile_batch_rows: int = typer.Option(4, "--tile-batch-rows", min=1, help="How many tile rows each disk-backed export job writes at once."),
+    only: list[str] = typer.Option([], "--only", help="Incrementally regenerate only selected overlay layers: surface, vegetation, biome_regions, rivers."),
 ) -> None:
     """Export stackable PNG layers consumed by the hover map."""
     if max_size == 0:
         console.print("[yellow]Native resolution can require several GB of RAM for large generated worlds.[/yellow]")
     try:
         manifest = read_manifest(root / "manifest.json")
-        total_steps = len(hover_preview_steps(root, manifest))
+        selected_layers = [item for value in only for item in value.split(",") if item]
+        total_steps = len(selected_layers) + 1 if selected_layers else len(hover_preview_steps(root, manifest))
         with Progress(
             TextColumn("[progress.description]{task.description}"),
             BarColumn(),
@@ -66,24 +68,45 @@ def export_cmd(
             def advance(step: str) -> None:
                 progress.update(task_id, description=_progress_label(step), advance=1)
 
-            written = export_hover_previews(
-                root,
-                out,
-                max_size=max_size,
-                style=style,
-                clean=clean,
-                tile_size=tile_size,
-                workers=workers,
-                visual_format=visual_format,
-                renderer=renderer,
-                force=force,
-                clean_stale=clean_stale,
-                deploy_minimal=deploy_minimal,
-                profile=profile,
-                write_full_images=write_full_images,
-                tile_batch_rows=tile_batch_rows,
-                progress=advance,
-            )
+            if selected_layers:
+                if clean:
+                    raise ValueError("--clean cannot be used with incremental --only exports")
+                if clean_stale:
+                    raise ValueError("--clean-stale cannot be used with incremental --only exports")
+                if deploy_minimal:
+                    raise ValueError("--deploy-minimal cannot be used with incremental --only exports")
+                written = export_hover_preview_layers(
+                    root,
+                    out,
+                    selected_layers,
+                    tile_size=tile_size,
+                    workers=workers,
+                    visual_format=visual_format,
+                    force=force,
+                    profile=profile,
+                    write_full_images=write_full_images,
+                    tile_batch_rows=tile_batch_rows,
+                    progress=advance,
+                )
+            else:
+                written = export_hover_previews(
+                    root,
+                    out,
+                    max_size=max_size,
+                    style=style,
+                    clean=clean,
+                    tile_size=tile_size,
+                    workers=workers,
+                    visual_format=visual_format,
+                    renderer=renderer,
+                    force=force,
+                    clean_stale=clean_stale,
+                    deploy_minimal=deploy_minimal,
+                    profile=profile,
+                    write_full_images=write_full_images,
+                    tile_batch_rows=tile_batch_rows,
+                    progress=advance,
+                )
     except (FileNotFoundError, ValueError) as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1) from exc

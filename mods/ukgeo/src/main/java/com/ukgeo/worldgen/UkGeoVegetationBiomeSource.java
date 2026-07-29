@@ -148,10 +148,45 @@ public final class UkGeoVegetationBiomeSource extends BiomeSource {
         if (isHighMountainSourceHeight(sourceHeightDecimetres)) {
             return mountains;
         }
-        int biomeClass = data.biomeRegionLayer != null
-            ? data.biomeRegionLayer.sampleOrDefault(blockX, blockZ, -1)
-            : data.vegetationLayer == null ? -1 : data.vegetationLayer.sampleOrDefault(blockX, blockZ, -1);
+        int biomeClass = smoothedBiomeClass(data, blockX, blockZ);
         return biomeForVegetationClass(biomeClass);
+    }
+
+    private int smoothedBiomeClass(RuntimeData data, int blockX, int blockZ) {
+        if (data.biomeRegionLayer == null) {
+            return data.vegetationLayer == null ? -1 : data.vegetationLayer.sampleOrDefault(blockX, blockZ, -1);
+        }
+        int center = data.biomeRegionLayer.sampleOrDefault(blockX, blockZ, -1);
+        if (center < 0 || center == 0 || center == 10) {
+            return center;
+        }
+        int step = Math.max(4, Math.max(1, data.biomeRegionCellBlocks) / 2);
+        int[] samples = {
+            center,
+            data.biomeRegionLayer.sampleOrDefault(blockX - step, blockZ, center),
+            data.biomeRegionLayer.sampleOrDefault(blockX + step, blockZ, center),
+            data.biomeRegionLayer.sampleOrDefault(blockX, blockZ - step, center),
+            data.biomeRegionLayer.sampleOrDefault(blockX, blockZ + step, center),
+        };
+        int[] weights = {4, 2, 2, 2, 2};
+        int[] counts = new int[256];
+        for (int i = 0; i < samples.length; i++) {
+            int sample = samples[i];
+            if (sample < 0 || sample >= counts.length) {
+                continue;
+            }
+            counts[sample] += weights[i];
+        }
+        int best = center;
+        int bestWeight = counts[center];
+        for (int classId = 0; classId < counts.length; classId++) {
+            int weight = counts[classId];
+            if (weight > bestWeight) {
+                best = classId;
+                bestWeight = weight;
+            }
+        }
+        return best;
     }
 
     private Holder<Biome> undergroundBiomeFor(int blockY, int sourceHeightDecimetres, int blockX, int blockZ) {
@@ -258,7 +293,7 @@ public final class UkGeoVegetationBiomeSource extends BiomeSource {
                     ? null
                     : new U8OreTileLayer(manifest, "biome_regions", manifest.biomeRegionsPath, manifest.biomeRegionsCellBlocks, manifest.paddedWidth, manifest.paddedDepth);
                 U8OreTileLayer riverLayer = manifest.riversPath == null ? null : new U8OreTileLayer(manifest, "rivers", manifest.riversPath);
-                runtimeData = new RuntimeData(height, vegetationLayer, biomeRegionLayer, riverLayer);
+                runtimeData = new RuntimeData(height, vegetationLayer, biomeRegionLayer, riverLayer, manifest.biomeRegionsCellBlocks);
             } catch (IOException | RuntimeException ex) {
                 UkGeoMod.LOGGER.warn("UK vegetation biome data is missing or invalid; using fallback biome: {}", ex.getMessage());
                 runtimeData = null;
@@ -276,6 +311,6 @@ public final class UkGeoVegetationBiomeSource extends BiomeSource {
         ).apply(instance, ExtraBiomes::new));
     }
 
-    private record RuntimeData(R16HeightTileLayer height, U8OreTileLayer vegetationLayer, U8OreTileLayer biomeRegionLayer, U8OreTileLayer riverLayer) {
+    private record RuntimeData(R16HeightTileLayer height, U8OreTileLayer vegetationLayer, U8OreTileLayer biomeRegionLayer, U8OreTileLayer riverLayer, int biomeRegionCellBlocks) {
     }
 }

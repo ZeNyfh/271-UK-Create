@@ -17,7 +17,7 @@ from tqdm import tqdm
 
 from .bgs import resolve_gpkg
 from .manifest import read_manifest, write_manifest
-from .raster_memory import U8Raster, maximum_in_place, row_windows
+from .raster_memory import U8Raster, find_memmap_path, maximum_in_place, row_windows
 from .tiles import HEIGHT_NODATA, read_r16_tile, write_u8_tile, u8_extension, r16_extension
 
 console = Console()
@@ -31,10 +31,21 @@ SOURCE_END_NODE_FIELDS = ("end_node", "END_NODE", "source_end_node", "TO_NODE", 
 SOURCE_FLOW_DIRECTION_FIELDS = ("flow_direction", "FLOW_DIRECTION", "direction")
 THINNER_RIVER_DATASETS = {"epa_river_network_routes_ie", "ni_river_segment"}
 THINNER_RIVER_WIDTH_FACTOR = 0.7
+GB_RIVER_DATASETS = {"os_open_rivers_gb"}
+GB_SMALL_STREAM_HALF_WIDTH_BONUS = 2
+GB_MAJOR_RIVER_WIDTH_FACTOR = 1.5
 TOP_ORDER_THINNING_FACTORS = (0.5, 1.0 / 1.5, 1.0 / 1.25, 1.0 / 1.125)
+RIVER_OUTPUT_WIDTH_FACTOR = 1.0 / 6.0
 RIVER_RASTER_BATCH_SIZE = 25000
 PREVIEW_RIVER_WIDTH_SCALE = 0.18
 PREVIEW_RIVER_MAX_RADIUS = 6
+RIVER_MEMMAP_LABELS = (
+    "rivers",
+    "river-order",
+    "river-half-width",
+    "river-preview-radius",
+    "river-burn",
+)
 
 
 def make_river_tiles(
@@ -45,7 +56,18 @@ def make_river_tiles(
     layer: str | None = None,
     width_metres: float = 30.0,
     debug_geotiff: Path | None = None,
+    resume_memmaps: bool = False,
+    skip_edges: int = 0,
 ) -> None:
+    if skip_edges < 0:
+        raise ValueError("--skip-edges must be >= 0")
+    if skip_edges and not resume_memmaps:
+        raise ValueError("--skip-edges requires --resume-memmaps")
+    if resume_memmaps and skip_edges % RIVER_RASTER_BATCH_SIZE != 0:
+        raise ValueError(
+            f"--skip-edges must be a multiple of {RIVER_RASTER_BATCH_SIZE} "
+            f"(last flushed batch boundary); got {skip_edges}"
+        )
     manifest = read_manifest(manifest_path)
     geo = manifest["georeferencing"]
     world = manifest["world"]
@@ -60,6 +82,11 @@ def make_river_tiles(
         width,
         depth,
     )
+    resume_paths = _resolve_resume_paths(out) if resume_memmaps else {}
+    if resume_memmaps:
+        console.print(
+            f"[cyan]Resuming river memmaps under {out}; skipping first {skip_edges} edges[/cyan]"
+        )
     gpkg, tmp = resolve_gpkg(rivers)
     try:
         layer_name = layer or _default_layer(gpkg)
@@ -71,11 +98,22 @@ def make_river_tiles(
         if frame.empty:
             console.print("[yellow]No river features intersect the manifest extent.[/yellow]")
         with (
-            U8Raster((depth, width), tmp_parent=out, label="rivers") as arr,
-            U8Raster((depth, width), tmp_parent=out, label="river-order") as order_arr,
-            U8Raster((depth, width), tmp_parent=out, label="river-half-width") as half_width_arr,
-            U8Raster((depth, width), tmp_parent=out, label="river-preview-radius") as preview_radius_arr,
-            U8Raster((depth, width), tmp_parent=out, label="river-burn") as burned,
+            U8Raster((depth, width), tmp_parent=out, label="rivers", resume_path=resume_paths.get("rivers")) as arr,
+            U8Raster(
+                (depth, width), tmp_parent=out, label="river-order", resume_path=resume_paths.get("river-order")
+            ) as order_arr,
+            U8Raster(
+                (depth, width),
+                tmp_parent=out,
+                label="river-half-width",
+                resume_path=resume_paths.get("river-half-width"),
+            ) as half_width_arr,
+            U8Raster(
+                (depth, width),
+                tmp_parent=out,
+                label="river-preview-radius",
+                resume_path=resume_paths.get("river-preview-radius"),
+            ) as preview_radius_arr,
         ):
             if not frame.empty:
                 if frame.crs and str(frame.crs).upper() != "EPSG:27700":
@@ -85,19 +123,25 @@ def make_river_tiles(
                 # Fall back to the old fixed-width raster if graph extraction produced no usable line edges.
                 fallback_fixed = not strahler.edges
                 cell_metres = _cell_metres(geo, width, depth)
+                axis_scale = _horizontal_axis_scale(manifest)
                 if fallback_fixed:
+                    if skip_edges:
+                        raise ValueError("--skip-edges is not supported for the fixed-width river fallback path")
                     cover_shapes: list[tuple[object, int]] = []
                     width_shapes: list[tuple[object, int]] = []
                     order_shapes: list[tuple[object, int]] = []
                     preview_shapes: list[tuple[object, int]] = []
-                    fallback_half_width = max(1, int(round(width_metres / (2.0 * cell_metres)))) if width_metres > 0 else 1
+                    scaled_width_metres = width_metres * axis_scale * RIVER_OUTPUT_WIDTH_FACTOR
+                    fallback_half_width = (
+                        max(1, int(round(scaled_width_metres / (2.0 * cell_metres)))) if scaled_width_metres > 0 else 1
+                    )
                     for geom in tqdm(frame.geometry, desc="rasterizing fallback rivers"):
                         if geom is None or geom.is_empty:
                             continue
                         if not isinstance(geom, (LineString, MultiLineString)):
                             continue
-                        if width_metres > 0:
-                            shape = geom.buffer(width_metres / 2.0, cap_style="round", join_style="round")
+                        if scaled_width_metres > 0:
+                            shape = geom.buffer(scaled_width_metres / 2.0, cap_style="round", join_style="round")
                         else:
                             shape = geom
                         cover_shapes.append((shape, 255))
@@ -105,46 +149,57 @@ def make_river_tiles(
                         order_shapes.append((shape, 1))
                         preview_shapes.append((shape, _preview_radius_for_order(1)))
                         if len(cover_shapes) >= RIVER_RASTER_BATCH_SIZE:
-                            _rasterize_shape_batches(cover_shapes, arr, transform, burned)
-                            _rasterize_shape_batches(width_shapes, half_width_arr, transform, burned)
-                            _rasterize_shape_batches(order_shapes, order_arr, transform, burned)
-                            _rasterize_shape_batches(preview_shapes, preview_radius_arr, transform, burned)
+                            _rasterize_shape_batches_direct(cover_shapes, arr, transform)
+                            _rasterize_shape_batches_direct(width_shapes, half_width_arr, transform)
+                            _rasterize_shape_batches_direct(order_shapes, order_arr, transform)
+                            _rasterize_shape_batches_direct(preview_shapes, preview_radius_arr, transform)
                             cover_shapes.clear()
                             width_shapes.clear()
                             order_shapes.clear()
                             preview_shapes.clear()
-                    _rasterize_shape_batches(cover_shapes, arr, transform, burned)
-                    _rasterize_shape_batches(width_shapes, half_width_arr, transform, burned)
-                    _rasterize_shape_batches(order_shapes, order_arr, transform, burned)
-                    _rasterize_shape_batches(preview_shapes, preview_radius_arr, transform, burned)
+                    _rasterize_shape_batches_direct(cover_shapes, arr, transform)
+                    _rasterize_shape_batches_direct(width_shapes, half_width_arr, transform)
+                    _rasterize_shape_batches_direct(order_shapes, order_arr, transform)
+                    _rasterize_shape_batches_direct(preview_shapes, preview_radius_arr, transform)
                 else:
-                    cover_shapes = []
-                    width_shapes = []
-                    order_shapes = []
-                    preview_shapes = []
-                    for edge in tqdm(strahler.edges, desc="rasterizing rivers"):
-                        if edge.line.is_empty:
-                            continue
-                        half_width = max(1, edge.half_width)
-                        buffer_metres = half_width * cell_metres
-                        buffered = edge.line.buffer(buffer_metres, cap_style="round", join_style="round")
-                        cover_shapes.append((buffered, 255))
-                        width_shapes.append((buffered, min(255, half_width)))
-                        order_shapes.append((buffered, min(255, max(1, edge.order))))
-                        preview_shapes.append((buffered, _preview_radius_for_edge(edge)))
-                        if len(cover_shapes) >= RIVER_RASTER_BATCH_SIZE:
-                            _rasterize_shape_batches(cover_shapes, arr, transform, burned)
-                            _rasterize_shape_batches(width_shapes, half_width_arr, transform, burned)
-                            _rasterize_shape_batches(order_shapes, order_arr, transform, burned)
-                            _rasterize_shape_batches(preview_shapes, preview_radius_arr, transform, burned)
-                            cover_shapes.clear()
-                            width_shapes.clear()
-                            order_shapes.clear()
-                            preview_shapes.clear()
-                    _rasterize_shape_batches(cover_shapes, arr, transform, burned)
-                    _rasterize_shape_batches(width_shapes, half_width_arr, transform, burned)
-                    _rasterize_shape_batches(order_shapes, order_arr, transform, burned)
-                    _rasterize_shape_batches(preview_shapes, preview_radius_arr, transform, burned)
+                    edges = strahler.edges
+                    if skip_edges > len(edges):
+                        raise ValueError(f"--skip-edges {skip_edges} exceeds edge count {len(edges)}")
+                    remaining_edges = edges[skip_edges:]
+                    _rasterize_edge_pass(
+                        remaining_edges,
+                        arr,
+                        transform,
+                        cell_metres,
+                        value_fn=lambda edge: 255,
+                        desc="rasterizing river coverage",
+                        initial=skip_edges,
+                        total=len(edges),
+                    )
+                    _rasterize_edge_pass(
+                        sorted(remaining_edges, key=lambda edge: min(255, max(1, edge.order))),
+                        order_arr,
+                        transform,
+                        cell_metres,
+                        value_fn=lambda edge: min(255, max(1, edge.order)),
+                        desc="rasterizing river order",
+                    )
+                    _rasterize_edge_pass(
+                        sorted(remaining_edges, key=lambda edge: min(255, max(1, edge.half_width))),
+                        half_width_arr,
+                        transform,
+                        cell_metres,
+                        value_fn=lambda edge: min(255, max(1, edge.half_width)),
+                        desc="rasterizing river half width",
+                    )
+                    _rasterize_edge_pass(
+                        sorted(remaining_edges, key=_preview_radius_for_edge),
+                        preview_radius_arr,
+                        transform,
+                        cell_metres,
+                        value_fn=_preview_radius_for_edge,
+                        desc="rasterizing river preview radius",
+                    )
             root = out / "water" / "rivers"
             _write_tiles(arr, root, tile_size)
             _write_tiles(order_arr, out / "water" / "river_order", tile_size)
@@ -161,7 +216,7 @@ def make_river_tiles(
                 "half_width_path": "water/river_half_width",
                 "preview_radius_path": "water/river_preview_radius",
                 "max_half_width": max_half_width,
-                "note": "255 marks cells inside variable-width river/watercourse vectors. Widths are derived from source river order where present, otherwise approximate Strahler stream order. Preview radii preserve legacy GB Strahler sizing while allowing thinner ROI minor streams.",
+                "note": "255 marks cells inside variable-width river/watercourse vectors. Widths are derived from source river order where present, otherwise approximate Strahler stream order, then scaled to one-third output width for in-world readability.",
             }
             write_manifest(manifest_path, manifest)
             if debug_geotiff:
@@ -169,6 +224,10 @@ def make_river_tiles(
     finally:
         if tmp is not None:
             tmp.cleanup()
+
+
+def _resolve_resume_paths(out: Path) -> dict[str, Path]:
+    return {label: find_memmap_path(out, label) for label in RIVER_MEMMAP_LABELS}
 
 
 def _default_layer(gpkg: Path) -> str:
@@ -227,6 +286,49 @@ def _rasterize_shape_batches(
         all_touched=True,
     )
     maximum_in_place(out, burned)
+
+
+def _rasterize_edge_pass(
+    edges: list[_Edge],
+    out: np.ndarray,
+    transform,
+    cell_metres: float,
+    *,
+    value_fn,
+    desc: str,
+    initial: int = 0,
+    total: int | None = None,
+) -> None:
+    shapes: list[tuple[object, int]] = []
+    progress_total = total if total is not None else len(edges)
+    for edge in tqdm(edges, desc=desc, initial=initial, total=progress_total):
+        if edge.line.is_empty:
+            continue
+        half_width = max(1, edge.half_width)
+        buffer_metres = half_width * cell_metres
+        buffered = edge.line.buffer(buffer_metres, cap_style="round", join_style="round")
+        shapes.append((buffered, int(value_fn(edge))))
+        if len(shapes) >= RIVER_RASTER_BATCH_SIZE:
+            _rasterize_shape_batches_direct(shapes, out, transform)
+            shapes.clear()
+    _rasterize_shape_batches_direct(shapes, out, transform)
+
+
+def _rasterize_shape_batches_direct(
+    shapes: list[tuple[object, int]],
+    out: np.ndarray,
+    transform,
+) -> None:
+    if not shapes:
+        return
+    rasterize(
+        shapes,
+        out=out,
+        transform=transform,
+        dtype=np.uint8,
+        merge_alg=MergeAlg.replace,
+        all_touched=True,
+    )
 
 
 def _write_debug(path: Path, arr: np.ndarray, transform) -> None:
@@ -354,6 +456,22 @@ def _cell_metres(geo: dict, width: int, depth: int) -> float:
     return (abs(x) + abs(z)) * 0.5
 
 
+def _horizontal_axis_scale(manifest: dict) -> float:
+    """Return the mean |axis_scale| for x/z, floored at 1.0.
+
+    At axis_scale 2 the raster cells are half as wide in metres, so order-based
+    half-widths (in cells) must be doubled to keep rivers the same physical and
+    relative size as a 1x world.
+    """
+    axis = manifest.get("axis_scale") or {}
+    try:
+        scale_x = abs(float(axis.get("x", 1.0) or 1.0))
+        scale_z = abs(float(axis.get("z", 1.0) or 1.0))
+    except (TypeError, ValueError):
+        return 1.0
+    return max(1.0, (scale_x + scale_z) * 0.5)
+
+
 class _HeightSampler:
     def __init__(self, manifest: dict, root: Path):
         self.manifest = manifest
@@ -400,6 +518,25 @@ class _StrahlerResult:
 def _strahler_widths(lines: list[_InputLine], manifest: dict, root: Path) -> _StrahlerResult:
     if not lines:
         return _StrahlerResult([])
+    # Keep each source dataset as its own network. Irish rivers ship with ORDER_
+    # while GB must compute Strahler; mixing them made GB orders compress to 1
+    # against the Irish source_max / inflated computed_max.
+    by_dataset: dict[str | None, list[_InputLine]] = defaultdict(list)
+    for item in lines:
+        by_dataset[item.source_dataset].append(item)
+    edges: list[_Edge] = []
+    axis_scale = _horizontal_axis_scale(manifest)
+    for dataset_lines in by_dataset.values():
+        edges.extend(_strahler_widths_for_network(dataset_lines, manifest, root).edges)
+    _apply_axis_scale_to_half_widths(edges, axis_scale)
+    _apply_gb_width_adjustments(edges, axis_scale)
+    _apply_output_width_scale(edges)
+    return _StrahlerResult(edges)
+
+
+def _strahler_widths_for_network(lines: list[_InputLine], manifest: dict, root: Path) -> _StrahlerResult:
+    if not lines:
+        return _StrahlerResult([])
     sampler = _HeightSampler(manifest, root)
     source_max_order = max((item.source_order or 0) for item in lines)
     node_ids: dict[tuple[str, str] | tuple[int, int], int] = {}
@@ -419,13 +556,15 @@ def _strahler_widths(lines: list[_InputLine], manifest: dict, root: Path) -> _St
         node_points.append((float(point[0]), float(point[1])))
         return found
 
-    raw_edges: list[tuple[int, int, LineString, int | None, str | None]] = []
+    raw_edges: list[tuple[int, int, LineString, int | None, str | None, str | None]] = []
     for item in lines:
         coords = list(item.line.coords)
         a = node_id((coords[0][0], coords[0][1]), item.source_start_node)
         b = node_id((coords[-1][0], coords[-1][1]), item.source_end_node)
         if a != b:
-            raw_edges.append((a, b, item.line, item.source_order, item.source_dataset))
+            raw_edges.append(
+                (a, b, item.line, item.source_order, item.source_dataset, item.source_flow_direction)
+            )
     if not raw_edges:
         return _StrahlerResult([])
 
@@ -433,8 +572,10 @@ def _strahler_widths(lines: list[_InputLine], manifest: dict, root: Path) -> _St
     downstream: dict[int, list[tuple[int, int]]] = defaultdict(list)
     upstream_count: dict[int, int] = defaultdict(int)
     oriented: list[tuple[int, int, LineString, int | None, str | None]] = []
-    for item, (a, b, line, source_order, source_dataset) in zip(lines, raw_edges, strict=False):
-        src, dst = _orient_edge(a, b, item.source_flow_direction, heights, node_points)
+    # Iterate raw_edges only — never zip with `lines`. Degenerate a==b skips would
+    # shift that pairing and apply the wrong flow_direction to later edges.
+    for a, b, line, source_order, source_dataset, flow_direction in raw_edges:
+        src, dst = _orient_edge(a, b, flow_direction, heights, node_points)
         downstream[src].append((dst, len(oriented)))
         upstream_count[dst] += 1
         upstream_count.setdefault(src, upstream_count.get(src, 0))
@@ -501,16 +642,53 @@ def _strahler_widths(lines: list[_InputLine], manifest: dict, root: Path) -> _St
     return _StrahlerResult(edges)
 
 
-def _thin_top_order_half_widths(edges: list[_Edge]) -> None:
+def _apply_axis_scale_to_half_widths(edges: list[_Edge], axis_scale: float) -> None:
+    if axis_scale <= 1.0 or not edges:
+        return
+    max_half_width = max(1, int(round(MAX_RIVER_HALFWIDTH * axis_scale)))
+    for edge in edges:
+        scaled = max(1, int(round(edge.half_width * axis_scale)))
+        edge.half_width = min(max_half_width, scaled)
+
+
+def _apply_output_width_scale(edges: list[_Edge]) -> None:
     if not edges:
         return
-    top_orders = sorted({edge.order for edge in edges if edge.order > 0}, reverse=True)[: len(TOP_ORDER_THINNING_FACTORS)]
-    factors = {order: factor for order, factor in zip(top_orders, TOP_ORDER_THINNING_FACTORS, strict=False)}
     for edge in edges:
+        edge.half_width = max(1, int(round(edge.half_width * RIVER_OUTPUT_WIDTH_FACTOR)))
+
+
+def _thin_top_order_half_widths(edges: list[_Edge]) -> None:
+    thin_edges = [edge for edge in edges if edge.source_dataset in THINNER_RIVER_DATASETS]
+    if not thin_edges:
+        return
+    top_orders = sorted({edge.order for edge in thin_edges if edge.order > 0}, reverse=True)[
+        : len(TOP_ORDER_THINNING_FACTORS)
+    ]
+    factors = {order: factor for order, factor in zip(top_orders, TOP_ORDER_THINNING_FACTORS, strict=False)}
+    for edge in thin_edges:
         factor = factors.get(edge.order)
         if factor is None:
             continue
         edge.half_width = max(1, int(round(edge.half_width * factor)))
+
+
+def _apply_gb_width_adjustments(edges: list[_Edge], axis_scale: float) -> None:
+    if not edges:
+        return
+    max_half_width = max(1, int(round(MAX_RIVER_HALFWIDTH * max(1.0, axis_scale))))
+    for edge in edges:
+        if edge.source_dataset not in GB_RIVER_DATASETS:
+            continue
+        if edge.order <= 1:
+            continue
+        if edge.order <= 3:
+            edge.half_width = min(max_half_width, edge.half_width + GB_SMALL_STREAM_HALF_WIDTH_BONUS)
+            continue
+        edge.half_width = min(
+            max_half_width,
+            max(1, int(round(edge.half_width * GB_MAJOR_RIVER_WIDTH_FACTOR))),
+        )
 
 
 def _normalize_computed_order_to_source_scale(order: int, computed_max_order: int, source_max_order: int) -> int:

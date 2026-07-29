@@ -299,6 +299,13 @@ def pack_layer_regions(root: Path, layer: dict[str, Any], manifest: dict[str, An
     layer_path = str(layer["path"])
     raw_root = root / layer_path
     region_root = root / layer_path / "regions"
+    region_ext = region_extension(dtype)
+    # Resume-safe: if raw tiles were already deleted after a prior pack, keep existing
+    # regions and only refresh metadata. Re-reading missing raws would zero-fill and
+    # overwrite good region files.
+    if not _has_raw_tiles(raw_root, extension) and _has_region_files(region_root, region_ext):
+        layer.update(region_metadata(layer_path, dtype, region_tiles=region_tiles))
+        return
     source_layer = {**layer, "extension": extension, "dtype": dtype}
     if _has_raw_tiles(raw_root, extension):
         source_layer["storage"] = "tiles"
@@ -309,7 +316,7 @@ def pack_layer_regions(root: Path, layer: dict[str, Any], manifest: dict[str, An
                 root,
                 source_layer,
                 raw_root,
-                region_root / tile_filename(region_x, region_z, region_extension(dtype)),
+                region_root / tile_filename(region_x, region_z, region_ext),
                 region_x,
                 region_z,
                 tiles_x,
@@ -333,6 +340,68 @@ def _has_raw_tiles(raw_root: Path, extension: str) -> bool:
     return any(raw_root.glob(f"*{extension}")) or any(raw_root.glob(f"*{extension}.gz"))
 
 
+def is_valid_region_file(path: Path) -> bool:
+    """True when path looks like a complete UKGeo region file (not empty/truncated)."""
+    try:
+        size = path.stat().st_size
+    except FileNotFoundError:
+        return False
+    if size < REGION_HEADER.size:
+        return False
+    with path.open("rb") as fh:
+        return fh.read(4) == REGION_MAGIC
+
+
+def _has_region_files(region_root: Path, region_ext: str) -> bool:
+    if not region_root.exists():
+        return False
+    return any(is_valid_region_file(path) for path in region_root.glob(f"*{region_ext}"))
+
+
+def write_region_file_from_tiles(
+    out: Path,
+    *,
+    tiles: list[np.ndarray | None],
+    tile_size: int,
+    region_tiles: int,
+    dtype: str,
+) -> None:
+    """Write one region file from a row-major list of tile arrays (None = missing/default)."""
+    expected = region_tiles * region_tiles
+    if len(tiles) != expected:
+        raise ValueError(f"expected {expected} tiles for region, got {len(tiles)}")
+    tile_bytes = raw_tile_bytes(dtype, tile_size)
+    default = default_tile_value(dtype)
+    payloads: list[bytes | None] = []
+    for tile in tiles:
+        if tile is None or np.all(tile == default):
+            payloads.append(None)
+            continue
+        raw = np.asarray(tile, dtype=tile_dtype(dtype)).tobytes(order="C")
+        if len(raw) != tile_bytes:
+            raise ValueError(f"tile payload was {len(raw)} bytes, expected {tile_bytes}")
+        compressed = zlib.compress(raw, level=6)
+        payloads.append(compressed if len(compressed) < len(raw) else raw)
+    if not any(payloads):
+        out.unlink(missing_ok=True)
+        return
+    out.parent.mkdir(parents=True, exist_ok=True)
+    offset = REGION_HEADER.size + expected * REGION_ENTRY.size
+    entries: list[tuple[int, int]] = []
+    body = bytearray()
+    for payload in payloads:
+        if payload is None:
+            entries.append((0, 0))
+            continue
+        entries.append((offset + len(body), len(payload)))
+        body.extend(payload)
+    with out.open("wb") as fh:
+        fh.write(REGION_HEADER.pack(REGION_MAGIC, REGION_VERSION, tile_size, region_tiles, tile_bytes, default, expected))
+        for entry in entries:
+            fh.write(REGION_ENTRY.pack(*entry))
+        fh.write(body)
+
+
 def _write_region_file(
     root: Path,
     layer: dict[str, Any],
@@ -347,39 +416,20 @@ def _write_region_file(
     dtype: str,
     extension: str,
 ) -> None:
-    tile_bytes = raw_tile_bytes(dtype, tile_size)
-    default = default_tile_value(dtype)
-    entry_count = region_tiles * region_tiles
-    payloads: list[bytes | None] = []
+    tiles: list[np.ndarray | None] = []
+    source = {**layer, "extension": extension, "dtype": dtype}
     for local_z in range(region_tiles):
         for local_x in range(region_tiles):
             tile_x = region_x * region_tiles + local_x
             tile_z = region_z * region_tiles + local_z
             if tile_x >= tiles_x or tile_z >= tiles_z:
-                payloads.append(None)
+                tiles.append(None)
                 continue
-            tile = read_layer_tile(root, {**layer, "extension": extension, "dtype": dtype}, tile_x, tile_z, tile_size)
-            if np.all(tile == default):
-                payloads.append(None)
-            else:
-                raw = np.asarray(tile, dtype=tile_dtype(dtype)).tobytes(order="C")
-                compressed = zlib.compress(raw, level=6)
-                payloads.append(compressed if len(compressed) < len(raw) else raw)
-    if not any(payloads):
-        out.unlink(missing_ok=True)
-        return
-    out.parent.mkdir(parents=True, exist_ok=True)
-    offset = REGION_HEADER.size + entry_count * REGION_ENTRY.size
-    entries: list[tuple[int, int]] = []
-    body = bytearray()
-    for payload in payloads:
-        if payload is None:
-            entries.append((0, 0))
-            continue
-        entries.append((offset + len(body), len(payload)))
-        body.extend(payload)
-    with out.open("wb") as fh:
-        fh.write(REGION_HEADER.pack(REGION_MAGIC, REGION_VERSION, tile_size, region_tiles, tile_bytes, default, entry_count))
-        for entry in entries:
-            fh.write(REGION_ENTRY.pack(*entry))
-        fh.write(body)
+            tiles.append(read_layer_tile(root, source, tile_x, tile_z, tile_size))
+    write_region_file_from_tiles(
+        out,
+        tiles=tiles,
+        tile_size=tile_size,
+        region_tiles=region_tiles,
+        dtype=dtype,
+    )

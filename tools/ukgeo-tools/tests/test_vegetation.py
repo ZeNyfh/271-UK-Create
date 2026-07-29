@@ -74,9 +74,17 @@ def test_clean_vegetation_grid_preserves_freshwater_and_excludes_it_as_replaceme
         dtype=np.uint8,
     )
     cleaned = clean_vegetation_grid(grid, smoothing="light")
-    assert np.array_equal(cleaned[grid == 10], grid[grid == 10])
+    assert int(cleaned[0, 0]) == 10
+    assert int(cleaned[4, 4]) == 10
     assert int(cleaned[2, 2]) == 4
-    assert not np.any((grid != 10) & (cleaned == 10))
+    assert int(np.count_nonzero(cleaned == 10)) >= int(np.count_nonzero(grid == 10))
+
+
+def test_clean_vegetation_grid_removes_tiny_freshwater_fragment():
+    grid = np.full((7, 7), 4, dtype=np.uint8)
+    grid[3, 3] = 10
+    cleaned = clean_vegetation_grid(grid, smoothing="light")
+    assert int(cleaned[3, 3]) == 4
 
 
 def test_clean_vegetation_grid_keeps_unclear_boundaries():

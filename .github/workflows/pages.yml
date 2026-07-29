@@ -7,7 +7,7 @@ on:
       - "index.html"
       - ".nojekyll"
       - "tools/hoverpreview-tools/site/**"
-      - "tools/ukgeo-tools/uk_world_data_gb/hoverpreviews/**"
+      - "data/uk_world_data_gb_hoverpreviews.zip"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
 
@@ -28,12 +28,12 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
-          filter: blob:none
+          lfs: true
           sparse-checkout: |
             .nojekyll
             index.html
             tools/hoverpreview-tools/site
-            tools/ukgeo-tools/uk_world_data_gb/hoverpreviews
+            data/uk_world_data_gb_hoverpreviews.zip
             .github/workflows/pages.yml
           sparse-checkout-cone-mode: true
 
@@ -45,25 +45,15 @@ jobs:
         run: |
           set -euo pipefail
           rm -rf _site
-          mkdir -p _site/tools/hoverpreview-tools _site/tools/ukgeo-tools/uk_world_data_gb/hoverpreviews
+          mkdir -p _site/tools/hoverpreview-tools _site/tools/ukgeo-tools/uk_world_data_gb
           cp index.html _site/index.html
           cp .nojekyll _site/.nojekyll
           cp -R tools/hoverpreview-tools/site _site/tools/hoverpreview-tools/site
-          if [ -d tools/ukgeo-tools/uk_world_data_gb/hoverpreviews ]; then
-            if [ -f tools/ukgeo-tools/uk_world_data_gb/hoverpreviews/hover_manifest.json ]; then
-              cp tools/ukgeo-tools/uk_world_data_gb/hoverpreviews/hover_manifest.json \
-                _site/tools/ukgeo-tools/uk_world_data_gb/hoverpreviews/hover_manifest.json
-            fi
-            if [ -d tools/ukgeo-tools/uk_world_data_gb/hoverpreviews/tiles ]; then
-              cp -R tools/ukgeo-tools/uk_world_data_gb/hoverpreviews/tiles \
-                _site/tools/ukgeo-tools/uk_world_data_gb/hoverpreviews/tiles
-            fi
-            if [ -d tools/ukgeo-tools/uk_world_data_gb/hoverpreviews/sample_tiles ]; then
-              cp -R tools/ukgeo-tools/uk_world_data_gb/hoverpreviews/sample_tiles \
-                _site/tools/ukgeo-tools/uk_world_data_gb/hoverpreviews/sample_tiles
-            fi
+          if [ -f data/uk_world_data_gb_hoverpreviews.zip ]; then
+            unzip -q -o data/uk_world_data_gb_hoverpreviews.zip -d _site/tools/ukgeo-tools/uk_world_data_gb
           else
-            echo "::warning::tools/ukgeo-tools/uk_world_data_gb/hoverpreviews is missing; the page will load but show the empty state."
+            echo "::warning::data/uk_world_data_gb_hoverpreviews.zip is missing; the page will load but show the empty state."
+            mkdir -p _site/tools/ukgeo-tools/uk_world_data_gb/hoverpreviews
           fi
 
       - name: Upload GitHub Pages artifact
