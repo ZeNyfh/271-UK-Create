@@ -138,14 +138,15 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     static final int VEGETATION_FRESHWATER = 10;
     private static final int VEGETATION_URBAN = 11;
     private static final int VEGETATION_ROCKY = 12;
-    private static final int LAKE_EDGE_SEARCH_RADIUS = 28;
-    private static final int LAKE_DEPTH_SMOOTHING_RADIUS = 3;
+    private static final int LAKE_EDGE_SEARCH_RADIUS = Integer.getInteger("ukgeo.lakeEdgeSearchRadius", 18);
     private static final int LAKE_BANK_BLEND_RADIUS = 5;
     private static final int LAKE_ARTIFACT_SCAN_RADIUS = 24;
     private static final int LAKE_ARTIFACT_MAX_COMPONENT = 1024;
     private static final double LAKE_ARTIFACT_CORRIDOR_OVERLAP = 0.70;
     private static final int LAKE_ARTIFACT_PREFILTER_RADIUS = Math.max(0, Integer.getInteger("ukgeo.lakeArtifactPrefilterRadius", 4));
     private static final int WATERBED_PROTECTION_DEPTH = 6;
+    private static final boolean ENABLE_RIVER_SEARCH_INDEX = Boolean.getBoolean("ukgeo.enableRiverSearchIndex");
+    private static final int RIVER_SHELF_REMOVAL_EXTRA_WIDTH = Integer.getInteger("ukgeo.riverShelfRemovalExtraWidth", 2);
     private static final int MAX_RIVER_SURFACE_STEP = 1;
     private static final int RIVER_REACH_SMOOTHING_RADIUS = 6;
     private static final double ALLOW_STEEP_RAPIDS_ONLY_ABOVE_SLOPE = 1.8;
@@ -154,9 +155,9 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     private static final int WATER_EDGE_MAX_LAND_HEIGHT_ABOVE_SEA = 24;
     private static final int SHALLOW_WATER_DEPTH = 2;
     private static final int OCEAN_DEEP_FLOOR_DEPTH = Integer.getInteger("ukgeo.oceanDeepFloorDepth", 100);
-    // 2x world + gentler shelf: twice the old radius (~50% less steep), softer curve, finer sampling.
-    private static final int OCEAN_FLOOR_SLOPE_RADIUS = Integer.getInteger("ukgeo.oceanFloorSlopeRadius", 128);
-    private static final int OCEAN_FLOOR_SLOPE_SAMPLE_STEP = Integer.getInteger("ukgeo.oceanFloorSlopeSampleStep", 4);
+    // Gentler open-water shelf without the heavy per-column scan cost of the previous 128/4 setting.
+    private static final int OCEAN_FLOOR_SLOPE_RADIUS = Integer.getInteger("ukgeo.oceanFloorSlopeRadius", 96);
+    private static final int OCEAN_FLOOR_SLOPE_SAMPLE_STEP = Integer.getInteger("ukgeo.oceanFloorSlopeSampleStep", 8);
     private static final double OCEAN_FLOOR_SLOPE_CURVE = Double.parseDouble(System.getProperty("ukgeo.oceanFloorSlopeCurve", "1.0"));
     private static final double BACKGROUND_ORE_ATTEMPT_MULTIPLIER = 0.1;
     private static final double ORE_AREA_ATTEMPT_MULTIPLIER = 3.0;
@@ -219,7 +220,7 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     private static final double AQUATIC_SEAGRASS_CHANCE = 0.18D;
     private static final double AQUATIC_TALL_SEAGRASS_CHANCE = 0.08D;
     private static final double AQUATIC_KELP_CHANCE = 0.10D;
-    private static final int OCEAN_MONUMENT_MIN_LAND_DISTANCE_BLOCKS = 200;
+    private static final int OCEAN_MONUMENT_MIN_LAND_DISTANCE_BLOCKS = Integer.getInteger("ukgeo.oceanMonumentMinLandDistanceBlocks", 384);
     private static final int VILLAGE_MOUNTAIN_AVG_HEIGHT_ABOVE_SEA = 38;
     private static final int VILLAGE_MOUNTAIN_RELIEF = 22;
     private static final int LUSH_CAVE_SURFACE_MARKER_TRIES = Integer.getInteger("ukgeo.lushCaveSurfaceMarkerTries", 10);
@@ -642,14 +643,15 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         if (!distance.found()) {
             return RiverShape.none(originalSurfaceY);
         }
-        int waterRadius = Math.max(riverWidenRadius, distance.halfWidth());
-        int bankRadius = waterRadius + 2;
+        int waterRadius = Math.max(riverWidenRadius, distance.halfWidth()) + RIVER_SHELF_REMOVAL_EXTRA_WIDTH;
+        int bankRadius = waterRadius;
         if (distance.blocks() > bankRadius) {
             return RiverShape.none(originalSurfaceY);
         }
         int vegetationClass = vegetationClassAt(data, x, z, cache);
         double slope = localSurfaceSlope(heightWindow, x, z, originalSurfaceY, cache);
-        boolean riverWater = riverLayerValue(data, x, z, cache) > 0 && supportedRiverWater(data, x, z, cache);
+        boolean riverWater = distance.blocks() <= waterRadius
+            && (riverLayerValue(data, x, z, cache) > 0 || supportedRiverWater(data, x, z, cache));
         return computeRiverShape(data, heightWindow, x, z, originalSurfaceY, minBuildY, cache, riverWater, distance, waterRadius, bankRadius, vegetationClass, slope);
     }
 
@@ -675,11 +677,13 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
                 ? nearestRiverBank(data, x, z, Math.max(4, waterRadius + 5), cache)
                 : Math.max(1.0, waterRadius + 0.5 - distance.blocks());
             int depth = riverDepth(data, heightWindow, x, z, edgeDistance, slope, waterRadius, riverOrder, cache);
-            int bed = riverBedY(originalSurfaceY, minBuildY, depth);
             double flowStrength = Math.clamp((waterRadius + 0.5 - distance.blocks()) / Math.max(1.0, waterRadius + 0.5), 0.0, 1.0);
             BlockState floor = waterFloorMaterial(x, z, vegetationClass, slope, true, flowStrength, depth, edgeDistance);
-            int waterSurface = riverWaterSurfaceY(data, heightWindow, x, z, originalSurfaceY, bed, waterRadius, slope, cache);
-            bed = Math.max(minBuildY + 1, Math.min(bed, waterSurface - Math.max(1, depth - 1)));
+            int provisionalBed = riverBedY(originalSurfaceY, minBuildY, depth);
+            int waterSurface = riverWaterSurfaceY(data, heightWindow, x, z, originalSurfaceY, provisionalBed, waterRadius, slope, cache);
+            int bed = Math.max(minBuildY + 1, waterSurface - depth);
+            waterSurface = riverWaterSurfaceY(data, heightWindow, x, z, originalSurfaceY, bed, waterRadius, slope, cache);
+            bed = Math.max(minBuildY + 1, waterSurface - depth);
             return new RiverShape(true, true, bed, waterSurface, floor);
         }
         int bankDrop = riverBankDrop(distance.blocks(), waterRadius, bankRadius);
@@ -715,17 +719,17 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
             }
         } else if (isRiverArtifactFreshwater(data, x, z, cache)) {
             RiverDistance distance = nearestRiver(data, x, z, riverSearchRadius(data) + 2, cache);
-            int waterRadius = Math.max(riverWidenRadius, distance.halfWidth());
+            int waterRadius = Math.max(riverWidenRadius, distance.halfWidth()) + RIVER_SHELF_REMOVAL_EXTRA_WIDTH;
             int vegetation = vegetationClassAt(data, x, z, cache);
             double slope = localSurfaceSlope(heightWindow, x, z, originalSurfaceY, cache);
-            shape = computeRiverShape(data, heightWindow, x, z, originalSurfaceY, minBuildY, cache, true, distance, waterRadius, waterRadius + 2, vegetation, slope);
+            shape = computeRiverShape(data, heightWindow, x, z, originalSurfaceY, minBuildY, cache, true, distance, waterRadius, waterRadius, vegetation, slope);
         } else {
             int waterSurface = lakeWaterSurfaceY(data, heightWindow, x, z, originalSurfaceY, cache);
             double edgeDistance = nearestLakeEdge(data, x, z, LAKE_EDGE_SEARCH_RADIUS, cache);
             int depth = lakeDepth(data, heightWindow, x, z, cache);
             int bed = Math.max(minBuildY + 1, waterSurface - depth);
             double slope = localSurfaceSlope(heightWindow, x, z, originalSurfaceY, cache);
-            BlockState floor = waterFloorMaterial(x, z, vegetationClass, slope, false, 0.0, depth, edgeDistance);
+            BlockState floor = stillWaterFloorMaterial(depth);
             shape = new RiverShape(true, true, bed, waterSurface, floor);
         }
         if (cache != null) {
@@ -813,7 +817,7 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         if (terrainSurfaceY >= originalSurfaceY) {
             return RiverShape.none(originalSurfaceY);
         }
-        BlockState floor = waterFloorMaterial(x, z, vegetationClass, slope, false, 0.0, 1, lake.blocks());
+        BlockState floor = stillWaterFloorMaterial(1);
         return new RiverShape(false, true, terrainSurfaceY, lake.waterSurfaceY(), floor);
     }
 
@@ -825,20 +829,8 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
                 return cached;
             }
         }
-        double total = 0.0;
-        int count = 0;
-        for (int dz = -LAKE_DEPTH_SMOOTHING_RADIUS; dz <= LAKE_DEPTH_SMOOTHING_RADIUS; dz++) {
-            for (int dx = -LAKE_DEPTH_SMOOTHING_RADIUS; dx <= LAKE_DEPTH_SMOOTHING_RADIUS; dx++) {
-                if (!isEffectiveLakeCell(data, x + dx, z + dz, cache)) {
-                    continue;
-                }
-                total += rawLakeDepth(data, heightWindow, x + dx, z + dz, cache);
-                count++;
-            }
-        }
-        double smoothedDepth = count == 0 ? rawLakeDepth(data, heightWindow, x, z, cache) : total / count;
         double edgeDistance = nearestLakeEdge(data, x, z, LAKE_EDGE_SEARCH_RADIUS, cache);
-        int depth = Math.round((float) smoothedDepth);
+        int depth = lakeDepthForOpenWaterWidth(edgeDistance * 2.0);
         if (edgeDistance <= 1.5) {
             depth = 1;
         } else if (edgeDistance <= 2.5) {
@@ -1065,42 +1057,6 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         return found;
     }
 
-    private double rawLakeDepth(RuntimeData data, HeightTileWindow heightWindow, int x, int z, WaterShapeCache cache) {
-        long key = cacheKey(x, z);
-        if (cache != null) {
-            Double cached = cache.rawLakeDepths.get(key);
-            if (cached != null) {
-                return cached;
-            }
-        }
-        double edgeDistance = nearestLakeEdge(data, x, z, LAKE_EDGE_SEARCH_RADIUS, cache);
-        double maxDepth = lakeMaxDepth(edgeDistance);
-        double shelfBlocks = Math.min(1.6, Math.max(0.85, edgeDistance * 0.03));
-        double depth;
-        if (edgeDistance <= shelfBlocks) {
-            double t = edgeDistance / Math.max(1.0, shelfBlocks);
-            depth = 1.0 + 0.08 * t;
-        } else {
-            double span = Math.max(5.0, edgeDistance + 4.0);
-            double u = Math.clamp((edgeDistance - shelfBlocks) / span, 0.0, 1.0);
-            double curved = Math.pow(smoothstep(u), 0.68);
-            depth = 1.0 + curved * (maxDepth - 1.0);
-        }
-        if (edgeDistance > 7.0) {
-            double centerWeight = smoothstep((edgeDistance - 7.0) / 12.0);
-            depth = lerp(depth, maxDepth, centerWeight * 0.36);
-        }
-        if (edgeDistance > 13.0) {
-            double baseWeight = smoothstep((edgeDistance - 13.0) / 12.0);
-            depth = lerp(depth, maxDepth, baseWeight * 0.24);
-        }
-        depth = Math.clamp(depth, 1.0, maxDepth);
-        if (cache != null) {
-            cache.rawLakeDepths.put(key, depth);
-        }
-        return depth;
-    }
-
     private int riverLakeMouthDepth(RuntimeData data, HeightTileWindow heightWindow, int x, int z, double lakeEdgeDistance, WaterShapeCache cache) {
         if (data.riverLayer == null || lakeEdgeDistance > 5.5) {
             return 1;
@@ -1129,13 +1085,35 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         if (edgeDistance <= 8.0) {
             return 6;
         }
-        if (edgeDistance <= 12.0) {
+        if (edgeDistance <= 11.0) {
             return 8;
         }
-        if (edgeDistance <= 18.0) {
+        if (edgeDistance <= 14.0) {
             return 10;
         }
-        if (edgeDistance <= 26.0) {
+        if (edgeDistance <= 17.0) {
+            return 12;
+        }
+        return 14;
+    }
+
+    private int lakeDepthForOpenWaterWidth(double openWaterWidth) {
+        if (openWaterWidth <= 5.0) {
+            return 2;
+        }
+        if (openWaterWidth <= 10.0) {
+            return 4;
+        }
+        if (openWaterWidth <= 16.0) {
+            return 6;
+        }
+        if (openWaterWidth <= 24.0) {
+            return 8;
+        }
+        if (openWaterWidth <= 36.0) {
+            return 10;
+        }
+        if (openWaterWidth <= 52.0) {
             return 12;
         }
         return 14;
@@ -1248,49 +1226,25 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     }
 
     private BlockState waterFloorMaterial(int x, int z, int vegetationClass, double slope, boolean river, double flowStrength, int depth, double edgeDistance) {
-        double coarse = (river ? 0.2 + flowStrength * 0.45 : 0.0) + Math.clamp(slope / 1.8, 0.0, 0.35);
-        double organic = 0.0;
-        double sandy = 0.0;
-        double rocky = Math.clamp(slope / 2.4, 0.0, 0.45);
-
-        switch (vegetationClass) {
-            case VEGETATION_WETLAND, VEGETATION_FRESHWATER -> organic += 0.55;
-            case VEGETATION_BROADLEAF_WOODLAND, VEGETATION_CONIFER_WOODLAND -> organic += 0.35;
-            case VEGETATION_ARABLE, VEGETATION_IMPROVED_GRASSLAND, VEGETATION_NEUTRAL_GRASSLAND -> organic += 0.18;
-            case VEGETATION_HEATH, VEGETATION_ACID_GRASSLAND, VEGETATION_CALCAREOUS_GRASSLAND -> sandy += 0.35;
-            case VEGETATION_ROCKY -> rocky += 0.55;
-            default -> sandy += 0.15;
-        }
-
-        double sedimentZone = river ? valueNoise(x, z, 0.042, 0x534544494d454e54L) : 0.0;
-        double secondaryZone = river ? valueNoise(x, z, 0.061, 0x464c4f4f52L) : 0.0;
         if (!river) {
-            sandy += depth >= 2 && edgeDistance <= 2.35 ? 0.12 : 0.0;
-            organic += depth >= 3 ? 0.18 : 0.0;
-            organic += depth >= 5 ? 0.2 : 0.0;
-            coarse *= edgeDistance <= 2.5 ? 0.9 : 0.55;
-            sandy *= depth <= 1 ? 0.0 : 0.45;
-            rocky *= 0.7;
+            return stillWaterFloorMaterial(depth);
         }
-        if (rocky + coarse > 0.85 && sedimentZone > -0.35) {
-            return secondaryZone > 0.25 ? Blocks.STONE.defaultBlockState() : Blocks.GRAVEL.defaultBlockState();
+        if (slope > 2.0 || vegetationClass == VEGETATION_ROCKY) {
+            return Blocks.GRAVEL.defaultBlockState();
         }
-        if (coarse > 0.5 && sedimentZone > -0.55) {
-            return secondaryZone > -0.1 ? Blocks.GRAVEL.defaultBlockState() : Blocks.COARSE_DIRT.defaultBlockState();
+        if (flowStrength > 0.78 && depth >= 4) {
+            return Blocks.GRAVEL.defaultBlockState();
         }
-        if (sandy > organic && sedimentZone > -0.25) {
-            return secondaryZone > 0.45 ? Blocks.GRAVEL.defaultBlockState() : Blocks.SAND.defaultBlockState();
+        if (vegetationClass == VEGETATION_HEATH
+            || vegetationClass == VEGETATION_ACID_GRASSLAND
+            || vegetationClass == VEGETATION_CALCAREOUS_GRASSLAND) {
+            return Blocks.DIRT.defaultBlockState();
         }
-        if (organic > 0.45) {
-            if (depth >= 4 || sedimentZone > 0.35) {
-                return Blocks.CLAY.defaultBlockState();
-            }
-            return secondaryZone > -0.35 ? Blocks.MUD.defaultBlockState() : Blocks.DIRT.defaultBlockState();
-        }
-        if (depth >= 3 && sedimentZone > 0.15) {
-            return Blocks.CLAY.defaultBlockState();
-        }
-        return secondaryZone > 0.35 ? Blocks.COARSE_DIRT.defaultBlockState() : Blocks.DIRT.defaultBlockState();
+        return Blocks.DIRT.defaultBlockState();
+    }
+
+    private static BlockState stillWaterFloorMaterial(int depth) {
+        return depth >= 4 ? Blocks.CLAY.defaultBlockState() : Blocks.DIRT.defaultBlockState();
     }
 
     private static double valueNoise(int x, int z, double frequency, long salt) {
@@ -1398,7 +1352,7 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     }
 
     RiverSearchIndex buildRiverSearchIndex(RuntimeData data, int chunkMinX, int chunkMinZ) {
-        if (data.riverLayer == null) {
+        if (!ENABLE_RIVER_SEARCH_INDEX || data.riverLayer == null) {
             return RiverSearchIndex.empty();
         }
         int radius = LAKE_ARTIFACT_SCAN_RADIUS + riverSearchRadius(data) + 2;
@@ -1520,7 +1474,6 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         private final Map<Long, RiverShape> shapes = new HashMap<>();
         private final Map<Long, Integer> lakeDepths = new HashMap<>();
         private final Map<Long, Integer> lakeWaterSurfaces = new HashMap<>();
-        private final Map<Long, Double> rawLakeDepths = new HashMap<>();
         private final Map<Long, Integer> riverDepths = new HashMap<>();
         private final Map<Long, Integer> vegetationValues = new HashMap<>();
         private final Map<Long, Integer> riverValues = new HashMap<>();
@@ -1567,6 +1520,10 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
 
         boolean covers(int x, int z, int radius) {
             return x - radius >= minX && x + radius <= maxX && z - radius >= minZ && z + radius <= maxZ;
+        }
+
+        int sampleCount() {
+            return samples.size();
         }
 
         boolean isEmpty() {
@@ -1853,7 +1810,8 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         int bestHalfWidth = 0;
         RiverSearchIndex riverSearchIndex = cache == null ? RiverSearchIndex.empty() : cache.riverSearchIndex;
         int radiusSquared = radius * radius;
-        if (!riverSearchIndex.isEmpty() && riverSearchIndex.covers(x, z, radius)) {
+        int directScanCost = Math.max(1, radius * radius * 3);
+        if (!riverSearchIndex.isEmpty() && riverSearchIndex.covers(x, z, radius) && riverSearchIndex.sampleCount() <= directScanCost) {
             for (RiverSample sample : riverSearchIndex.samples) {
                 int dx = sample.x() - x;
                 int dz = sample.z() - z;

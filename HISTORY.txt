@@ -1,0 +1,234 @@
+HISTORY.txt — Cursor chat export / session context
+================================================
+Exported: 2026-07-26 (evening)
+Workspace: /media/zenyfh/ssd/mapcreator
+Topic: UK world-data rebuild — rivers interrupted by SSD filesystem issues; whether we can resume
+
+NOTE
+----
+The IDE chat UI may not show prior messages. This file reconstructs the conversation
+and technical state from this session plus leftover logs/terminal monitors.
+
+
+================================================================================
+CHAT TURN 1 — User
+================================================================================
+
+User reported they could not see chat history anymore, but assumed it was still
+there. They posted the result of a filesystem check and asked whether rivers
+could safely continue from current processed data, then finish the rest:
+
+  zenyfh@zenyfh:~$ sudo e2fsck -f /dev/sdb1
+  e2fsck 1.47.2 (1-Jan-2025)
+  ssd: recovering journal
+  Pass 1: Checking inodes, blocks, and sizes
+  Pass 2: Checking directory structure
+  Pass 3: Checking directory connectivity
+  Pass 4: Checking reference counts
+  Pass 5: Checking group summary information
+  ssd: 418540/14655488 files (0.1% non-contiguous), 28576277/58607611 blocks
+  zenyfh@zenyfh:~$
+
+Question (paraphrased): Can we safely continue rivers from the current processed
+data and then finish off the rest?
+
+
+================================================================================
+CHAT TURN 1 — Assistant findings / answer
+================================================================================
+
+Verdict:
+  - e2fsck: CLEAN. Journal recovered; SSD OK to use again.
+  - Rebuild overall: YES, safe to continue from rivers onward.
+  - Mid-river memmap resume: NOT supported by current code without a small change.
+
+Interrupted rebuild directory:
+  /media/zenyfh/ssd/mapcreator/tools/ukgeo-tools/uk_world_data_gb.rebuild.234631
+
+Resume helper already present from prior session:
+  /tmp/ukgeo-resume-from-rivers.sh
+  /tmp/ukgeo-resume-from-rivers.log
+
+Pipeline status in rebuild.234631:
+
+  DONE:
+    - height
+    - make-ore-tiles (all layers)
+    - apply-ore-image-overlay (iron)
+    - make-coal-resource-tiles
+    - make-gold-occurrence-tiles
+    - apply-named-svg-ore-overlays (ROI coal/zinc/copper)
+    - make-surface-geology-tiles -> geology/
+
+  IN PROGRESS WHEN IT DIED:
+    - make-river-tiles
+      Source: ../../data/oprvrs_gpkg_gb_ie.zip (via config RIVERS_ZIP)
+      Command was approximately:
+        ukgeo make-river-tiles \
+          --rivers <RIVERS_ZIP> \
+          --manifest .../uk_world_data_gb.rebuild.234631/manifest.json \
+          --out .../uk_world_data_gb.rebuild.234631 \
+          --width-metres 220
+      Progress from log: got to ~94% — 324451 / 345610 edges
+      Last log activity around 2026-07-26 ~05:25–05:35
+      Process had been stuck in uninterruptible disk wait (Dl / folio_wait_bit)
+      before/during filesystem trouble — consistent with SSD journal recovery.
+
+  NOT STARTED:
+    - river tile write-out (water/*)
+    - make-vegetation-tiles
+    - make-animal-habitat-tiles
+    - pack-tile-regions (if enabled)
+    - validate-tiles + stats
+    - promote rebuild.234631 -> uk_world_data_gb
+
+Orphaned river memmaps still on disk (~32 GB total, 6.4G each):
+  .rivers-1i1xcj60/rivers.u1
+  .river-order-h9df9vke/river-order.u1
+  .river-half-width-l8mgrano/river-half-width.u1
+  .river-preview-radius-w6tvypsy/river-preview-radius.u1
+  .river-burn-vra0610x/river-burn.u1
+
+World size from rebuild manifest: 68462 x 100000 cells (each .u1 = 6,846,200,000 bytes).
+manifest.json does NOT yet contain a "rivers" key (rivers step never finished).
+No water/ directory in the rebuild tree yet.
+
+Important implementation detail (why naive resume fails):
+  tools/ukgeo-tools/src/ukgeo/raster_memory.py U8Raster always creates a NEW
+  TemporaryDirectory and opens memmaps with mode "w+", then zeros them.
+  So re-running make-river-tiles ignores the orphaned partial memmaps.
+
+Batching detail (why 324451 is not a safe reopen checkpoint):
+  RIVER_RASTER_BATCH_SIZE = 25000
+  Disk is only guaranteed after each full 25k-edge burn batch.
+  Last solid flushed checkpoint ≈ 300000 edges (not 324451).
+  Edges 300001–324451 were likely still buffered / mid-burn when the process died.
+
+Options offered to user:
+  1) Restart /tmp/ukgeo-resume-from-rivers.sh as-is
+     - Safest, no code changes
+     - Keeps all finished earlier layers
+     - Restarts rivers from 0%, then vegetation → animals → validate → promote
+  2) Add a short resume path that reopens existing memmaps and skips first
+     300000 edges (~87% of river raster work saved), then finish the rest
+
+User had not yet chosen option 1 vs 2 before Turn 2.
+
+
+================================================================================
+CHAT TURN 2 — User
+================================================================================
+
+User still cannot see this chat's messages. Asked to export the context and chat
+history to a file named HISTORY.txt.
+
+
+================================================================================
+CHAT TURN 2 — Assistant
+================================================================================
+
+Created this file: /media/zenyfh/ssd/mapcreator/HISTORY.txt
+
+
+================================================================================
+BACKGROUND CONTEXT (from prior session artifacts, not shown in UI)
+================================================================================
+
+Rebuild script:
+  tools/ukgeo-tools/rebuild_uk_world_data_gb.sh
+  Creates TMP_ROOT="$OUT_ROOT.rebuild.$$" then runs full pipeline.
+  On EXIT trap, incomplete TMP_ROOT is normally deleted — but PID 234631's
+  directory survived because the process/FS died rather than clean trap cleanup.
+
+Existing live dataset (older/partial, NOT the interrupted Ireland-inclusive rebuild):
+  tools/ukgeo-tools/uk_world_data_gb/
+  water/rivers etc. only had ~61 tiles each (~13MB) — leftover from an earlier
+  smaller run; do not confuse with rebuild.234631 progress.
+
+Resume script contents (summary):
+  cd tools/ukgeo-tools
+  load config.yml rebuild section
+  TMP_ROOT=uk_world_data_gb.rebuild.234631
+  run make-river-tiles (width 220m)
+  run make-vegetation-tiles
+  run make-animal-habitat-tiles
+  optionally pack-tile-regions
+  validate-tiles + stats
+  mv existing uk_world_data_gb -> backup
+  mv TMP_ROOT -> uk_world_data_gb
+
+Log note from earlier monitor:
+  tqdm freezes during each 25k-edge burn batch (zeros + rasterize 4x 6.4GB
+  memmaps). Progress bar can look stuck for many minutes while disk I/O continues.
+
+
+================================================================================
+CHAT TURN 3 — User
+================================================================================
+
+Chose option B: implement memmap resume from edge 300000, then finish pipeline.
+
+
+================================================================================
+CHAT TURN 3 — Assistant
+================================================================================
+
+Implemented:
+  - U8Raster(resume_path=...) reopens orphan .u1 memmaps in r+ without zeroing
+  - Resumed memmaps are preserved on failure; deleted only on success
+  - find_memmap_path() auto-discovers unique .{label}-*/{label}.u1 under --out
+  - make-river-tiles --resume-memmaps --skip-edges N (N must be multiple of 25000)
+  - /tmp/ukgeo-resume-from-rivers.sh updated to use skip-edges=300000
+
+Started background pipeline:
+  nohup /tmp/ukgeo-resume-from-rivers.sh
+  log: /tmp/ukgeo-resume-from-rivers.log
+  nohup: /tmp/ukgeo-resume-from-rivers.nohup.out
+
+Confirmed live: tqdm started near 300000/345610 and entered burn I/O.
+
+
+================================================================================
+CHAT TURN 4 — User
+================================================================================
+
+Had to run fsck fix again; asked to continue from where it left off.
+
+
+================================================================================
+CHAT TURN 4 — Assistant findings
+================================================================================
+
+Resume-from-rivers progressed further before the next I/O failure:
+
+  DONE:
+    - make-river-tiles (memmap resume)
+    - make-vegetation-tiles
+    - make-animal-habitat-tiles
+
+  FAILED AT:
+    - pack-tile-regions — OSError Errno 5 Input/output error while reading a raw tile
+      (filesystem trouble again; typer/rich_utils.py also hit I/O error)
+
+  Partial pack state in rebuild.234631:
+    Already packed (raw deleted, regions present):
+      height, geology/surface, vegetation, biome_regions, water/rivers
+    Partial:
+      water/river_order (raw still present + some regions)
+    Still raw:
+      water/river_half_width, water/river_preview_radius,
+      all ore_layers, all animal_habitats
+
+  Important: naive re-run of pack-tile-regions would DESTROY already-packed
+  layers (missing raws read as zero/nodata → empty regions overwrite good ones).
+
+  Fix applied in tools/ukgeo-tools/src/ukgeo/tiles.py:
+    pack_layer_regions skips rewrite when raw tiles are gone and region files
+    already exist; only refreshes region metadata.
+  Test: tests/test_tiles.py::test_pack_manifest_regions_skips_already_packed_layers
+
+  New resume script:
+    /tmp/ukgeo-resume-from-pack.sh
+    log: /tmp/ukgeo-resume-from-pack.log
+    nohup: /tmp/ukgeo-resume-from-pack.nohup.out
+  Continues: pack → validate → stats → promote rebuild.234631 → uk_world_data_gb

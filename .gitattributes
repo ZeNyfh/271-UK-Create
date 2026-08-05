@@ -5,6 +5,7 @@
 data/*.zip filter=lfs diff=lfs merge=lfs -text
 data/*.zip.part* filter=lfs diff=lfs merge=lfs -text
 data/*.geojson filter=lfs diff=lfs merge=lfs -text
+data/egdi_wfs_cache/*.geojson filter=lfs diff=lfs merge=lfs -text
 /tools/ukgeo-tools/uk_world_data_gb/hoverpreviews/layers/height.png filter=lfs diff=lfs merge=lfs -text
 /tools/ukgeo-tools/uk_world_data_gb/hoverpreviews/samples/height_rgb.png filter=lfs diff=lfs merge=lfs -text
 /tools/ukgeo-tools/uk_world_data_gb/hoverpreviews/samples/height_u16.png filter=lfs diff=lfs merge=lfs -text
@@ -82,5 +83,14 @@ data/*.geojson filter=lfs diff=lfs merge=lfs -text
 /tools/ukgeo-tools/uk_world_data_gb/vegetation/regions/002_005.u8rg filter=lfs diff=lfs merge=lfs -text
 /tools/ukgeo-tools/uk_world_data_gb/vegetation/regions/003_004.u8rg filter=lfs diff=lfs merge=lfs -text
 /tools/ukgeo-tools/uk_world_data_gb/vegetation/regions/003_005.u8rg filter=lfs diff=lfs merge=lfs -text
+/data/clc_wms_cache/21679634f3ee303ae819fade54374b0a2fcf935d341cd9fcc133f4a60e0e88c1.png filter=lfs diff=lfs merge=lfs -text
+/data/clc_wms_cache/4a0d602899863602feca29b813452e05db23151d22c2f09aa371e5f69c979fb2.png filter=lfs diff=lfs merge=lfs -text
+/data/clc_wms_cache/68cd82c7e6afa62addf1bd317ec6a4787723c1821c59f2d7054ed37a9da66ce6.png filter=lfs diff=lfs merge=lfs -text
+/data/clc_wms_cache/774220af9a84f6f678d7d4bbdd14567d084040c304cd9a2901ed1676d515cc9a.png filter=lfs diff=lfs merge=lfs -text
+/data/clc_wms_cache/88efc887c42aa0cdc242639f64c15799c024655d765d3a5b43be1cfd82d2e559.png filter=lfs diff=lfs merge=lfs -text
+/data/clc_wms_cache/8ea91a1f5f669ceb7844cde0842d18eb92684ab67c692971c812040ee1ea9b85.png filter=lfs diff=lfs merge=lfs -text
+/data/clc_wms_cache/acd10028b1cc1fe13132c5664c3a47dec07812f0b0346836ee76673fe2d67430.png filter=lfs diff=lfs merge=lfs -text
+/data/clc_wms_cache/ae426a65779d8df9821ab7ca403abd5036f0b9558e2189bc41043e9833eab12e.png filter=lfs diff=lfs merge=lfs -text
+/data/clc_wms_cache/bcdf3d29733b9723ca0ae89c372a36dec047f98ae146a36b0f1f5b440fd94957.png filter=lfs diff=lfs merge=lfs -text
 **/uk_world_data_gb/hoverpreviews/** filter=lfs diff=lfs merge=lfs -text
 **/uk_world_data/hoverpreviews/** filter=lfs diff=lfs merge=lfs -text

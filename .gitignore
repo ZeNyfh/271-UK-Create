@@ -81,3 +81,4 @@ _site/
 /.graphify-test-kubejs
 /.graphify-runs
 /.graphify-staging
+data/uk_world_data_gb.zip

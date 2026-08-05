@@ -1,0 +1,937 @@
+{
+  "format": "uk-raster-tiles-v1",
+  "tile_size": 512,
+  "world": {
+    "width": 68462,
+    "depth": 100000,
+    "padded_width": 68608,
+    "padded_depth": 100352,
+    "minecraft_min_x": -52100,
+    "minecraft_min_z": -73850,
+    "minecraft_max_x": 16361,
+    "minecraft_max_z": 26149
+  },
+  "georeferencing": {
+    "crs": "EPSG:27700",
+    "bng_min_easting": -220000.0,
+    "bng_min_northing": 0.0,
+    "bng_max_easting": 670000.0,
+    "bng_max_northing": 1300000.0,
+    "note": "Final map cells are Minecraft x/z blocks resampled from the source GIS extent."
+  },
+  "axis_scale": {
+    "x": 2.0,
+    "z": 2.0,
+    "note": "Multipliers applied to the historic UKGeo horizontal and vertical block scales before raster resampling."
+  },
+  "height": {
+    "path": "height",
+    "extension": ".r16",
+    "dtype": "int16_le",
+    "unit": "decimetres",
+    "scale_to_metres": 0.1,
+    "nodata": -32768,
+    "sea_level_y": 64,
+    "storage": "regions",
+    "region_path": "height/regions",
+    "region_extension": ".r16rg",
+    "region_tiles": 8,
+    "missing_tile": -32768
+  },
+  "ore_layers": {
+    "coal": {
+      "path": "ores/coal",
+      "extension": ".u8",
+      "dtype": "uint8",
+      "min": 0,
+      "max": 255,
+      "storage": "regions",
+      "region_path": "ores/coal/regions",
+      "region_extension": ".u8rg",
+      "region_tiles": 8,
+      "missing_tile": 0
+    },
+    "iron": {
+      "path": "ores/iron",
+      "extension": ".u8",
+      "dtype": "uint8",
+      "min": 0,
+      "max": 255,
+      "storage": "regions",
+      "region_path": "ores/iron/regions",
+      "region_extension": ".u8rg",
+      "region_tiles": 8,
+      "missing_tile": 0
+    },
+    "copper": {
+      "path": "ores/copper",
+      "extension": ".u8",
+      "dtype": "uint8",
+      "min": 0,
+      "max": 255,
+      "storage": "regions",
+      "region_path": "ores/copper/regions",
+      "region_extension": ".u8rg",
+      "region_tiles": 8,
+      "missing_tile": 0
+    },
+    "zinc": {
+      "path": "ores/zinc",
+      "extension": ".u8",
+      "dtype": "uint8",
+      "min": 0,
+      "max": 255,
+      "storage": "regions",
+      "region_path": "ores/zinc/regions",
+      "region_extension": ".u8rg",
+      "region_tiles": 8,
+      "missing_tile": 0
+    },
+    "gold": {
+      "path": "ores/gold",
+      "extension": ".u8",
+      "dtype": "uint8",
+      "min": 0,
+      "max": 255,
+      "storage": "regions",
+      "region_path": "ores/gold/regions",
+      "region_extension": ".u8rg",
+      "region_tiles": 8,
+      "missing_tile": 0
+    },
+    "tuff": {
+      "path": "ores/tuff",
+      "extension": ".u8",
+      "dtype": "uint8",
+      "min": 0,
+      "max": 255,
+      "storage": "regions",
+      "region_path": "ores/tuff/regions",
+      "region_extension": ".u8rg",
+      "region_tiles": 8,
+      "missing_tile": 0
+    },
+    "crimsite": {
+      "path": "ores/crimsite",
+      "extension": ".u8",
+      "dtype": "uint8",
+      "min": 0,
+      "max": 255,
+      "storage": "regions",
+      "region_path": "ores/crimsite/regions",
+      "region_extension": ".u8rg",
+      "region_tiles": 8,
+      "missing_tile": 0
+    },
+    "limestone": {
+      "path": "ores/limestone",
+      "extension": ".u8",
+      "dtype": "uint8",
+      "min": 0,
+      "max": 255,
+      "storage": "regions",
+      "region_path": "ores/limestone/regions",
+      "region_extension": ".u8rg",
+      "region_tiles": 8,
+      "missing_tile": 0
+    },
+    "asurine": {
+      "path": "ores/asurine",
+      "extension": ".u8",
+      "dtype": "uint8",
+      "min": 0,
+      "max": 255,
+      "storage": "regions",
+      "region_path": "ores/asurine/regions",
+      "region_extension": ".u8rg",
+      "region_tiles": 8,
+      "missing_tile": 0
+    },
+    "veridium": {
+      "path": "ores/veridium",
+      "extension": ".u8",
+      "dtype": "uint8",
+      "min": 0,
+      "max": 255,
+      "storage": "regions",
+      "region_path": "ores/veridium/regions",
+      "region_extension": ".u8rg",
+      "region_tiles": 8,
+      "missing_tile": 0
+    },
+    "smooth_basalt": {
+      "path": "ores/smooth_basalt",
+      "extension": ".u8",
+      "dtype": "uint8",
+      "min": 0,
+      "max": 255,
+      "storage": "regions",
+      "region_path": "ores/smooth_basalt/regions",
+      "region_extension": ".u8rg",
+      "region_tiles": 8,
+      "missing_tile": 0
+    },
+    "andesite": {
+      "path": "ores/andesite",
+      "extension": ".u8",
+      "dtype": "uint8",
+      "min": 0,
+      "max": 255,
+      "storage": "regions",
+      "region_path": "ores/andesite/regions",
+      "region_extension": ".u8rg",
+      "region_tiles": 8,
+      "missing_tile": 0
+    },
+    "diorite": {
+      "path": "ores/diorite",
+      "extension": ".u8",
+      "dtype": "uint8",
+      "min": 0,
+      "max": 255,
+      "storage": "regions",
+      "region_path": "ores/diorite/regions",
+      "region_extension": ".u8rg",
+      "region_tiles": 8,
+      "missing_tile": 0
+    },
+    "granite": {
+      "path": "ores/granite",
+      "extension": ".u8",
+      "dtype": "uint8",
+      "min": 0,
+      "max": 255,
+      "storage": "regions",
+      "region_path": "ores/granite/regions",
+      "region_extension": ".u8rg",
+      "region_tiles": 8,
+      "missing_tile": 0
+    },
+    "ochrum": {
+      "path": "ores/ochrum",
+      "extension": ".u8",
+      "dtype": "uint8",
+      "min": 0,
+      "max": 255,
+      "storage": "regions",
+      "region_path": "ores/ochrum/regions",
+      "region_extension": ".u8rg",
+      "region_tiles": 8,
+      "missing_tile": 0
+    },
+    "calcite": {
+      "path": "ores/calcite",
+      "extension": ".u8",
+      "dtype": "uint8",
+      "min": 0,
+      "max": 255,
+      "storage": "regions",
+      "region_path": "ores/calcite/regions",
+      "region_extension": ".u8rg",
+      "region_tiles": 8,
+      "missing_tile": 0
+    },
+    "scoria": {
+      "path": "ores/scoria",
+      "extension": ".u8",
+      "dtype": "uint8",
+      "min": 0,
+      "max": 255,
+      "storage": "regions",
+      "region_path": "ores/scoria/regions",
+      "region_extension": ".u8rg",
+      "region_tiles": 8,
+      "missing_tile": 0
+    }
+  },
+  "height_processing": {
+    "source": "OS Terrain 50",
+    "resampling": "bilinear",
+    "smoothing": "light",
+    "deterrace": true
+  },
+  "height_cleanup": {
+    "bgs_land_mask": {
+      "source": "../../data/BGS_Geology_625k_bedrock_gpkg.zip",
+      "layers": [
+        "625k_V5_BEDROCK_Geology",
+        "625k_V5_SUPERFICIAL_Geology"
+      ],
+      "buffer_metres": 0.0,
+      "max_height_metres": 30.0,
+      "preserve_height_overlays": true,
+      "preserved_overlay_cells": 0,
+      "removed_cells": 321436225,
+      "note": "Near-sea-level cells outside BGS land polygons were converted to height nodata/ocean."
+    }
+  },
+  "height_overlays": [
+    {
+      "source": "Copernicus DEM COP30 GeoTIFF",
+      "archive": "rasters_COP30.tar.gz",
+      "target": "ireland-iom",
+      "resampling": "bilinear",
+      "smoothing": "light",
+      "deterrace": true,
+      "protect_mainland_gb": true,
+      "minecraft_y_offset": 0.0,
+      "minecraft_height_scale": 0.18,
+      "height_offset_decimetres": 0
+    }
+  ],
+  "ore_image_overlays": [
+    {
+      "ore": "iron",
+      "source": "../../data/uk_iron_ore_reference_overlay.svg",
+      "score": 180,
+      "red_min": 180,
+      "green_max": 120,
+      "blue_max": 120,
+      "fit": "outline",
+      "svg_raster_scale": 4,
+      "placement": {
+        "mode": "control_points",
+        "matrix": [
+          [
+            16.695552085128238,
+            -1.121076145055913,
+            15189.015468333255
+          ],
+          [
+            0.7872721334959563,
+            17.945375268736164,
+            23731.48011111098
+          ]
+        ],
+        "inverse_matrix": [
+          [
+            0.05972026706365427,
+            0.0037308201014927167,
+            -995.6299432395451
+          ],
+          [
+            -0.002619956471239767,
+            0.0555609907493023,
+            -1278.749987552668
+          ]
+        ]
+      },
+      "note": "Image red shapes were max-merged into the existing ore score tiles."
+    },
+    {
+      "kind": "named_svg_paths",
+      "ore": "coal",
+      "source": "../../data/SVGS/Ores Republic of Ireland export.svg",
+      "svg_path_id": "Coal",
+      "score": 180,
+      "fit": "ireland-reference",
+      "svg_raster_scale": 1,
+      "note": "Named SVG path was max-merged into the existing ore score tiles."
+    },
+    {
+      "kind": "named_svg_paths",
+      "ore": "zinc",
+      "source": "../../data/SVGS/Ores Republic of Ireland export.svg",
+      "svg_path_id": "Zinc",
+      "score": 180,
+      "fit": "ireland-reference",
+      "svg_raster_scale": 1,
+      "note": "Named SVG path was max-merged into the existing ore score tiles."
+    },
+    {
+      "kind": "named_svg_paths",
+      "ore": "copper",
+      "source": "../../data/SVGS/Ores Republic of Ireland export.svg",
+      "svg_path_id": "Copper",
+      "score": 180,
+      "fit": "ireland-reference",
+      "svg_raster_scale": 1,
+      "note": "Named SVG path was max-merged into the existing ore score tiles."
+    }
+  ],
+  "surface_geology": {
+    "path": "geology/surface",
+    "extension": ".u8",
+    "dtype": "uint8",
+    "classes": {
+      "0": {
+        "name": "default",
+        "block": "minecraft:stone",
+        "fallback_block": "minecraft:stone",
+        "color": "#5f625d"
+      },
+      "1": {
+        "name": "chalk",
+        "block": "minecraft:calcite",
+        "fallback_block": "minecraft:calcite",
+        "color": "#eee8cf"
+      },
+      "2": {
+        "name": "limestone",
+        "block": "create:limestone",
+        "fallback_block": "minecraft:calcite",
+        "color": "#bdb895"
+      },
+      "3": {
+        "name": "granite",
+        "block": "minecraft:granite",
+        "fallback_block": "minecraft:granite",
+        "color": "#b17e6a"
+      },
+      "4": {
+        "name": "basalt",
+        "block": "minecraft:smooth_basalt",
+        "fallback_block": "minecraft:deepslate",
+        "color": "#383c42"
+      },
+      "5": {
+        "name": "andesite",
+        "block": "minecraft:andesite",
+        "fallback_block": "minecraft:andesite",
+        "color": "#7a7e7b"
+      },
+      "6": {
+        "name": "diorite",
+        "block": "minecraft:diorite",
+        "fallback_block": "minecraft:diorite",
+        "color": "#d2d0c8"
+      },
+      "7": {
+        "name": "tuff",
+        "block": "minecraft:tuff",
+        "fallback_block": "minecraft:tuff",
+        "color": "#687062"
+      },
+      "8": {
+        "name": "sandstone",
+        "block": "minecraft:sandstone",
+        "fallback_block": "minecraft:sandstone",
+        "color": "#c6ad68"
+      },
+      "9": {
+        "name": "slate",
+        "block": "minecraft:deepslate",
+        "fallback_block": "minecraft:deepslate",
+        "color": "#4d5660"
+      },
+      "10": {
+        "name": "sand/gravel",
+        "block": "minecraft:sand",
+        "fallback_block": "minecraft:sand",
+        "color": "#d7c58b"
+      },
+      "11": {
+        "name": "clay/silt/till",
+        "block": "minecraft:clay",
+        "fallback_block": "minecraft:clay",
+        "color": "#9a8f7a"
+      },
+      "12": {
+        "name": "peat",
+        "block": "minecraft:mud",
+        "fallback_block": "minecraft:dirt",
+        "color": "#4b3728"
+      }
+    },
+    "storage": "regions",
+    "region_path": "geology/surface/regions",
+    "region_extension": ".u8rg",
+    "region_tiles": 8,
+    "missing_tile": 0,
+    "egdi_overlay": {
+      "source": "https://maps.europe-geology.eu/wfs/",
+      "feature_types": [
+        "ms:geologicunitview"
+      ],
+      "mode": "fill_only",
+      "bbox_epsg4326_axis_order": "49.58045431,-13.53829133,61.58145377,3.07402202,EPSG:4326",
+      "changed_tiles": 1944,
+      "changed_cells": 409248365
+    }
+  },
+  "rivers": {
+    "path": "water/rivers",
+    "extension": ".u8",
+    "dtype": "uint8",
+    "min": 0,
+    "max": 255,
+    "order_path": "water/river_order",
+    "half_width_path": "water/river_half_width",
+    "preview_radius_path": "water/river_preview_radius",
+    "max_half_width": 27,
+    "note": "255 marks cells inside variable-width river/watercourse vectors. Existing packed river masks were shrunk to one-third output width for in-world readability.",
+    "storage": "regions",
+    "region_path": "water/rivers/regions",
+    "region_extension": ".u8rg",
+    "region_tiles": 8,
+    "missing_tile": 0,
+    "order_storage": "regions",
+    "order_region_path": "water/river_order/regions",
+    "order_region_extension": ".u8rg",
+    "order_region_tiles": 8,
+    "order_missing_tile": 0,
+    "half_width_storage": "regions",
+    "half_width_region_path": "water/river_half_width/regions",
+    "half_width_region_extension": ".u8rg",
+    "half_width_region_tiles": 8,
+    "half_width_missing_tile": 0,
+    "preview_radius_storage": "regions",
+    "preview_radius_region_path": "water/river_preview_radius/regions",
+    "preview_radius_region_extension": ".u8rg",
+    "preview_radius_region_tiles": 8,
+    "preview_radius_missing_tile": 0
+  },
+  "vegetation": {
+    "path": "vegetation",
+    "extension": ".u8",
+    "dtype": "uint8",
+    "cell_blocks": 4,
+    "cell_metres": 50.0,
+    "width_cells": 17116,
+    "depth_cells": 25000,
+    "source": "https://image.discomap.eea.europa.eu/arcgis/services/Corine/CLC2018_WM/MapServer/WMSServer",
+    "source_layer": "12",
+    "source_scheme": "CORINE Land Cover 2018 WMS colors",
+    "classes": {
+      "0": {
+        "name": "none/ocean",
+        "color": "#101820"
+      },
+      "1": {
+        "name": "broadleaf woodland",
+        "color": "#1f6f3a"
+      },
+      "2": {
+        "name": "conifer woodland",
+        "color": "#174c34"
+      },
+      "3": {
+        "name": "arable and horticulture",
+        "color": "#d9c66a"
+      },
+      "4": {
+        "name": "improved grassland",
+        "color": "#78b957"
+      },
+      "5": {
+        "name": "neutral grassland",
+        "color": "#9ccc66"
+      },
+      "6": {
+        "name": "calcareous grassland",
+        "color": "#c8d78a"
+      },
+      "7": {
+        "name": "acid grassland",
+        "color": "#8aa84f"
+      },
+      "8": {
+        "name": "wetland/bog/fen",
+        "color": "#4c8f8a"
+      },
+      "9": {
+        "name": "heath/heather",
+        "color": "#8c5a99"
+      },
+      "10": {
+        "name": "freshwater",
+        "color": "#3b82c4"
+      },
+      "11": {
+        "name": "urban/suburban",
+        "color": "#777777"
+      },
+      "12": {
+        "name": "rocky",
+        "color": "#b9b0a2"
+      }
+    },
+    "source_classes": {
+      "111": "CLC 111",
+      "112": "CLC 112",
+      "121": "CLC 121",
+      "122": "CLC 122",
+      "123": "CLC 123",
+      "124": "CLC 124",
+      "131": "CLC 131",
+      "132": "CLC 132",
+      "133": "CLC 133",
+      "141": "CLC 141",
+      "142": "CLC 142",
+      "211": "CLC 211",
+      "212": "CLC 212",
+      "213": "CLC 213",
+      "221": "CLC 221",
+      "222": "CLC 222",
+      "223": "CLC 223",
+      "231": "CLC 231",
+      "241": "CLC 241",
+      "242": "CLC 242",
+      "243": "CLC 243",
+      "244": "CLC 244",
+      "311": "CLC 311",
+      "312": "CLC 312",
+      "313": "CLC 313",
+      "321": "CLC 321",
+      "322": "CLC 322",
+      "323": "CLC 323",
+      "324": "CLC 324",
+      "331": "CLC 331",
+      "332": "CLC 332",
+      "333": "CLC 333",
+      "334": "CLC 334",
+      "335": "CLC 335",
+      "411": "CLC 411",
+      "412": "CLC 412",
+      "421": "CLC 421",
+      "422": "CLC 422",
+      "423": "CLC 423",
+      "511": "CLC 511",
+      "512": "CLC 512",
+      "521": "CLC 521",
+      "522": "CLC 522",
+      "523": "CLC 523"
+    },
+    "storage": "regions",
+    "region_path": "vegetation/regions",
+    "region_extension": ".u8rg",
+    "region_tiles": 8,
+    "missing_tile": 0,
+    "smoothing": {
+      "mode": "postprocessed-medium",
+      "freshwater_preserved": false,
+      "freshwater_class": 10,
+      "freshwater_cleanup": true
+    }
+  },
+  "biome_regions": {
+    "path": "biome_regions",
+    "extension": ".u8",
+    "dtype": "uint8",
+    "cell_blocks": 32,
+    "source_cell_blocks": 4,
+    "region_factor": 8,
+    "width_cells": 2140,
+    "depth_cells": 3125,
+    "source": "vegetation",
+    "classes": {
+      "0": {
+        "name": "ocean",
+        "color": "#1f4f7a"
+      },
+      "1": {
+        "name": "broadleaf woodland",
+        "color": "#1f6f3a"
+      },
+      "2": {
+        "name": "conifer woodland",
+        "color": "#174c34"
+      },
+      "3": {
+        "name": "arable and horticulture",
+        "color": "#d9c66a"
+      },
+      "4": {
+        "name": "improved grassland",
+        "color": "#78b957"
+      },
+      "5": {
+        "name": "neutral grassland",
+        "color": "#9ccc66"
+      },
+      "6": {
+        "name": "calcareous grassland",
+        "color": "#c8d78a"
+      },
+      "7": {
+        "name": "acid grassland",
+        "color": "#8aa84f"
+      },
+      "8": {
+        "name": "wetland/bog/fen",
+        "color": "#4c8f8a"
+      },
+      "9": {
+        "name": "heath/heather",
+        "color": "#8c5a99"
+      },
+      "10": {
+        "name": "freshwater",
+        "color": "#2b8fc6"
+      },
+      "11": {
+        "name": "urban/suburban",
+        "color": "#777777"
+      },
+      "12": {
+        "name": "rocky",
+        "color": "#b9b0a2"
+      }
+    },
+    "generation": {
+      "method": "postprocessed-majority-smoothing",
+      "smoothing_passes": 3,
+      "min_area_cells": 6,
+      "hard_classes": [
+        0,
+        10
+      ]
+    },
+    "storage": "regions",
+    "region_path": "biome_regions/regions",
+    "region_extension": ".u8rg",
+    "region_tiles": 8,
+    "missing_tile": 0
+  },
+  "animal_habitats": {
+    "entities": {
+      "wildernature:deer": {
+        "path": "animals/habitats/wildernature/deer",
+        "extension": ".u8",
+        "dtype": "uint8",
+        "min": 0,
+        "max": 255,
+        "svg_path_id": "Deer",
+        "fit": "full-frame",
+        "svg_raster_scale": 1,
+        "source": "../../data/SVGS/Animals British Isles export.svg",
+        "storage": "regions",
+        "region_path": "animals/habitats/wildernature/deer/regions",
+        "region_extension": ".u8rg",
+        "region_tiles": 8,
+        "missing_tile": 0
+      },
+      "wildernature:bison": {
+        "path": "animals/habitats/wildernature/bison",
+        "extension": ".u8",
+        "dtype": "uint8",
+        "min": 0,
+        "max": 255,
+        "svg_path_id": "Bison",
+        "fit": "full-frame",
+        "svg_raster_scale": 1,
+        "source": "../../data/SVGS/Animals British Isles export.svg",
+        "storage": "regions",
+        "region_path": "animals/habitats/wildernature/bison/regions",
+        "region_extension": ".u8rg",
+        "region_tiles": 8,
+        "missing_tile": 0
+      },
+      "wildernature:boar": {
+        "path": "animals/habitats/wildernature/boar",
+        "extension": ".u8",
+        "dtype": "uint8",
+        "min": 0,
+        "max": 255,
+        "svg_path_id": "WildBoar-Pig",
+        "fit": "full-frame",
+        "svg_raster_scale": 1,
+        "source": "../../data/SVGS/Animals British Isles export.svg",
+        "storage": "regions",
+        "region_path": "animals/habitats/wildernature/boar/regions",
+        "region_extension": ".u8rg",
+        "region_tiles": 8,
+        "missing_tile": 0
+      },
+      "minecraft:pig": {
+        "path": "animals/habitats/minecraft/pig",
+        "extension": ".u8",
+        "dtype": "uint8",
+        "min": 0,
+        "max": 255,
+        "svg_path_id": "WildBoar-Pig",
+        "fit": "full-frame",
+        "svg_raster_scale": 1,
+        "source": "../../data/SVGS/Animals British Isles export.svg",
+        "storage": "regions",
+        "region_path": "animals/habitats/minecraft/pig/regions",
+        "region_extension": ".u8rg",
+        "region_tiles": 8,
+        "missing_tile": 0
+      },
+      "wildernature:hedgehog": {
+        "path": "animals/habitats/wildernature/hedgehog",
+        "extension": ".u8",
+        "dtype": "uint8",
+        "min": 0,
+        "max": 255,
+        "svg_path_id": "Hedgehogs",
+        "fit": "full-frame",
+        "svg_raster_scale": 1,
+        "source": "../../data/SVGS/Animals British Isles export.svg",
+        "storage": "regions",
+        "region_path": "animals/habitats/wildernature/hedgehog/regions",
+        "region_extension": ".u8rg",
+        "region_tiles": 8,
+        "missing_tile": 0
+      },
+      "wildernature:minisheep": {
+        "path": "animals/habitats/wildernature/minisheep",
+        "extension": ".u8",
+        "dtype": "uint8",
+        "min": 0,
+        "max": 255,
+        "svg_path_id": "Mini-Sheep",
+        "fit": "full-frame",
+        "svg_raster_scale": 1,
+        "source": "../../data/SVGS/Animals British Isles export.svg",
+        "storage": "regions",
+        "region_path": "animals/habitats/wildernature/minisheep/regions",
+        "region_extension": ".u8rg",
+        "region_tiles": 8,
+        "missing_tile": 0
+      },
+      "wildernature:owl": {
+        "path": "animals/habitats/wildernature/owl",
+        "extension": ".u8",
+        "dtype": "uint8",
+        "min": 0,
+        "max": 255,
+        "svg_path_id": "Owls-Bats-Bees-Sheep-Cows",
+        "fit": "full-frame",
+        "svg_raster_scale": 1,
+        "source": "../../data/SVGS/Animals British Isles export.svg",
+        "storage": "regions",
+        "region_path": "animals/habitats/wildernature/owl/regions",
+        "region_extension": ".u8rg",
+        "region_tiles": 8,
+        "missing_tile": 0
+      },
+      "minecraft:bat": {
+        "path": "animals/habitats/minecraft/bat",
+        "extension": ".u8",
+        "dtype": "uint8",
+        "min": 0,
+        "max": 255,
+        "svg_path_id": "Owls-Bats-Bees-Sheep-Cows",
+        "fit": "full-frame",
+        "svg_raster_scale": 1,
+        "source": "../../data/SVGS/Animals British Isles export.svg",
+        "storage": "regions",
+        "region_path": "animals/habitats/minecraft/bat/regions",
+        "region_extension": ".u8rg",
+        "region_tiles": 8,
+        "missing_tile": 0
+      },
+      "minecraft:cow": {
+        "path": "animals/habitats/minecraft/cow",
+        "extension": ".u8",
+        "dtype": "uint8",
+        "min": 0,
+        "max": 255,
+        "svg_path_id": "Owls-Bats-Bees-Sheep-Cows",
+        "fit": "full-frame",
+        "svg_raster_scale": 1,
+        "source": "../../data/SVGS/Animals British Isles export.svg",
+        "storage": "regions",
+        "region_path": "animals/habitats/minecraft/cow/regions",
+        "region_extension": ".u8rg",
+        "region_tiles": 8,
+        "missing_tile": 0
+      },
+      "minecraft:sheep": {
+        "path": "animals/habitats/minecraft/sheep",
+        "extension": ".u8",
+        "dtype": "uint8",
+        "min": 0,
+        "max": 255,
+        "svg_path_id": "Owls-Bats-Bees-Sheep-Cows",
+        "fit": "full-frame",
+        "svg_raster_scale": 1,
+        "source": "../../data/SVGS/Animals British Isles export.svg",
+        "storage": "regions",
+        "region_path": "animals/habitats/minecraft/sheep/regions",
+        "region_extension": ".u8rg",
+        "region_tiles": 8,
+        "missing_tile": 0
+      },
+      "wildernature:squirrel": {
+        "path": "animals/habitats/wildernature/squirrel",
+        "extension": ".u8",
+        "dtype": "uint8",
+        "min": 0,
+        "max": 255,
+        "svg_path_id": "Squirrels",
+        "fit": "full-frame",
+        "svg_raster_scale": 1,
+        "source": "../../data/SVGS/Animals British Isles export.svg",
+        "storage": "regions",
+        "region_path": "animals/habitats/wildernature/squirrel/regions",
+        "region_extension": ".u8rg",
+        "region_tiles": 8,
+        "missing_tile": 0
+      },
+      "minecraft:chicken": {
+        "path": "animals/habitats/minecraft/chicken",
+        "extension": ".u8",
+        "dtype": "uint8",
+        "min": 0,
+        "max": 255,
+        "svg_path_id": "Chckens",
+        "fit": "full-frame",
+        "svg_raster_scale": 1,
+        "source": "../../data/SVGS/Animals British Isles export.svg",
+        "storage": "regions",
+        "region_path": "animals/habitats/minecraft/chicken/regions",
+        "region_extension": ".u8rg",
+        "region_tiles": 8,
+        "missing_tile": 0
+      },
+      "minecraft:rabbit": {
+        "path": "animals/habitats/minecraft/rabbit",
+        "extension": ".u8",
+        "dtype": "uint8",
+        "min": 0,
+        "max": 255,
+        "svg_path_id": "Frogs-Rabbits",
+        "fit": "full-frame",
+        "svg_raster_scale": 1,
+        "source": "../../data/SVGS/Animals British Isles export.svg",
+        "storage": "regions",
+        "region_path": "animals/habitats/minecraft/rabbit/regions",
+        "region_extension": ".u8rg",
+        "region_tiles": 8,
+        "missing_tile": 0
+      },
+      "minecraft:wolf": {
+        "path": "animals/habitats/minecraft/wolf",
+        "extension": ".u8",
+        "dtype": "uint8",
+        "min": 0,
+        "max": 255,
+        "svg_path_id": "GrayWolf-WildCat",
+        "fit": "full-frame",
+        "svg_raster_scale": 1,
+        "source": "../../data/SVGS/Animals British Isles export.svg",
+        "storage": "regions",
+        "region_path": "animals/habitats/minecraft/wolf/regions",
+        "region_extension": ".u8rg",
+        "region_tiles": 8,
+        "missing_tile": 0
+      },
+      "minecraft:fox": {
+        "path": "animals/habitats/minecraft/fox",
+        "extension": ".u8",
+        "dtype": "uint8",
+        "min": 0,
+        "max": 255,
+        "svg_path_id": "Foxes",
+        "fit": "full-frame",
+        "svg_raster_scale": 1,
+        "source": "../../data/SVGS/Animals British Isles export.svg",
+        "storage": "regions",
+        "region_path": "animals/habitats/minecraft/fox/regions",
+        "region_extension": ".u8rg",
+        "region_tiles": 8,
+        "missing_tile": 0
+      }
+    },
+    "note": "Animal habitat masks are rasterized from the British Isles animal SVG and sampled by ukgeo-animals at spawn time."
+  },
+  "tile_storage": {
+    "format": "ukgeo-region-tiles-v1",
+    "region_tiles": 8,
+    "sparse_zero_u8": true,
+    "missing_height": "nodata"
+  }
+}

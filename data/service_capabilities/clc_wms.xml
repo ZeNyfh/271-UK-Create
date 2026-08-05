@@ -1,0 +1,437 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<WMS_Capabilities version="1.3.0"
+  xmlns="http://www.opengis.net/wms"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xmlns:esri_wms="http://www.esri.com/wms"
+  xsi:schemaLocation="http://www.opengis.net/wms http://schemas.opengis.net/wms/1.3.0/capabilities_1_3_0.xsd http://www.esri.com/wms https://image.discomap.eea.europa.eu/arcgis/services/Corine/CLC2018_WM/MapServer/WMSServer?version=1.3.0%26service=WMS%26request=GetSchemaExtension">
+  <Service>
+    <Name><![CDATA[WMS]]></Name>
+    <Title><![CDATA[Corine Land Cover 2018]]></Title>
+    <Abstract><![CDATA[Web serice for the Corine Land Cover 2018 in web mercator projection]]></Abstract>
+    <KeywordList><Keyword><![CDATA[Corine, Land Cover, Land Use, CLC, temporal, imagery, earth observations, CLC 2018, 2018, Sentinel-2, EEA39, Europe, CLMS, Copernicus Land Monitoring, Copernicus]]></Keyword></KeywordList>
+    <OnlineResource xmlns:xlink="http://www.w3.org/1999/xlink" xlink:type="simple" xlink:href="https://image.discomap.eea.europa.eu/arcgis/services/Corine/CLC2018_WM/MapServer/WMSServer?"/>
+    <ContactInformation>
+      <ContactPersonPrimary>
+        <ContactPerson><![CDATA[Ludvig Forslund]]></ContactPerson>
+        <ContactOrganization><![CDATA[EEA]]></ContactOrganization>
+      </ContactPersonPrimary>
+      <ContactPosition><![CDATA[GIS Consultant]]></ContactPosition>
+      <ContactAddress>
+        <AddressType><![CDATA[Postal]]></AddressType>
+        <Address><![CDATA[Kongens Nytorv 6]]></Address>
+        <City><![CDATA[Copenhagen]]></City>
+        <StateOrProvince><![CDATA[Capital Region]]></StateOrProvince>
+        <PostCode><![CDATA[1050]]></PostCode>
+        <Country><![CDATA[Denmark]]></Country>
+      </ContactAddress>
+      <ContactVoiceTelephone><![CDATA[]]></ContactVoiceTelephone>
+      <ContactFacsimileTelephone><![CDATA[]]></ContactFacsimileTelephone>
+      <ContactElectronicMailAddress><![CDATA[copernicus@eea.europa.eu]]></ContactElectronicMailAddress>
+    </ContactInformation>
+    <Fees><![CDATA[No Condition Apply]]></Fees>
+    <AccessConstraints><![CDATA[No Limitation]]></AccessConstraints>
+    <MaxWidth>4096</MaxWidth>
+    <MaxHeight>4096</MaxHeight>
+  </Service>
+  <Capability>
+    <Request>
+      <GetCapabilities>
+        <Format>application/vnd.ogc.wms_xml</Format>
+        <Format>text/xml</Format>
+        <DCPType>
+          <HTTP><Get><OnlineResource xmlns:xlink="http://www.w3.org/1999/xlink" xlink:type="simple" xlink:href="https://image.discomap.eea.europa.eu/arcgis/services/Corine/CLC2018_WM/MapServer/WMSServer?"/></Get></HTTP>
+        </DCPType>
+      </GetCapabilities>
+      <GetMap>
+        <Format>image/bmp</Format>
+        <Format>image/jpeg</Format>
+        <Format>image/tiff</Format>
+        <Format>image/png</Format>
+        <Format>image/png8</Format>
+        <Format>image/png24</Format>
+        <Format>image/png32</Format>
+        <Format>image/gif</Format>
+        <Format>image/svg+xml</Format>
+        <DCPType>
+          <HTTP><Get><OnlineResource xmlns:xlink="http://www.w3.org/1999/xlink" xlink:type="simple" xlink:href="https://image.discomap.eea.europa.eu/arcgis/services/Corine/CLC2018_WM/MapServer/WMSServer?"/></Get></HTTP>
+        </DCPType>
+      </GetMap>
+      <GetFeatureInfo>
+        <Format>application/vnd.esri.wms_raw_xml</Format>
+        <Format>application/vnd.esri.wms_featureinfo_xml</Format>
+        <Format>application/vnd.ogc.wms_xml</Format>
+        <Format>application/geo+json</Format>
+        <Format>text/xml</Format>
+        <Format>text/html</Format>
+        <Format>text/plain</Format>
+        <DCPType>
+          <HTTP><Get><OnlineResource xmlns:xlink="http://www.w3.org/1999/xlink" xlink:type="simple" xlink:href="https://image.discomap.eea.europa.eu/arcgis/services/Corine/CLC2018_WM/MapServer/WMSServer?"/></Get></HTTP>
+        </DCPType>
+      </GetFeatureInfo>
+      <esri_wms:GetStyles>
+        <Format>application/vnd.ogc.sld+xml</Format>
+        <DCPType>
+          <HTTP><Get><OnlineResource xmlns:xlink="http://www.w3.org/1999/xlink" xlink:type="simple" xlink:href="https://image.discomap.eea.europa.eu/arcgis/services/Corine/CLC2018_WM/MapServer/WMSServer?"/></Get></HTTP>
+        </DCPType>
+      </esri_wms:GetStyles>
+    </Request>
+    <Exception>
+      <Format>application/vnd.ogc.se_xml</Format>
+      <Format>application/vnd.ogc.se_inimage</Format>
+      <Format>application/vnd.ogc.se_blank</Format>
+      <Format>text/xml</Format>
+      <Format>XML</Format>
+    </Exception>
+    <Layer>
+      <Title><![CDATA[CLC2018]]></Title>
+<CRS>CRS:84</CRS>
+<CRS>EPSG:4326</CRS>
+<CRS>EPSG:3857</CRS>
+ <!-- alias 3857 -->
+<CRS>EPSG:102100</CRS>
+<CRS>EPSG:3035</CRS>
+<EX_GeographicBoundingBox><westBoundLongitude>-61.906490</westBoundLongitude><eastBoundLongitude>72.906158</eastBoundLongitude><southBoundLatitude>-21.483299</southBoundLatitude><northBoundLatitude>72.664410</northBoundLatitude></EX_GeographicBoundingBox>
+<BoundingBox CRS="CRS:84" minx="-61.906490" miny="-21.483299" maxx="72.906158" maxy="72.664410"/>
+<BoundingBox CRS="EPSG:4326" minx="-21.483299" miny="-61.906490" maxx="72.664410" maxy="72.906158"/>
+<BoundingBox CRS="EPSG:3857" minx="-6891398.929541" miny="-2449601.033470" maxx="8115876.376301" maxy="11996911.054933"/>
+<BoundingBox CRS="EPSG:102100" minx="-6891398.929541" miny="-2449601.033470" maxx="8115876.376301" maxy="11996911.054933"/>
+<BoundingBox CRS="EPSG:3035" minx="-4390248.158800" miny="-4127923.628866" maxx="6666108.710298" maxy="11888486.467025"/>
+      <Layer queryable="1">
+        <Title><![CDATA[Corine Land Cover 2018 DOMs raster]]></Title>
+        <Abstract><![CDATA[]]></Abstract>
+<CRS>CRS:84</CRS>
+<CRS>EPSG:4326</CRS>
+<CRS>EPSG:3857</CRS>
+ <!-- alias 3857 -->
+<CRS>EPSG:102100</CRS>
+<CRS>EPSG:3035</CRS>
+<EX_GeographicBoundingBox><westBoundLongitude>-61.906490</westBoundLongitude><eastBoundLongitude>55.937312</eastBoundLongitude><southBoundLatitude>-21.483299</southBoundLatitude><northBoundLatitude>16.607732</northBoundLatitude></EX_GeographicBoundingBox>
+<BoundingBox CRS="CRS:84" minx="-61.906490" miny="-21.483299" maxx="55.937312" maxy="16.607732"/>
+<BoundingBox CRS="EPSG:4326" minx="-21.483299" miny="-61.906490" maxx="16.607732" maxy="55.937312"/>
+<BoundingBox CRS="EPSG:3857" minx="-6891398.929541" miny="-2449601.033470" maxx="6226913.098970" maxy="1875210.096352"/>
+<BoundingBox CRS="EPSG:102100" minx="-6891398.929541" miny="-2449601.033470" maxx="6226913.098970" maxy="1875210.096352"/>
+<BoundingBox CRS="EPSG:3035" minx="-4390248.158641" miny="-4127923.628866" maxx="2766118.349324" maxy="10037984.629086"/>
+        <MinScaleDenominator>236235.119048</MinScaleDenominator>
+      <Layer queryable="1">
+        <Name>1</Name>
+        <Title><![CDATA[U2018_CLC2018_V2020_20u1_FR_GLP_R_WM]]></Title>
+        <Abstract><![CDATA[CLC2018 is one of the Corine Land Cover (CLC) datasets produced within the frame the Copernicus Land Monitoring Service referring to land cover / land use status of year 2018. CLC service has a long-time heritage (formerly known as "CORINE Land Cover Programme"), coordinated by the European Environment Agency (EEA). It provides consistent and thematically detailed information on land cover and land cover changes across Europe. CLC datasets are based on the classification of satellite images produced by the national teams of the participating countries - the EEA members and cooperating countries (EEA39). National CLC inventories are then further integrated into a seamless land cover map of Europe. The resulting European database relies on standard methodology and nomenclature with following base parameters: 44 classes in the hierarchical 3-level CLC nomenclature; minimum mapping unit (MMU) for status layers is 25 hectares; minimum width of linear elements is 100 metres. Change layers have higher resolution, i.e. minimum mapping unit (MMU) is 5 hectares for Land Cover Changes (LCC), and the minimum width of linear elements is 100 metres. The CLC service delivers important data sets supporting the implementation of key priority areas of the Environment Action Programmes of the European Union as e.g. protecting ecosystems, halting the loss of biological diversity, tracking the impacts of climate change, monitoring urban land take, assessing developments in agriculture or dealing with water resources directives. CLC belongs to the Pan-European component of the Copernicus Land Monitoring Service (https://land.copernicus.eu/), part of the European Copernicus Programme coordinated by the European Environment Agency, providing environmental information from a combination of air- and space-based observation systems and in-situ monitoring. Additional information about CLC product description including mapping guides can be found at https://land.copernicus.eu/user-corner/technical-library/clc2018technicalguidelines_final.pdf. CLC class descriptions can be found at https://land.copernicus.eu/user-corner/technical-library/corine-land-cover-nomenclature-guidelines/html/.]]></Abstract>
+<CRS>CRS:84</CRS>
+<CRS>EPSG:4326</CRS>
+<CRS>EPSG:3857</CRS>
+ <!-- alias 3857 -->
+<CRS>EPSG:102100</CRS>
+<CRS>EPSG:3035</CRS>
+<EX_GeographicBoundingBox><westBoundLongitude>-61.906490</westBoundLongitude><eastBoundLongitude>-60.904868</eastBoundLongitude><southBoundLatitude>15.735481</southBoundLatitude><northBoundLatitude>16.607732</northBoundLatitude></EX_GeographicBoundingBox>
+<BoundingBox CRS="CRS:84" minx="-61.906490" miny="15.735481" maxx="-60.904868" maxy="16.607732"/>
+<BoundingBox CRS="EPSG:4326" minx="15.735481" miny="-61.906490" maxx="16.607732" maxy="-60.904868"/>
+<BoundingBox CRS="EPSG:3857" minx="-6891398.929541" miny="1774110.096352" maxx="-6779898.929541" maxy="1875210.096352"/>
+<BoundingBox CRS="EPSG:102100" minx="-6891398.929541" miny="1774110.096352" maxx="-6779898.929541" maxy="1875210.096352"/>
+<BoundingBox CRS="EPSG:3035" minx="2594595.954173" miny="-2658561.193680" maxx="2766118.349324" maxy="-2537275.957021"/>
+        <Style>
+          <Name>default</Name>
+          <Title><![CDATA[U2018_CLC2018_V2020_20u1_FR_GLP_R_WM]]></Title>
+          <LegendURL width="534" height="468">
+            <Format>image/png</Format>
+            <OnlineResource xlink:href="https://image.discomap.eea.europa.eu/arcgis/services/Corine/CLC2018_WM/MapServer/WMSServer?request=GetLegendGraphic%26version=1.3.0%26format=image/png%26layer=1" xlink:type="simple" xmlns:xlink="http://www.w3.org/1999/xlink" />
+          </LegendURL>
+        </Style>
+      </Layer>
+      <Layer queryable="1">
+        <Name>2</Name>
+        <Title><![CDATA[U2018_CLC2018_V2020_20u1_FR_GUF_R_WM]]></Title>
+        <Abstract><![CDATA[CLC2018 is one of the Corine Land Cover (CLC) datasets produced within the frame the Copernicus Land Monitoring Service referring to land cover / land use status of year 2018. CLC service has a long-time heritage (formerly known as "CORINE Land Cover Programme"), coordinated by the European Environment Agency (EEA). It provides consistent and thematically detailed information on land cover and land cover changes across Europe. CLC datasets are based on the classification of satellite images produced by the national teams of the participating countries - the EEA members and cooperating countries (EEA39). National CLC inventories are then further integrated into a seamless land cover map of Europe. The resulting European database relies on standard methodology and nomenclature with following base parameters: 44 classes in the hierarchical 3-level CLC nomenclature; minimum mapping unit (MMU) for status layers is 25 hectares; minimum width of linear elements is 100 metres. Change layers have higher resolution, i.e. minimum mapping unit (MMU) is 5 hectares for Land Cover Changes (LCC), and the minimum width of linear elements is 100 metres. The CLC service delivers important data sets supporting the implementation of key priority areas of the Environment Action Programmes of the European Union as e.g. protecting ecosystems, halting the loss of biological diversity, tracking the impacts of climate change, monitoring urban land take, assessing developments in agriculture or dealing with water resources directives. CLC belongs to the Pan-European component of the Copernicus Land Monitoring Service (https://land.copernicus.eu/), part of the European Copernicus Programme coordinated by the European Environment Agency, providing environmental information from a combination of air- and space-based observation systems and in-situ monitoring. Additional information about CLC product description including mapping guides can be found at https://land.copernicus.eu/user-corner/technical-library/clc2018technicalguidelines_final.pdf. CLC class descriptions can be found at https://land.copernicus.eu/user-corner/technical-library/corine-land-cover-nomenclature-guidelines/html/.]]></Abstract>
+<CRS>CRS:84</CRS>
+<CRS>EPSG:4326</CRS>
+<CRS>EPSG:3857</CRS>
+ <!-- alias 3857 -->
+<CRS>EPSG:102100</CRS>
+<CRS>EPSG:3035</CRS>
+<EX_GeographicBoundingBox><westBoundLongitude>-54.268608</westBoundLongitude><eastBoundLongitude>-51.620375</eastBoundLongitude><southBoundLatitude>3.772231</southBoundLatitude><northBoundLatitude>5.852440</northBoundLatitude></EX_GeographicBoundingBox>
+<BoundingBox CRS="CRS:84" minx="-54.268608" miny="3.772231" maxx="-51.620375" maxy="5.852440"/>
+<BoundingBox CRS="EPSG:4326" minx="3.772231" miny="-54.268608" maxx="5.852440" maxy="-51.620375"/>
+<BoundingBox CRS="EPSG:3857" minx="-6041153.846314" miny="420226.491090" maxx="-5746353.846314" maxy="652626.491090"/>
+<BoundingBox CRS="EPSG:102100" minx="-6041153.846314" miny="420226.491090" maxx="-5746353.846314" maxy="652626.491090"/>
+<BoundingBox CRS="EPSG:3035" minx="625936.878757" miny="-2734079.065414" maxx="1059364.936491" maxy="-2415085.367413"/>
+        <Style>
+          <Name>default</Name>
+          <Title><![CDATA[U2018_CLC2018_V2020_20u1_FR_GUF_R_WM]]></Title>
+          <LegendURL width="534" height="504">
+            <Format>image/png</Format>
+            <OnlineResource xlink:href="https://image.discomap.eea.europa.eu/arcgis/services/Corine/CLC2018_WM/MapServer/WMSServer?request=GetLegendGraphic%26version=1.3.0%26format=image/png%26layer=2" xlink:type="simple" xmlns:xlink="http://www.w3.org/1999/xlink" />
+          </LegendURL>
+        </Style>
+      </Layer>
+      <Layer queryable="1">
+        <Name>3</Name>
+        <Title><![CDATA[U2018_CLC2018_V2020_20u1_FR_MTQ_R_WM]]></Title>
+        <Abstract><![CDATA[CLC2018 is one of the Corine Land Cover (CLC) datasets produced within the frame the Copernicus Land Monitoring Service referring to land cover / land use status of year 2018. CLC service has a long-time heritage (formerly known as "CORINE Land Cover Programme"), coordinated by the European Environment Agency (EEA). It provides consistent and thematically detailed information on land cover and land cover changes across Europe. CLC datasets are based on the classification of satellite images produced by the national teams of the participating countries - the EEA members and cooperating countries (EEA39). National CLC inventories are then further integrated into a seamless land cover map of Europe. The resulting European database relies on standard methodology and nomenclature with following base parameters: 44 classes in the hierarchical 3-level CLC nomenclature; minimum mapping unit (MMU) for status layers is 25 hectares; minimum width of linear elements is 100 metres. Change layers have higher resolution, i.e. minimum mapping unit (MMU) is 5 hectares for Land Cover Changes (LCC), and the minimum width of linear elements is 100 metres. The CLC service delivers important data sets supporting the implementation of key priority areas of the Environment Action Programmes of the European Union as e.g. protecting ecosystems, halting the loss of biological diversity, tracking the impacts of climate change, monitoring urban land take, assessing developments in agriculture or dealing with water resources directives. CLC belongs to the Pan-European component of the Copernicus Land Monitoring Service (https://land.copernicus.eu/), part of the European Copernicus Programme coordinated by the European Environment Agency, providing environmental information from a combination of air- and space-based observation systems and in-situ monitoring. Additional information about CLC product description including mapping guides can be found at https://land.copernicus.eu/user-corner/technical-library/clc2018technicalguidelines_final.pdf. CLC class descriptions can be found at https://land.copernicus.eu/user-corner/technical-library/corine-land-cover-nomenclature-guidelines/html/.]]></Abstract>
+<CRS>CRS:84</CRS>
+<CRS>EPSG:4326</CRS>
+<CRS>EPSG:3857</CRS>
+ <!-- alias 3857 -->
+<CRS>EPSG:102100</CRS>
+<CRS>EPSG:3035</CRS>
+<EX_GeographicBoundingBox><westBoundLongitude>-61.327023</westBoundLongitude><eastBoundLongitude>-60.710779</eastBoundLongitude><southBoundLatitude>14.295482</southBoundLatitude><northBoundLatitude>14.970827</northBoundLatitude></EX_GeographicBoundingBox>
+<BoundingBox CRS="CRS:84" minx="-61.327023" miny="14.295482" maxx="-60.710779" maxy="14.970827"/>
+<BoundingBox CRS="EPSG:4326" minx="14.295482" miny="-61.327023" maxx="14.970827" maxy="-60.710779"/>
+<BoundingBox CRS="EPSG:3857" minx="-6826892.985893" miny="1608138.340312" maxx="-6758292.985893" maxy="1685838.340312"/>
+<BoundingBox CRS="EPSG:102100" minx="-6826892.985893" miny="1608138.340312" maxx="-6758292.985893" maxy="1685838.340312"/>
+<BoundingBox CRS="EPSG:3035" minx="2445766.834444" miny="-2712191.007482" maxx="2564760.381066" maxy="-2628774.742706"/>
+        <Style>
+          <Name>default</Name>
+          <Title><![CDATA[U2018_CLC2018_V2020_20u1_FR_MTQ_R_WM]]></Title>
+          <LegendURL width="534" height="468">
+            <Format>image/png</Format>
+            <OnlineResource xlink:href="https://image.discomap.eea.europa.eu/arcgis/services/Corine/CLC2018_WM/MapServer/WMSServer?request=GetLegendGraphic%26version=1.3.0%26format=image/png%26layer=3" xlink:type="simple" xmlns:xlink="http://www.w3.org/1999/xlink" />
+          </LegendURL>
+        </Style>
+      </Layer>
+      <Layer queryable="1">
+        <Name>4</Name>
+        <Title><![CDATA[U2018_CLC2018_V2020_20u1_FR_MYT_R_WM]]></Title>
+        <Abstract><![CDATA[CLC2018 is one of the Corine Land Cover (CLC) datasets produced within the frame the Copernicus Land Monitoring Service referring to land cover / land use status of year 2018. CLC service has a long-time heritage (formerly known as "CORINE Land Cover Programme"), coordinated by the European Environment Agency (EEA). It provides consistent and thematically detailed information on land cover and land cover changes across Europe. CLC datasets are based on the classification of satellite images produced by the national teams of the participating countries - the EEA members and cooperating countries (EEA39). National CLC inventories are then further integrated into a seamless land cover map of Europe. The resulting European database relies on standard methodology and nomenclature with following base parameters: 44 classes in the hierarchical 3-level CLC nomenclature; minimum mapping unit (MMU) for status layers is 25 hectares; minimum width of linear elements is 100 metres. Change layers have higher resolution, i.e. minimum mapping unit (MMU) is 5 hectares for Land Cover Changes (LCC), and the minimum width of linear elements is 100 metres. The CLC service delivers important data sets supporting the implementation of key priority areas of the Environment Action Programmes of the European Union as e.g. protecting ecosystems, halting the loss of biological diversity, tracking the impacts of climate change, monitoring urban land take, assessing developments in agriculture or dealing with water resources directives. CLC belongs to the Pan-European component of the Copernicus Land Monitoring Service (https://land.copernicus.eu/), part of the European Copernicus Programme coordinated by the European Environment Agency, providing environmental information from a combination of air- and space-based observation systems and in-situ monitoring. Additional information about CLC product description including mapping guides can be found at https://land.copernicus.eu/user-corner/technical-library/clc2018technicalguidelines_final.pdf. CLC class descriptions can be found at https://land.copernicus.eu/user-corner/technical-library/corine-land-cover-nomenclature-guidelines/html/.]]></Abstract>
+<CRS>CRS:84</CRS>
+<CRS>EPSG:4326</CRS>
+<CRS>EPSG:3857</CRS>
+ <!-- alias 3857 -->
+<CRS>EPSG:102100</CRS>
+<CRS>EPSG:3035</CRS>
+<EX_GeographicBoundingBox><westBoundLongitude>44.927154</westBoundLongitude><eastBoundLongitude>45.390685</eastBoundLongitude><southBoundLatitude>-13.090385</southBoundLatitude><northBoundLatitude>-12.546436</northBoundLatitude></EX_GeographicBoundingBox>
+<BoundingBox CRS="CRS:84" minx="44.927154" miny="-13.090385" maxx="45.390685" maxy="-12.546436"/>
+<BoundingBox CRS="EPSG:4326" minx="-13.090385" miny="44.927154" maxx="-12.546436" maxy="45.390685"/>
+<BoundingBox CRS="EPSG:3857" minx="5001267.915118" miny="-1470060.413133" maxx="5052867.915118" maxy="-1407960.413133"/>
+<BoundingBox CRS="EPSG:102100" minx="5001267.915118" miny="-1470060.413133" maxx="5052867.915118" maxy="-1407960.413133"/>
+<BoundingBox CRS="EPSG:3035" minx="-2816827.268024" miny="8699805.577259" maxx="-2742174.521558" maxy="8759582.356493"/>
+        <Style>
+          <Name>default</Name>
+          <Title><![CDATA[U2018_CLC2018_V2020_20u1_FR_MYT_R_WM]]></Title>
+          <LegendURL width="534" height="306">
+            <Format>image/png</Format>
+            <OnlineResource xlink:href="https://image.discomap.eea.europa.eu/arcgis/services/Corine/CLC2018_WM/MapServer/WMSServer?request=GetLegendGraphic%26version=1.3.0%26format=image/png%26layer=4" xlink:type="simple" xmlns:xlink="http://www.w3.org/1999/xlink" />
+          </LegendURL>
+        </Style>
+      </Layer>
+      <Layer queryable="1">
+        <Name>5</Name>
+        <Title><![CDATA[U2018_CLC2018_V2020_20u1_FR_REU_R_WM]]></Title>
+        <Abstract><![CDATA[CLC2018 is one of the Corine Land Cover (CLC) datasets produced within the frame the Copernicus Land Monitoring Service referring to land cover / land use status of year 2018. CLC service has a long-time heritage (formerly known as "CORINE Land Cover Programme"), coordinated by the European Environment Agency (EEA). It provides consistent and thematically detailed information on land cover and land cover changes across Europe. CLC datasets are based on the classification of satellite images produced by the national teams of the participating countries - the EEA members and cooperating countries (EEA39). National CLC inventories are then further integrated into a seamless land cover map of Europe. The resulting European database relies on standard methodology and nomenclature with following base parameters: 44 classes in the hierarchical 3-level CLC nomenclature; minimum mapping unit (MMU) for status layers is 25 hectares; minimum width of linear elements is 100 metres. Change layers have higher resolution, i.e. minimum mapping unit (MMU) is 5 hectares for Land Cover Changes (LCC), and the minimum width of linear elements is 100 metres. The CLC service delivers important data sets supporting the implementation of key priority areas of the Environment Action Programmes of the European Union as e.g. protecting ecosystems, halting the loss of biological diversity, tracking the impacts of climate change, monitoring urban land take, assessing developments in agriculture or dealing with water resources directives. CLC belongs to the Pan-European component of the Copernicus Land Monitoring Service (https://land.copernicus.eu/), part of the European Copernicus Programme coordinated by the European Environment Agency, providing environmental information from a combination of air- and space-based observation systems and in-situ monitoring. Additional information about CLC product description including mapping guides can be found at https://land.copernicus.eu/user-corner/technical-library/clc2018technicalguidelines_final.pdf. CLC class descriptions can be found at https://land.copernicus.eu/user-corner/technical-library/corine-land-cover-nomenclature-guidelines/html/.]]></Abstract>
+<CRS>CRS:84</CRS>
+<CRS>EPSG:4326</CRS>
+<CRS>EPSG:3857</CRS>
+ <!-- alias 3857 -->
+<CRS>EPSG:102100</CRS>
+<CRS>EPSG:3035</CRS>
+<EX_GeographicBoundingBox><westBoundLongitude>55.114455</westBoundLongitude><eastBoundLongitude>55.937312</eastBoundLongitude><southBoundLatitude>-21.483299</southBoundLatitude><northBoundLatitude>-20.777781</northBoundLatitude></EX_GeographicBoundingBox>
+<BoundingBox CRS="CRS:84" minx="55.114455" miny="-21.483299" maxx="55.937312" maxy="-20.777781"/>
+<BoundingBox CRS="EPSG:4326" minx="-21.483299" miny="55.114455" maxx="-20.777781" maxy="55.937312"/>
+<BoundingBox CRS="EPSG:3857" minx="6135313.098970" miny="-2449601.033470" maxx="6226913.098970" maxy="-2365401.033470"/>
+<BoundingBox CRS="EPSG:102100" minx="6135313.098970" miny="-2449601.033470" maxx="6226913.098970" maxy="-2365401.033470"/>
+<BoundingBox CRS="EPSG:3035" minx="-3109147.500369" miny="9942289.044092" maxx="-2991670.778602" maxy="10037984.629086"/>
+        <Style>
+          <Name>default</Name>
+          <Title><![CDATA[U2018_CLC2018_V2020_20u1_FR_REU_R_WM]]></Title>
+          <LegendURL width="534" height="558">
+            <Format>image/png</Format>
+            <OnlineResource xlink:href="https://image.discomap.eea.europa.eu/arcgis/services/Corine/CLC2018_WM/MapServer/WMSServer?request=GetLegendGraphic%26version=1.3.0%26format=image/png%26layer=5" xlink:type="simple" xmlns:xlink="http://www.w3.org/1999/xlink" />
+          </LegendURL>
+        </Style>
+      </Layer>
+      </Layer>
+      <Layer queryable="1">
+        <Title><![CDATA[Corine Land Cover 2018 DOMs vector]]></Title>
+        <Abstract><![CDATA[]]></Abstract>
+<CRS>CRS:84</CRS>
+<CRS>EPSG:4326</CRS>
+<CRS>EPSG:3857</CRS>
+ <!-- alias 3857 -->
+<CRS>EPSG:102100</CRS>
+<CRS>EPSG:3035</CRS>
+<EX_GeographicBoundingBox><westBoundLongitude>-61.903160</westBoundLongitude><eastBoundLongitude>55.933092</eastBoundLongitude><southBoundLatitude>-21.480179</southBoundLatitude><northBoundLatitude>16.604784</northBoundLatitude></EX_GeographicBoundingBox>
+<BoundingBox CRS="CRS:84" minx="-61.903160" miny="-21.480179" maxx="55.933092" maxy="16.604784"/>
+<BoundingBox CRS="EPSG:4326" minx="-21.480179" miny="-61.903160" maxx="16.604784" maxy="55.933092"/>
+<BoundingBox CRS="EPSG:3857" minx="-6891028.209200" miny="-2449227.773500" maxx="6226443.290800" maxy="1874867.649400"/>
+<BoundingBox CRS="EPSG:102100" minx="-6891028.209200" miny="-2449227.773500" maxx="6226443.290800" maxy="1874867.649400"/>
+<BoundingBox CRS="EPSG:3035" minx="-4389970.783388" miny="-4127585.995070" maxx="2765544.249396" maxy="10037496.529004"/>
+        <MaxScaleDenominator>236234.174107</MaxScaleDenominator>
+      <Layer queryable="1">
+        <Name>7</Name>
+        <Title><![CDATA[CLC2018_CLC2018_V2018_20u1_FR_GLP_WM]]></Title>
+        <Abstract><![CDATA[CLC18is one of the datasets produced within the frame the Corine Land Cover programme referring to land cover / land use status of year 2018. The Corine Land Cover (CLC) is an European programme, coordinated by the European Environment Agency (EEA), providing consistent information on land cover and land cover changes across Europe. CLC products are based on the photointerpretation of satellite images by the national teams of the participating countries - the EEA member or cooperating countries. The resulting national land cover inventories are further integrated into a seamless land cover map of Europe. The resulting European database is based on standard methodology and nomenclature with following base parameters: - 44 classes in the hierarchical 3-level Corine nomenclature - minimum mapping unit (MMU) for status layers is 25 hectares - minimum width of linear elements is 100 metres - minimum mapping unit (MMU) for Land Cover Changes (LCC) for change layers is 5 hectares CLC programme provides important data sets supporting the implementation of key priority areas of the Environment Action Programmes of the European Community as protecting ecosystems, halting the loss of biological diversity, tracking the impacts of climate change, assessing developments in agriculture and implementing the EU Water Framework Directive etc.. CLC programme is also a part of the Global Monitoring for Environment and Security (GMES http://gmes.info) initiative, run by the European Commission and the European Space Agency, which will provide environmental information from a combination of air- and space-based observation systems and in-situ monitoring. More about the Corine Land Cover (CLC) programme and datasets can be found at http://www.eea.eu.]]></Abstract>
+<CRS>CRS:84</CRS>
+<CRS>EPSG:4326</CRS>
+<CRS>EPSG:3857</CRS>
+ <!-- alias 3857 -->
+<CRS>EPSG:102100</CRS>
+<CRS>EPSG:3035</CRS>
+<EX_GeographicBoundingBox><westBoundLongitude>-61.903160</westBoundLongitude><eastBoundLongitude>-60.908472</eastBoundLongitude><southBoundLatitude>15.741719</southBoundLatitude><northBoundLatitude>16.604784</northBoundLatitude></EX_GeographicBoundingBox>
+<BoundingBox CRS="CRS:84" minx="-61.903160" miny="15.741719" maxx="-60.908472" maxy="16.604784"/>
+<BoundingBox CRS="EPSG:4326" minx="15.741719" miny="-61.903160" maxx="16.604784" maxy="-60.908472"/>
+<BoundingBox CRS="EPSG:3857" minx="-6891028.209200" miny="1774831.559900" maxx="-6780300.096400" maxy="1874867.649400"/>
+<BoundingBox CRS="EPSG:102100" minx="-6891028.209200" miny="1774831.559900" maxx="-6780300.096400" maxy="1874867.649400"/>
+<BoundingBox CRS="EPSG:3035" minx="2595493.464826" miny="-2657943.089435" maxx="2765544.249396" maxy="-2537701.147806"/>
+        <Style>
+          <Name>default</Name>
+          <Title><![CDATA[CLC2018_CLC2018_V2018_20u1_FR_GLP_WM]]></Title>
+          <LegendURL width="564" height="810">
+            <Format>image/png</Format>
+            <OnlineResource xlink:href="https://image.discomap.eea.europa.eu/arcgis/services/Corine/CLC2018_WM/MapServer/WMSServer?request=GetLegendGraphic%26version=1.3.0%26format=image/png%26layer=7" xlink:type="simple" xmlns:xlink="http://www.w3.org/1999/xlink" />
+          </LegendURL>
+        </Style>
+      </Layer>
+      <Layer queryable="1">
+        <Name>8</Name>
+        <Title><![CDATA[CLC2018_CLC2018_V2018_20u1_FR_Guf_WM]]></Title>
+        <Abstract><![CDATA[CLC18is one of the datasets produced within the frame the Corine Land Cover programme referring to land cover / land use status of year 2018. The Corine Land Cover (CLC) is an European programme, coordinated by the European Environment Agency (EEA), providing consistent information on land cover and land cover changes across Europe. CLC products are based on the photointerpretation of satellite images by the national teams of the participating countries - the EEA member or cooperating countries. The resulting national land cover inventories are further integrated into a seamless land cover map of Europe. The resulting European database is based on standard methodology and nomenclature with following base parameters: - 44 classes in the hierarchical 3-level Corine nomenclature - minimum mapping unit (MMU) for status layers is 25 hectares - minimum width of linear elements is 100 metres - minimum mapping unit (MMU) for Land Cover Changes (LCC) for change layers is 5 hectares CLC programme provides important data sets supporting the implementation of key priority areas of the Environment Action Programmes of the European Community as protecting ecosystems, halting the loss of biological diversity, tracking the impacts of climate change, assessing developments in agriculture and implementing the EU Water Framework Directive etc.. CLC programme is also a part of the Global Monitoring for Environment and Security (GMES http://gmes.info) initiative, run by the European Commission and the European Space Agency, which will provide environmental information from a combination of air- and space-based observation systems and in-situ monitoring. More about the Corine Land Cover (CLC) programme and datasets can be found at http://www.eea.eu.]]></Abstract>
+<CRS>CRS:84</CRS>
+<CRS>EPSG:4326</CRS>
+<CRS>EPSG:3857</CRS>
+ <!-- alias 3857 -->
+<CRS>EPSG:102100</CRS>
+<CRS>EPSG:3035</CRS>
+<EX_GeographicBoundingBox><westBoundLongitude>-54.265103</westBoundLongitude><eastBoundLongitude>-51.621584</eastBoundLongitude><southBoundLatitude>3.778333</southBoundLatitude><northBoundLatitude>5.844874</northBoundLatitude></EX_GeographicBoundingBox>
+<BoundingBox CRS="CRS:84" minx="-54.265103" miny="3.778333" maxx="-51.621584" maxy="5.844874"/>
+<BoundingBox CRS="EPSG:4326" minx="3.778333" miny="-54.265103" maxx="5.844874" maxy="-51.621584"/>
+<BoundingBox CRS="EPSG:3857" minx="-6040763.618500" miny="420907.329400" maxx="-5746488.498000" maxy="651779.844400"/>
+<BoundingBox CRS="EPSG:102100" minx="-6040763.618500" miny="420907.329400" maxx="-5746488.498000" maxy="651779.844400"/>
+<BoundingBox CRS="EPSG:3035" minx="626644.774188" miny="-2733513.467165" maxx="1058315.785247" maxy="-2415523.552217"/>
+        <Style>
+          <Name>default</Name>
+          <Title><![CDATA[CLC2018_CLC2018_V2018_20u1_FR_Guf_WM]]></Title>
+          <LegendURL width="564" height="810">
+            <Format>image/png</Format>
+            <OnlineResource xlink:href="https://image.discomap.eea.europa.eu/arcgis/services/Corine/CLC2018_WM/MapServer/WMSServer?request=GetLegendGraphic%26version=1.3.0%26format=image/png%26layer=8" xlink:type="simple" xmlns:xlink="http://www.w3.org/1999/xlink" />
+          </LegendURL>
+        </Style>
+      </Layer>
+      <Layer queryable="1">
+        <Name>9</Name>
+        <Title><![CDATA[CLC2018_CLC2018_V2018_20u1_FR_MTQ_WM]]></Title>
+        <Abstract><![CDATA[CLC18is one of the datasets produced within the frame the Corine Land Cover programme referring to land cover / land use status of year 2018. The Corine Land Cover (CLC) is an European programme, coordinated by the European Environment Agency (EEA), providing consistent information on land cover and land cover changes across Europe. CLC products are based on the photointerpretation of satellite images by the national teams of the participating countries - the EEA member or cooperating countries. The resulting national land cover inventories are further integrated into a seamless land cover map of Europe. The resulting European database is based on standard methodology and nomenclature with following base parameters: - 44 classes in the hierarchical 3-level Corine nomenclature - minimum mapping unit (MMU) for status layers is 25 hectares - minimum width of linear elements is 100 metres - minimum mapping unit (MMU) for Land Cover Changes (LCC) for change layers is 5 hectares CLC programme provides important data sets supporting the implementation of key priority areas of the Environment Action Programmes of the European Community as protecting ecosystems, halting the loss of biological diversity, tracking the impacts of climate change, assessing developments in agriculture and implementing the EU Water Framework Directive etc.. CLC programme is also a part of the Global Monitoring for Environment and Security (GMES http://gmes.info) initiative, run by the European Commission and the European Space Agency, which will provide environmental information from a combination of air- and space-based observation systems and in-situ monitoring. More about the Corine Land Cover (CLC) programme and datasets can be found at http://www.eea.eu.]]></Abstract>
+<CRS>CRS:84</CRS>
+<CRS>EPSG:4326</CRS>
+<CRS>EPSG:3857</CRS>
+ <!-- alias 3857 -->
+<CRS>EPSG:102100</CRS>
+<CRS>EPSG:3035</CRS>
+<EX_GeographicBoundingBox><westBoundLongitude>-61.322165</westBoundLongitude><eastBoundLongitude>-60.716781</eastBoundLongitude><southBoundLatitude>14.298308</southBoundLatitude><northBoundLatitude>14.969143</northBoundLatitude></EX_GeographicBoundingBox>
+<BoundingBox CRS="CRS:84" minx="-61.322165" miny="14.298308" maxx="-60.716781" maxy="14.969143"/>
+<BoundingBox CRS="EPSG:4326" minx="14.298308" miny="-61.322165" maxx="14.969143" maxy="-60.716781"/>
+<BoundingBox CRS="EPSG:3857" minx="-6826352.169200" miny="1608463.056700" maxx="-6758961.167700" maxy="1685644.203800"/>
+<BoundingBox CRS="EPSG:102100" minx="-6826352.169200" miny="1608463.056700" maxx="-6758961.167700" maxy="1685644.203800"/>
+<BoundingBox CRS="EPSG:3035" minx="2446584.456270" miny="-2711690.657304" maxx="2564152.961440" maxy="-2629281.679397"/>
+        <Style>
+          <Name>default</Name>
+          <Title><![CDATA[CLC2018_CLC2018_V2018_20u1_FR_MTQ_WM]]></Title>
+          <LegendURL width="564" height="810">
+            <Format>image/png</Format>
+            <OnlineResource xlink:href="https://image.discomap.eea.europa.eu/arcgis/services/Corine/CLC2018_WM/MapServer/WMSServer?request=GetLegendGraphic%26version=1.3.0%26format=image/png%26layer=9" xlink:type="simple" xmlns:xlink="http://www.w3.org/1999/xlink" />
+          </LegendURL>
+        </Style>
+      </Layer>
+      <Layer queryable="1">
+        <Name>10</Name>
+        <Title><![CDATA[CLC2018_CLC2018_V2018_20u1_FR_MYT_WM]]></Title>
+        <Abstract><![CDATA[CLC18is one of the datasets produced within the frame the Corine Land Cover programme referring to land cover / land use status of year 2018. The Corine Land Cover (CLC) is an European programme, coordinated by the European Environment Agency (EEA), providing consistent information on land cover and land cover changes across Europe. CLC products are based on the photointerpretation of satellite images by the national teams of the participating countries - the EEA member or cooperating countries. The resulting national land cover inventories are further integrated into a seamless land cover map of Europe. The resulting European database is based on standard methodology and nomenclature with following base parameters: - 44 classes in the hierarchical 3-level Corine nomenclature - minimum mapping unit (MMU) for status layers is 25 hectares - minimum width of linear elements is 100 metres - minimum mapping unit (MMU) for Land Cover Changes (LCC) for change layers is 5 hectares CLC programme provides important data sets supporting the implementation of key priority areas of the Environment Action Programmes of the European Community as protecting ecosystems, halting the loss of biological diversity, tracking the impacts of climate change, assessing developments in agriculture and implementing the EU Water Framework Directive etc.. CLC programme is also a part of the Global Monitoring for Environment and Security (GMES http://gmes.info) initiative, run by the European Commission and the European Space Agency, which will provide environmental information from a combination of air- and space-based observation systems and in-situ monitoring. More about the Corine Land Cover (CLC) programme and datasets can be found at http://www.eea.eu.]]></Abstract>
+<CRS>CRS:84</CRS>
+<CRS>EPSG:4326</CRS>
+<CRS>EPSG:3857</CRS>
+ <!-- alias 3857 -->
+<CRS>EPSG:102100</CRS>
+<CRS>EPSG:3035</CRS>
+<EX_GeographicBoundingBox><westBoundLongitude>44.927509</westBoundLongitude><eastBoundLongitude>45.389656</eastBoundLongitude><southBoundLatitude>-13.089536</southBoundLatitude><northBoundLatitude>-12.546972</northBoundLatitude></EX_GeographicBoundingBox>
+<BoundingBox CRS="CRS:84" minx="44.927509" miny="-13.089536" maxx="45.389656" maxy="-12.546972"/>
+<BoundingBox CRS="EPSG:4326" minx="-13.089536" miny="44.927509" maxx="-12.546972" maxy="45.389656"/>
+<BoundingBox CRS="EPSG:3857" minx="5001307.454000" miny="-1469963.395300" maxx="5052753.384700" maxy="-1408021.499400"/>
+<BoundingBox CRS="EPSG:102100" minx="5001307.454000" miny="-1469963.395300" maxx="5052753.384700" maxy="-1408021.499400"/>
+<BoundingBox CRS="EPSG:3035" minx="-2816728.206566" miny="8699852.464694" maxx="-2742275.228012" maxy="8759452.806187"/>
+        <Style>
+          <Name>default</Name>
+          <Title><![CDATA[CLC2018_CLC2018_V2018_20u1_FR_MYT_WM]]></Title>
+          <LegendURL width="564" height="810">
+            <Format>image/png</Format>
+            <OnlineResource xlink:href="https://image.discomap.eea.europa.eu/arcgis/services/Corine/CLC2018_WM/MapServer/WMSServer?request=GetLegendGraphic%26version=1.3.0%26format=image/png%26layer=10" xlink:type="simple" xmlns:xlink="http://www.w3.org/1999/xlink" />
+          </LegendURL>
+        </Style>
+      </Layer>
+      <Layer queryable="1">
+        <Name>11</Name>
+        <Title><![CDATA[CLC2018_CLC2018_V2018_20u1_FR_REU_WM]]></Title>
+        <Abstract><![CDATA[CLC18is one of the datasets produced within the frame the Corine Land Cover programme referring to land cover / land use status of year 2018. The Corine Land Cover (CLC) is an European programme, coordinated by the European Environment Agency (EEA), providing consistent information on land cover and land cover changes across Europe. CLC products are based on the photointerpretation of satellite images by the national teams of the participating countries - the EEA member or cooperating countries. The resulting national land cover inventories are further integrated into a seamless land cover map of Europe. The resulting European database is based on standard methodology and nomenclature with following base parameters: - 44 classes in the hierarchical 3-level Corine nomenclature - minimum mapping unit (MMU) for status layers is 25 hectares - minimum width of linear elements is 100 metres - minimum mapping unit (MMU) for Land Cover Changes (LCC) for change layers is 5 hectares CLC programme provides important data sets supporting the implementation of key priority areas of the Environment Action Programmes of the European Community as protecting ecosystems, halting the loss of biological diversity, tracking the impacts of climate change, assessing developments in agriculture and implementing the EU Water Framework Directive etc.. CLC programme is also a part of the Global Monitoring for Environment and Security (GMES http://gmes.info) initiative, run by the European Commission and the European Space Agency, which will provide environmental information from a combination of air- and space-based observation systems and in-situ monitoring. More about the Corine Land Cover (CLC) programme and datasets can be found at http://www.eea.eu.]]></Abstract>
+<CRS>CRS:84</CRS>
+<CRS>EPSG:4326</CRS>
+<CRS>EPSG:3857</CRS>
+ <!-- alias 3857 -->
+<CRS>EPSG:102100</CRS>
+<CRS>EPSG:3035</CRS>
+<EX_GeographicBoundingBox><westBoundLongitude>55.120538</westBoundLongitude><eastBoundLongitude>55.933092</eastBoundLongitude><southBoundLatitude>-21.480179</southBoundLatitude><northBoundLatitude>-20.781371</northBoundLatitude></EX_GeographicBoundingBox>
+<BoundingBox CRS="CRS:84" minx="55.120538" miny="-21.480179" maxx="55.933092" maxy="-20.781371"/>
+<BoundingBox CRS="EPSG:4326" minx="-21.480179" miny="55.120538" maxx="-20.781371" maxy="55.933092"/>
+<BoundingBox CRS="EPSG:3857" minx="6135990.209900" miny="-2449227.773500" maxx="6226443.290800" maxy="-2365828.374600"/>
+<BoundingBox CRS="EPSG:102100" minx="6135990.209900" miny="-2449227.773500" maxx="6226443.290800" maxy="-2365828.374600"/>
+<BoundingBox CRS="EPSG:3035" minx="-3108491.738501" miny="9942997.174504" maxx="-2992274.077922" maxy="10037496.529004"/>
+        <Style>
+          <Name>default</Name>
+          <Title><![CDATA[CLC2018_CLC2018_V2018_20u1_FR_REU_WM]]></Title>
+          <LegendURL width="564" height="810">
+            <Format>image/png</Format>
+            <OnlineResource xlink:href="https://image.discomap.eea.europa.eu/arcgis/services/Corine/CLC2018_WM/MapServer/WMSServer?request=GetLegendGraphic%26version=1.3.0%26format=image/png%26layer=11" xlink:type="simple" xmlns:xlink="http://www.w3.org/1999/xlink" />
+          </LegendURL>
+        </Style>
+      </Layer>
+      </Layer>
+      <Layer queryable="1">
+        <Name>12</Name>
+        <Title><![CDATA[Corine Land Cover 2018 raster]]></Title>
+        <Abstract><![CDATA[CLC2018 is one of the Corine Land Cover (CLC) datasets produced within the frame the Copernicus Land Monitoring Service referring to land cover / land use status of year 2018. CLC service has a long-time heritage (formerly known as "CORINE Land Cover Programme"), coordinated by the European Environment Agency (EEA). It provides consistent and thematically detailed information on land cover and land cover changes across Europe. CLC datasets are based on the classification of satellite images produced by the national teams of the participating countries - the EEA members and cooperating countries (EEA39). National CLC inventories are then further integrated into a seamless land cover map of Europe. The resulting European database relies on standard methodology and nomenclature with following base parameters: 44 classes in the hierarchical 3-level CLC nomenclature; minimum mapping unit (MMU) for status layers is 25 hectares; minimum width of linear elements is 100 metres. Change layers have higher resolution, i.e. minimum mapping unit (MMU) is 5 hectares for Land Cover Changes (LCC), and the minimum width of linear elements is 100 metres. The CLC service delivers important data sets supporting the implementation of key priority areas of the Environment Action Programmes of the European Union as e.g. protecting ecosystems, halting the loss of biological diversity, tracking the impacts of climate change, monitoring urban land take, assessing developments in agriculture or dealing with water resources directives. CLC belongs to the Pan-European component of the Copernicus Land Monitoring Service (https://land.copernicus.eu/), part of the European Copernicus Programme coordinated by the European Environment Agency, providing environmental information from a combination of air- and space-based observation systems and in-situ monitoring. Additional information about CLC product description including mapping guides can be found at https://land.copernicus.eu/user-corner/technical-library/clc2018technicalguidelines_final.pdf. CLC class descriptions can be found at https://land.copernicus.eu/user-corner/technical-library/corine-land-cover-nomenclature-guidelines/html/.]]></Abstract>
+<CRS>CRS:84</CRS>
+<CRS>EPSG:4326</CRS>
+<CRS>EPSG:3857</CRS>
+ <!-- alias 3857 -->
+<CRS>EPSG:102100</CRS>
+<CRS>EPSG:3035</CRS>
+<EX_GeographicBoundingBox><westBoundLongitude>-56.505142</westBoundLongitude><eastBoundLongitude>72.906158</eastBoundLongitude><southBoundLatitude>24.283655</southBoundLatitude><northBoundLatitude>72.664410</northBoundLatitude></EX_GeographicBoundingBox>
+<BoundingBox CRS="CRS:84" minx="-56.505142" miny="24.283655" maxx="72.906158" maxy="72.664410"/>
+<BoundingBox CRS="EPSG:4326" minx="24.283655" miny="-56.505142" maxx="72.664410" maxy="72.906158"/>
+<BoundingBox CRS="EPSG:3857" minx="-6290123.623699" miny="2788011.054933" maxx="8115876.376301" maxy="11996911.054933"/>
+<BoundingBox CRS="EPSG:102100" minx="-6290123.623699" miny="2788011.054933" maxx="8115876.376301" maxy="11996911.054933"/>
+<BoundingBox CRS="EPSG:3035" minx="162412.044474" miny="-1742096.915131" maxx="6512401.155419" maxy="10146780.330407"/>
+        <Style>
+          <Name>default</Name>
+          <Title><![CDATA[Corine Land Cover 2018 raster]]></Title>
+          <LegendURL width="534" height="828">
+            <Format>image/png</Format>
+            <OnlineResource xlink:href="https://image.discomap.eea.europa.eu/arcgis/services/Corine/CLC2018_WM/MapServer/WMSServer?request=GetLegendGraphic%26version=1.3.0%26format=image/png%26layer=12" xlink:type="simple" xmlns:xlink="http://www.w3.org/1999/xlink" />
+          </LegendURL>
+        </Style>
+        <MinScaleDenominator>236235.119048</MinScaleDenominator>
+      </Layer>
+      <Layer queryable="1">
+        <Name>13</Name>
+        <Title><![CDATA[Corine Land Cover 2018 vector]]></Title>
+        <Abstract><![CDATA[CLC2018 is one of the datasets produced within the frame the Corine Land Cover programme referring to land cover / land use status of year 2018. The Corine Land Cover (CLC) is an European programme, coordinated by the European Environment Agency (EEA), providing consistent information on land cover and land cover changes across Europe. CLC products are based on the photointerpretation of satellite images by the national teams of the participating countries - the EEA member or cooperating countries. The resulting national land cover inventories are further integrated into a seamless land cover map of Europe. The resulting European database is based on standard methodology and nomenclature with following base parameters: - 44 classes in the hierarchical 3-level Corine nomenclature - minimum mapping unit (MMU) for status layers is 25 hectares - minimum width of linear elements is 100 metres - minimum mapping unit (MMU) for Land Cover Changes (LCC) for change layers is 5 hectares CLC programme provides important data sets supporting the implementation of key priority areas of the Environment Action Programmes of the European Community as protecting ecosystems, halting the loss of biological diversity, tracking the impacts of climate change, assessing developments in agriculture and implementing the EU Water Framework Directive etc.. CLC programme is also a part of the Global Monitoring for Environment and Security (GMES http://gmes.info) initiative, run by the European Commission and the European Space Agency, which will provide environmental information from a combination of air- and space-based observation systems and in-situ monitoring. More about the Corine Land Cover (CLC) programme and datasets can be found at http://www.eea.eu.]]></Abstract>
+<CRS>CRS:84</CRS>
+<CRS>EPSG:4326</CRS>
+<CRS>EPSG:3857</CRS>
+ <!-- alias 3857 -->
+<CRS>EPSG:102100</CRS>
+<CRS>EPSG:3035</CRS>
+<EX_GeographicBoundingBox><westBoundLongitude>-31.561261</westBoundLongitude><eastBoundLongitude>44.820775</eastBoundLongitude><southBoundLatitude>27.405827</southBoundLatitude><northBoundLatitude>71.409109</northBoundLatitude></EX_GeographicBoundingBox>
+<BoundingBox CRS="CRS:84" minx="-31.561261" miny="27.405827" maxx="44.820775" maxy="71.409109"/>
+<BoundingBox CRS="EPSG:4326" minx="27.405827" miny="-31.561261" maxx="71.409109" maxy="44.820775"/>
+<BoundingBox CRS="EPSG:3857" minx="-3513383.543500" miny="3174266.572000" maxx="4989425.832900" maxy="11543628.387100"/>
+<BoundingBox CRS="EPSG:102100" minx="-3513383.543500" miny="3174266.572000" maxx="4989425.832900" maxy="11543628.387100"/>
+<BoundingBox CRS="EPSG:3035" minx="499501.658333" miny="328362.544389" maxx="5805155.557479" maxy="7719449.855544"/>
+        <Style>
+          <Name>default</Name>
+          <Title><![CDATA[Corine Land Cover 2018 vector]]></Title>
+          <LegendURL width="564" height="810">
+            <Format>image/png</Format>
+            <OnlineResource xlink:href="https://image.discomap.eea.europa.eu/arcgis/services/Corine/CLC2018_WM/MapServer/WMSServer?request=GetLegendGraphic%26version=1.3.0%26format=image/png%26layer=13" xlink:type="simple" xmlns:xlink="http://www.w3.org/1999/xlink" />
+          </LegendURL>
+        </Style>
+        <MaxScaleDenominator>236234.174107</MaxScaleDenominator>
+      </Layer>
+    </Layer>
+  </Capability>
+</WMS_Capabilities>
