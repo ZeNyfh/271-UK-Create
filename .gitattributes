@@ -6,6 +6,8 @@ data/*.zip filter=lfs diff=lfs merge=lfs -text
 data/*.zip.part* filter=lfs diff=lfs merge=lfs -text
 data/*.geojson filter=lfs diff=lfs merge=lfs -text
 data/egdi_wfs_cache/*.geojson filter=lfs diff=lfs merge=lfs -text
+**/uk_world_data/hoverpreviews/** filter=lfs diff=lfs merge=lfs -text
+**/uk_world_data_gb/hoverpreviews/** filter=lfs diff=lfs merge=lfs -text
 /tools/ukgeo-tools/uk_world_data_gb/hoverpreviews/layers/height.png filter=lfs diff=lfs merge=lfs -text
 /tools/ukgeo-tools/uk_world_data_gb/hoverpreviews/samples/height_rgb.png filter=lfs diff=lfs merge=lfs -text
 /tools/ukgeo-tools/uk_world_data_gb/hoverpreviews/samples/height_u16.png filter=lfs diff=lfs merge=lfs -text

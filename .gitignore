@@ -31,7 +31,12 @@ __pycache__/
 dist/
 
 # Generated UKGeo runtime/debug outputs
-tools/ukgeo-tools/uk_world_data*/
+**/uk_world_data/*
+**/uk_world_data_gb/*
+!**/uk_world_data/hoverpreviews/
+!**/uk_world_data/hoverpreviews/**
+!**/uk_world_data_gb/hoverpreviews/
+!**/uk_world_data_gb/hoverpreviews/**
 tools/ukgeo-tools/**/*.png
 tools/ukgeo-tools/**/*.tif
 tools/ukgeo-tools/**/*.tiff
@@ -65,7 +70,6 @@ tools/ukgeo-tools/ukgeo-hover-linux
 
 # Generated world tiles / hoverpreviews stay local. Publish as zip archives under
 # data/ instead of tens of thousands of region files (see data/README.md).
-tools/ukgeo-tools/uk_world_data_gb/
 tools/ukgeo-tools/uk_world_data_gb.backup*/
 tools/ukgeo-tools/uk_world_data_gb.rebuild*/
 
