@@ -169,6 +169,10 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     private static final int MIN_RIVER_CHANNEL_HALF_WIDTH = Integer.getInteger("ukgeo.minRiverChannelHalfWidth", 1);
     private static final int MAX_RIVER_SURFACE_STEP = 1;
     private static final int RIVER_REACH_SMOOTHING_RADIUS = 8;
+    /** Coarse cell size for shared river water-surface planes (blocks = 1 << shift). */
+    private static final int RIVER_WATER_PLANE_SHIFT = 3;
+    private static final int RIVER_BANK_STRIP_EXTRA = 3;
+    private static final int RIVER_BANK_WIDE_EXTRA = 12;
     private static final double ALLOW_STEEP_RAPIDS_ONLY_ABOVE_SLOPE = 1.8;
     private static final int WATER_EDGE_SMOOTHING_RADIUS = 16;
     private static final int WATER_EDGE_SAMPLE_STEP = 4;
@@ -641,26 +645,64 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     }
 
     private int riverWaterSurfaceY(RuntimeData data, HeightTileWindow heightWindow, int x, int z, int originalSurfaceY, int riverBedY, int waterRadius, double slope, WaterShapeCache cache) {
-        OptionalInt reachBank = riverReachBankSurfaceY(data, heightWindow, x, z, originalSurfaceY, waterRadius, cache);
-        int smoothed = smoothedSurfaceY(heightWindow, x, z, Math.max(3, Math.max(riverWidenRadius, waterRadius))).orElse(originalSurfaceY);
-        // Prefer min-biased bank height; without banks never follow hillside DEM above local land.
-        int target = reachBank.orElseGet(() -> Math.min(smoothed, originalSurfaceY));
-        if (reachBank.isPresent()) {
-            target = Math.min(target, reachBank.getAsInt());
+        long planeKey = riverWaterPlaneKey(x, z);
+        if (cache != null) {
+            Integer cached = cache.riverWaterPlanes.get(planeKey);
+            if (cached != null) {
+                return Math.max(riverBedY + 1, cached);
+            }
+        }
+        OptionalInt bankTop = riverReachBankSurfaceY(data, heightWindow, x, z, waterRadius, cache);
+        int plane;
+        if (bankTop.isPresent()) {
+            // Banks sit one block above the water plane.
+            plane = bankTop.getAsInt() - 1;
+        } else {
+            // Never use under-river wet DEM (originalSurfaceY) — it tracks bathymetry dips.
+            plane = riverBedY + 1;
         }
         int minAllowedY = riverBedY + 1;
-        return Math.max(minAllowedY, target);
+        int result = Math.max(minAllowedY, plane);
+        if (cache != null) {
+            cache.riverWaterPlanes.putIfAbsent(planeKey, result);
+            Integer shared = cache.riverWaterPlanes.get(planeKey);
+            if (shared != null) {
+                result = Math.max(minAllowedY, shared);
+            }
+        }
+        return result;
+    }
+
+    private static long riverWaterPlaneKey(int x, int z) {
+        return (((long) (x >> RIVER_WATER_PLANE_SHIFT)) << 32) ^ ((z >> RIVER_WATER_PLANE_SHIFT) & 0xffffffffL);
     }
 
     /**
-     * Samples dry bank columns just outside the water channel and returns a robust bank level.
-     * Unlike the old reach average (which used river-mask DEM cells already low in valleys),
-     * this keeps the water surface as a flat plane at bank height.
+     * Samples dry bank columns just outside the water channel and returns a robust bank-top level.
+     * Never samples under-river / river-mask DEM cells (those track valley bathymetry).
+     * Uses a tight bank strip first, then a wider dry-land ring if samples are sparse.
+     * Min-biased so hillside walls do not lift the water plane.
      */
-    private OptionalInt riverReachBankSurfaceY(RuntimeData data, HeightTileWindow heightWindow, int x, int z, int originalSurfaceY, int waterRadius, WaterShapeCache cache) {
-        int radius = Math.max(RIVER_REACH_SMOOTHING_RADIUS, Math.min(14, waterRadius + 4));
-        int bankSearch = waterRadius + 3;
-        int localSmoothed = smoothedSurfaceY(heightWindow, x, z, Math.max(3, Math.max(riverWidenRadius, waterRadius))).orElse(originalSurfaceY);
+    private OptionalInt riverReachBankSurfaceY(RuntimeData data, HeightTileWindow heightWindow, int x, int z, int waterRadius, WaterShapeCache cache) {
+        OptionalInt tight = sampleDryBankSurfaces(data, heightWindow, x, z, waterRadius, cache, RIVER_BANK_STRIP_EXTRA, true);
+        if (tight.isPresent()) {
+            return tight;
+        }
+        return sampleDryBankSurfaces(data, heightWindow, x, z, waterRadius, cache, RIVER_BANK_WIDE_EXTRA, false);
+    }
+
+    private OptionalInt sampleDryBankSurfaces(
+        RuntimeData data,
+        HeightTileWindow heightWindow,
+        int x,
+        int z,
+        int waterRadius,
+        WaterShapeCache cache,
+        int outerExtra,
+        boolean requireNearRiver
+    ) {
+        int radius = Math.max(RIVER_REACH_SMOOTHING_RADIUS, Math.min(24, waterRadius + outerExtra + 2));
+        int bankSearch = waterRadius + outerExtra + 2;
         int total = 0;
         int count = 0;
         int min = Integer.MAX_VALUE;
@@ -678,22 +720,26 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
                 }
                 RiverDistance toRiver = nearestRiver(data, sampleX, sampleZ, bankSearch, cache);
                 if (!toRiver.found()) {
-                    continue;
-                }
-                double blocks = toRiver.blocks();
-                // Bank strip: outside the water fill radius, within a few blocks of the channel edge.
-                if (blocks <= waterRadius || blocks > waterRadius + 3) {
-                    continue;
+                    if (requireNearRiver) {
+                        continue;
+                    }
+                    // Wider fallback: still require the sample outside the water fill radius
+                    // by Euclidean distance from the query water column.
+                    double fromQuery = Math.sqrt(distanceSquared);
+                    if (fromQuery <= waterRadius || fromQuery > waterRadius + outerExtra) {
+                        continue;
+                    }
+                } else {
+                    double blocks = toRiver.blocks();
+                    if (blocks <= waterRadius || blocks > waterRadius + outerExtra) {
+                        continue;
+                    }
                 }
                 int sample = sampleDecimetresOrNodata(heightWindow, sampleX, sampleZ);
                 if (sample == R16HeightTileLayer.NODATA) {
                     continue;
                 }
                 int surface = rawSurfaceY(heightWindow, sampleX, sampleZ, sample);
-                // Reject outlier-high banks on slopes relative to the query column.
-                if (surface > localSmoothed + 2) {
-                    continue;
-                }
                 total += surface;
                 min = Math.min(min, surface);
                 max = Math.max(max, surface);
@@ -705,6 +751,7 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         }
         int average = Math.round((float) total / count);
         // Bias harder toward the lower bank so water does not climb hillside walls.
+        // Do not reject high banks against channel/wet DEM — that discarded real dry banks.
         int lowBias = Math.round((min * 3.0f + average) / 4.0f);
         return OptionalInt.of(Math.min(lowBias, max));
     }
@@ -1582,6 +1629,8 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         private final Map<Long, RiverShape> shapes = new HashMap<>();
         private final Map<Long, Integer> lakeDepths = new HashMap<>();
         private final Map<Long, Integer> lakeWaterSurfaces = new HashMap<>();
+        /** Shared flat water-surface Y per coarse cell (x>>3, z>>3). Dry-bank derived only. */
+        private final Map<Long, Integer> riverWaterPlanes = new HashMap<>();
         private final Map<Long, Integer> riverDepths = new HashMap<>();
         private final Map<Long, Integer> vegetationValues = new HashMap<>();
         private final Map<Long, Integer> riverValues = new HashMap<>();

@@ -88,6 +88,7 @@ final class ChunkTerrainPlanner {
         long waterElapsedNanos = System.nanoTime() - waterStartNanos;
         logTiming("ChunkTerrainPlanner.waterPlanning", chunk, waterStartNanos);
         flattenRiverWaterSurfaces(columns, minBuildY, maxBuildY);
+        fitWaterToBanks(columns, minBuildY, maxBuildY);
         long oreStartNanos = System.nanoTime();
         Plan plan = new Plan(columns, generator.buildOrePlacements(data, chunk, columns), generator.seaLevel());
         long oreElapsedNanos = System.nanoTime() - oreStartNanos;
@@ -305,7 +306,14 @@ final class ChunkTerrainPlanner {
     }
 
     private static void flattenRiverWaterSurfaces(ColumnPlan[] columns, int minBuildY, int maxBuildY) {
+        // Two passes with a larger neighbourhood so mid-river terraces flatten within the chunk.
+        applyRiverWaterMedianPass(columns, minBuildY, maxBuildY, 3);
+        applyRiverWaterMedianPass(columns, minBuildY, maxBuildY, 3);
+    }
+
+    private static void applyRiverWaterMedianPass(ColumnPlan[] columns, int minBuildY, int maxBuildY, int radius) {
         int[] medians = new int[columns.length];
+        int sampleCap = (radius * 2 + 1) * (radius * 2 + 1);
         for (int index = 0; index < columns.length; index++) {
             ColumnPlan column = columns[index];
             if (!column.river().hasWater()) {
@@ -314,10 +322,10 @@ final class ChunkTerrainPlanner {
             }
             int localZ = index / CHUNK_SIZE;
             int localX = index - localZ * CHUNK_SIZE;
-            int[] samples = new int[25];
+            int[] samples = new int[sampleCap];
             int count = 0;
-            for (int dz = -2; dz <= 2; dz++) {
-                for (int dx = -2; dx <= 2; dx++) {
+            for (int dz = -radius; dz <= radius; dz++) {
+                for (int dx = -radius; dx <= radius; dx++) {
                     int nx = localX + dx;
                     int nz = localZ + dz;
                     if (nx < 0 || nz < 0 || nx >= CHUNK_SIZE || nz >= CHUNK_SIZE) {
@@ -348,7 +356,7 @@ final class ChunkTerrainPlanner {
             int oldBed = river.terrainSurfaceY();
             int depth = Math.max(1, oldWater - oldBed);
             int newWater = Math.clamp(median, minBuildY + 1, maxBuildY);
-            int newBed = Math.max(minBuildY + 1, newWater - depth);
+            int newBed = RiverBankFit.bedForWater(newWater, depth, minBuildY);
             UkGeoChunkGenerator.RiverShape flat = new UkGeoChunkGenerator.RiverShape(
                 true,
                 river.influenced(),
@@ -364,6 +372,189 @@ final class ChunkTerrainPlanner {
                 column.steep(),
                 column.coastalBeach(),
                 flat,
+                column.vegetationClass(),
+                column.surfaceRock(),
+                column.exposedSurfaceRock(),
+                column.hasHeightData()
+            );
+        }
+    }
+
+    /**
+     * Fit river water to adjacent dry banks: small bank rounding (≤2) or lower water when overflow is larger.
+     * Does not raise water toward taller neighbours.
+     */
+    private static void fitWaterToBanks(ColumnPlan[] columns, int minBuildY, int maxBuildY) {
+        final int bankRadius = 3;
+        int[] newWaters = new int[columns.length];
+        int[] bankRaises = new int[columns.length];
+        java.util.Arrays.fill(newWaters, Integer.MIN_VALUE);
+        java.util.Arrays.fill(bankRaises, Integer.MIN_VALUE);
+
+        for (int index = 0; index < columns.length; index++) {
+            ColumnPlan column = columns[index];
+            if (!column.river().hasWater()) {
+                continue;
+            }
+            int localZ = index / CHUNK_SIZE;
+            int localX = index - localZ * CHUNK_SIZE;
+            int waterSurface = column.river().waterSurfaceY();
+            int minBank = Integer.MAX_VALUE;
+            for (int dz = -bankRadius; dz <= bankRadius; dz++) {
+                for (int dx = -bankRadius; dx <= bankRadius; dx++) {
+                    if (dx == 0 && dz == 0) {
+                        continue;
+                    }
+                    int nx = localX + dx;
+                    int nz = localZ + dz;
+                    if (nx < 0 || nz < 0 || nx >= CHUNK_SIZE || nz >= CHUNK_SIZE) {
+                        continue;
+                    }
+                    ColumnPlan neighbor = columns[nz * CHUNK_SIZE + nx];
+                    if (neighbor.river().hasWater()) {
+                        continue;
+                    }
+                    int bankTop = Math.min(neighbor.terrainTop(), neighbor.originalSurfaceY());
+                    minBank = Math.min(minBank, bankTop);
+                }
+            }
+            int fitted = RiverBankFit.resolveWaterSurface(waterSurface, minBank);
+            fitted = Math.clamp(fitted, minBuildY + 1, maxBuildY);
+            // Never raise water — only keep or lower.
+            newWaters[index] = Math.min(waterSurface, fitted);
+
+            if (minBank != Integer.MAX_VALUE && waterSurface - minBank > 0 && waterSurface - minBank <= RiverBankFit.MAX_BANK_RAISE) {
+                // Mark that low banks near this water may be raised toward water+1.
+                for (int dz = -bankRadius; dz <= bankRadius; dz++) {
+                    for (int dx = -bankRadius; dx <= bankRadius; dx++) {
+                        if (dx == 0 && dz == 0) {
+                            continue;
+                        }
+                        int nx = localX + dx;
+                        int nz = localZ + dz;
+                        if (nx < 0 || nz < 0 || nx >= CHUNK_SIZE || nz >= CHUNK_SIZE) {
+                            continue;
+                        }
+                        int nIndex = nz * CHUNK_SIZE + nx;
+                        ColumnPlan neighbor = columns[nIndex];
+                        if (neighbor.river().hasWater()) {
+                            continue;
+                        }
+                        int bankTop = neighbor.terrainTop();
+                        int raised = RiverBankFit.raiseBankToward(bankTop, newWaters[index]);
+                        if (raised > bankTop) {
+                            int prev = bankRaises[nIndex];
+                            bankRaises[nIndex] = prev == Integer.MIN_VALUE ? raised : Math.max(prev, raised);
+                        }
+                    }
+                }
+            }
+        }
+
+        for (int index = 0; index < columns.length; index++) {
+            ColumnPlan column = columns[index];
+            if (column.river().hasWater() && newWaters[index] != Integer.MIN_VALUE) {
+                UkGeoChunkGenerator.RiverShape river = column.river();
+                int oldWater = river.waterSurfaceY();
+                int newWater = newWaters[index];
+                int depth = Math.max(1, oldWater - river.terrainSurfaceY());
+                int newBed = RiverBankFit.bedForWater(newWater, depth, minBuildY);
+                UkGeoChunkGenerator.RiverShape shaped = new UkGeoChunkGenerator.RiverShape(
+                    true,
+                    river.influenced(),
+                    newBed,
+                    newWater,
+                    river.floorMaterial()
+                );
+                int columnTop = Math.clamp(Math.max(column.columnTop(), newWater), minBuildY, maxBuildY);
+                columns[index] = new ColumnPlan(
+                    column.originalSurfaceY(),
+                    newBed,
+                    columnTop,
+                    column.steep(),
+                    column.coastalBeach(),
+                    shaped,
+                    column.vegetationClass(),
+                    column.surfaceRock(),
+                    column.exposedSurfaceRock(),
+                    column.hasHeightData()
+                );
+                continue;
+            }
+            if (bankRaises[index] != Integer.MIN_VALUE && !column.river().hasWater()) {
+                int raisedTop = Math.clamp(bankRaises[index], minBuildY + 1, maxBuildY);
+                if (raisedTop <= column.terrainTop()) {
+                    continue;
+                }
+                UkGeoChunkGenerator.RiverShape river = column.river();
+                UkGeoChunkGenerator.RiverShape raisedRiver = new UkGeoChunkGenerator.RiverShape(
+                    false,
+                    river.influenced(),
+                    raisedTop,
+                    raisedTop,
+                    river.floorMaterial()
+                );
+                int columnTop = Math.clamp(Math.max(column.columnTop(), raisedTop), minBuildY, maxBuildY);
+                columns[index] = new ColumnPlan(
+                    column.originalSurfaceY(),
+                    raisedTop,
+                    columnTop,
+                    column.steep(),
+                    column.coastalBeach(),
+                    raisedRiver,
+                    column.vegetationClass(),
+                    column.surfaceRock(),
+                    column.exposedSurfaceRock(),
+                    column.hasHeightData()
+                );
+            }
+        }
+
+        // After bank raises, re-clamp water so it stays one below the (possibly raised) min bank.
+        for (int index = 0; index < columns.length; index++) {
+            ColumnPlan column = columns[index];
+            if (!column.river().hasWater()) {
+                continue;
+            }
+            int localZ = index / CHUNK_SIZE;
+            int localX = index - localZ * CHUNK_SIZE;
+            int minBank = Integer.MAX_VALUE;
+            for (int dz = -bankRadius; dz <= bankRadius; dz++) {
+                for (int dx = -bankRadius; dx <= bankRadius; dx++) {
+                    if (dx == 0 && dz == 0) {
+                        continue;
+                    }
+                    int nx = localX + dx;
+                    int nz = localZ + dz;
+                    if (nx < 0 || nz < 0 || nx >= CHUNK_SIZE || nz >= CHUNK_SIZE) {
+                        continue;
+                    }
+                    ColumnPlan neighbor = columns[nz * CHUNK_SIZE + nx];
+                    if (neighbor.river().hasWater()) {
+                        continue;
+                    }
+                    minBank = Math.min(minBank, neighbor.terrainTop());
+                }
+            }
+            if (minBank == Integer.MAX_VALUE) {
+                continue;
+            }
+            int water = column.river().waterSurfaceY();
+            int fitted = Math.min(water, minBank - 1);
+            if (fitted >= water) {
+                continue;
+            }
+            fitted = Math.clamp(fitted, minBuildY + 1, maxBuildY);
+            UkGeoChunkGenerator.RiverShape river = column.river();
+            int depth = Math.max(1, water - river.terrainSurfaceY());
+            int newBed = RiverBankFit.bedForWater(fitted, depth, minBuildY);
+            columns[index] = new ColumnPlan(
+                column.originalSurfaceY(),
+                newBed,
+                Math.clamp(Math.max(column.columnTop(), fitted), minBuildY, maxBuildY),
+                column.steep(),
+                column.coastalBeach(),
+                new UkGeoChunkGenerator.RiverShape(true, river.influenced(), newBed, fitted, river.floorMaterial()),
                 column.vegetationClass(),
                 column.surfaceRock(),
                 column.exposedSurfaceRock(),
