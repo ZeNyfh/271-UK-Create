@@ -53,14 +53,19 @@ public final class UkGeoAnimals {
     private static final Object ANIMAL_HABITAT_LOCK = new Object();
     private static volatile AnimalHabitatRuntime ANIMAL_HABITAT_RUNTIME;
 
+    /** Non-allowlisted WilderNature mobs still referenced by datapack remove_spawns (must exist in registry). */
     private static final Set<ResourceLocation> UNWANTED_WILDERNATURE = Set.of(
-            id("wildernature", "red_wolf"),
             id("wildernature", "raccoon"),
-            id("wildernature", "penguin"),
             id("wildernature", "turkey"),
-            id("wildernature", "pelican"),
-            id("wildernature", "flamingo"),
-            id("wildernature", "cassowary")
+            id("wildernature", "cassowary"),
+            id("wildernature", "beaver"),
+            id("wildernature", "elephant"),
+            id("wildernature", "giraffe"),
+            id("wildernature", "hippo"),
+            id("wildernature", "lion"),
+            id("wildernature", "scorpion"),
+            id("wildernature", "swift_fox"),
+            id("wildernature", "termite")
     );
 
     private static final Set<ResourceLocation> FILTERED_WILDERNATURE = Set.of(
@@ -70,7 +75,6 @@ public final class UkGeoAnimals {
             id("wildernature", "dog"),
             id("wildernature", "hedgehog"),
             id("wildernature", "minisheep"),
-            id("wildernature", "owl"),
             id("wildernature", "squirrel")
     );
 
@@ -88,7 +92,6 @@ public final class UkGeoAnimals {
     private static final Map<ResourceLocation, Integer> EXTRA_RARITY = Map.of(
             id("wildernature", "bison"), 10,
             id("wildernature", "dog"), 5,
-            id("wildernature", "owl"), 3,
             id("minecraft", "wolf"), 6,
             id("minecraft", "fox"), 3,
             id("minecraft", "bat"), 4
@@ -161,11 +164,14 @@ public final class UkGeoAnimals {
     }
 
     private static SpawnDecision decide(ResourceLocation entityId, String biome, BlockPos pos, MobSpawnType spawnType, net.minecraft.world.level.ServerLevelAccessor level) {
-        if (UNWANTED_WILDERNATURE.contains(entityId) && isWorldSpawn(spawnType)) {
-            return SpawnDecision.block("unwanted_wildernature");
-        }
         if (!isWorldSpawn(spawnType)) {
             return SpawnDecision.allow();
+        }
+        // WilderNature: allowlist only (new animals like hippo/lion must not slip past a stale denylist).
+        if ("wildernature".equals(entityId.getNamespace())) {
+            if (!FILTERED_WILDERNATURE.contains(entityId)) {
+                return SpawnDecision.block("unwanted_wildernature");
+            }
         }
         if (FILTERED_WILDERNATURE.contains(entityId) || FILTERED_VANILLA.contains(entityId)) {
             if (!isHabitatAllowed(entityId, biome, pos, spawnType, level)) {
@@ -178,7 +184,9 @@ public final class UkGeoAnimals {
             if (rarity > 1 && Math.floorMod(positionHash(pos, entityId.hashCode()), rarity) != 0) {
                 return SpawnDecision.block("rarity");
             }
+            return SpawnDecision.allow();
         }
+        // Other mods' mobs: unchanged (not gated by this allowlist).
         return SpawnDecision.allow();
     }
 
@@ -214,7 +222,6 @@ public final class UkGeoAnimals {
             case "wildernature:boar" -> y <= 245 && (isWoodland(biome) || isHeath(biome) || isArableEdge(biome));
             case "wildernature:hedgehog" -> y <= 185 && (isLowlandOpen(biome) || isArableEdge(biome) || "urban".equals(biome) || "broadleaf_woodland".equals(biome));
             case "wildernature:squirrel" -> y <= 235 && (isWoodland(biome) || "urban".equals(biome));
-            case "wildernature:owl" -> y <= 265 && (isWoodland(biome) || isArableEdge(biome) || isHeath(biome));
             case "wildernature:dog" -> y <= 170 && (isLowlandOpen(biome) || "urban".equals(biome) || "arable".equals(biome));
             case "wildernature:minisheep" -> y <= 290 && (isGrassland(biome) || isHeath(biome) || "rocky".equals(biome));
             case "wildernature:bison" -> y <= 220 && ("improved_grassland".equals(biome) || "neutral_grassland".equals(biome) || isHeath(biome));

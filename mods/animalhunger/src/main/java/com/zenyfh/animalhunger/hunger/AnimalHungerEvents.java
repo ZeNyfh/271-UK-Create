@@ -108,7 +108,7 @@ public final class AnimalHungerEvents {
             return true;
         }
         return "wildernature".equals(id.getNamespace()) && AnimalHungerConfig.ENABLE_WILDERNATURE_SUPPORT.get() && switch (id.getPath()) {
-            case "deer", "bison", "boar", "dog", "hedgehog", "minisheep", "owl", "squirrel" -> true;
+            case "deer", "bison", "boar", "dog", "hedgehog", "minisheep", "squirrel" -> true;
             default -> false;
         };
     }
