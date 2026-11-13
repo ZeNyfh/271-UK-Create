@@ -590,19 +590,22 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     }
 
     private int riverWaterSurfaceY(RuntimeData data, HeightTileWindow heightWindow, int x, int z, int originalSurfaceY, int riverBedY, int waterRadius, double slope, WaterShapeCache cache) {
-        OptionalInt reachSurface = riverReachWaterSurfaceY(data, heightWindow, x, z, originalSurfaceY, waterRadius, cache);
-        int smoothedSurface = smoothedSurfaceY(heightWindow, x, z, Math.max(3, Math.max(riverWidenRadius, waterRadius))).orElse(originalSurfaceY);
-        // Prefer the reach average (flat pool along the channel). Fall back to smoothed land-1.
-        int target = reachSurface.orElse(smoothedSurface) - 1;
-        // Keep freeboard below surrounding land, but never above the local land surface.
-        target = Math.min(target, originalSurfaceY - 1);
+        OptionalInt reachBank = riverReachBankSurfaceY(data, heightWindow, x, z, waterRadius, cache);
+        int smoothed = smoothedSurfaceY(heightWindow, x, z, Math.max(3, Math.max(riverWidenRadius, waterRadius))).orElse(originalSurfaceY);
+        // Flat bank-to-bank: no freeboard dip, and never follow in-channel valley DEM.
+        int target = reachBank.orElse(smoothed);
         int minAllowedY = riverBedY + 1;
-        int maxAllowedY = Math.max(minAllowedY, originalSurfaceY - 1);
-        return safeClampY(target, minAllowedY, maxAllowedY);
+        return Math.max(minAllowedY, target);
     }
 
-    private OptionalInt riverReachWaterSurfaceY(RuntimeData data, HeightTileWindow heightWindow, int x, int z, int fallbackSurfaceY, int waterRadius, WaterShapeCache cache) {
+    /**
+     * Samples dry bank columns just outside the water channel and returns a robust bank level.
+     * Unlike the old reach average (which used river-mask DEM cells already low in valleys),
+     * this keeps the water surface as a flat plane at bank height.
+     */
+    private OptionalInt riverReachBankSurfaceY(RuntimeData data, HeightTileWindow heightWindow, int x, int z, int waterRadius, WaterShapeCache cache) {
         int radius = Math.max(RIVER_REACH_SMOOTHING_RADIUS, Math.min(14, waterRadius + 4));
+        int bankSearch = waterRadius + 3;
         int total = 0;
         int count = 0;
         int min = Integer.MAX_VALUE;
@@ -610,14 +613,28 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         for (int dz = -radius; dz <= radius; dz++) {
             for (int dx = -radius; dx <= radius; dx++) {
                 int distanceSquared = dx * dx + dz * dz;
-                if (distanceSquared > radius * radius || riverLayerValue(data, x + dx, z + dz, cache) <= 0) {
+                if (distanceSquared > radius * radius) {
                     continue;
                 }
-                int sample = sampleDecimetresOrNodata(heightWindow, x + dx, z + dz);
+                int sampleX = x + dx;
+                int sampleZ = z + dz;
+                if (riverLayerValue(data, sampleX, sampleZ, cache) > 0) {
+                    continue;
+                }
+                RiverDistance toRiver = nearestRiver(data, sampleX, sampleZ, bankSearch, cache);
+                if (!toRiver.found()) {
+                    continue;
+                }
+                double blocks = toRiver.blocks();
+                // Bank strip: outside the water fill radius, within a few blocks of the channel edge.
+                if (blocks <= waterRadius || blocks > waterRadius + 3) {
+                    continue;
+                }
+                int sample = sampleDecimetresOrNodata(heightWindow, sampleX, sampleZ);
                 if (sample == R16HeightTileLayer.NODATA) {
                     continue;
                 }
-                int surface = rawSurfaceY(heightWindow, x + dx, z + dz, sample);
+                int surface = rawSurfaceY(heightWindow, sampleX, sampleZ, sample);
                 total += surface;
                 min = Math.min(min, surface);
                 max = Math.max(max, surface);
@@ -628,10 +645,10 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
             return OptionalInt.empty();
         }
         int average = Math.round((float) total / count);
-        // Bias toward the lower third of the reach so water does not climb local terrain humps.
+        // Bias toward the lower bank so water does not flood the higher bank.
         int lowBias = Math.round((average * 2.0f + min) / 3.0f);
-        int clamped = safeClampY(lowBias, min + MAX_RIVER_SURFACE_STEP, max - MAX_RIVER_SURFACE_STEP);
-        return OptionalInt.of(safeClampY(clamped, fallbackSurfaceY - 4, fallbackSurfaceY + 2));
+        // Cap at the highest sampled bank so we never flood land; never clamp to in-channel DEM.
+        return OptionalInt.of(Math.min(lowBias, max));
     }
 
     private static int safeClampY(int value, int minY, int maxY) {
@@ -701,8 +718,7 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
             int provisionalBed = riverBedY(originalSurfaceY, minBuildY, depth);
             int waterSurface = riverWaterSurfaceY(data, heightWindow, x, z, originalSurfaceY, provisionalBed, waterRadius, slope, cache);
             int bed = Math.max(minBuildY + 1, waterSurface - depth);
-            waterSurface = riverWaterSurfaceY(data, heightWindow, x, z, originalSurfaceY, bed, waterRadius, slope, cache);
-            bed = Math.max(minBuildY + 1, waterSurface - depth);
+            // Do not recompute waterSurface from bed — that re-dips the surface toward deeper channel.
             return new RiverShape(true, true, bed, waterSurface, floor);
         }
         int bankDrop = riverBankDrop(distance.blocks(), waterRadius, bankRadius);
