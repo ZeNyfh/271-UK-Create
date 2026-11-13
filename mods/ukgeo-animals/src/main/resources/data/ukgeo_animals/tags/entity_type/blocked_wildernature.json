@@ -1,12 +1,16 @@
 {
   "replace": false,
   "values": [
-    "wildernature:red_wolf",
     "wildernature:raccoon",
-    "wildernature:penguin",
     "wildernature:turkey",
-    "wildernature:pelican",
-    "wildernature:flamingo",
-    "wildernature:cassowary"
+    "wildernature:cassowary",
+    "wildernature:beaver",
+    "wildernature:elephant",
+    "wildernature:giraffe",
+    "wildernature:hippo",
+    "wildernature:lion",
+    "wildernature:scorpion",
+    "wildernature:swift_fox",
+    "wildernature:termite"
   ]
 }

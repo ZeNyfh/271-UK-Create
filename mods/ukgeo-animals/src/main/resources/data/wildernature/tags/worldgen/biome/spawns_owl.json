@@ -1,10 +1,4 @@
 {
-  "replace": false,
-  "values": [
-    "ukgeo:broadleaf_woodland",
-    "ukgeo:conifer_woodland",
-    "ukgeo:arable",
-    "ukgeo:neutral_grassland",
-    "ukgeo:heath"
-  ]
+  "replace": true,
+  "values": []
 }
