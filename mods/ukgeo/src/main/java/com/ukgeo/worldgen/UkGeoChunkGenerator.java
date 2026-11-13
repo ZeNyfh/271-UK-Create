@@ -172,7 +172,7 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     private static final int MINERAL_VEIN_ORIGIN_RADIUS = Math.max(1, Integer.getInteger("ukgeo.mineralVeinOriginRadius", 8));
     private static final double MINERAL_VEIN_SIZE_MULTIPLIER = Double.parseDouble(System.getProperty("ukgeo.mineralVeinSizeMultiplier", "8.0"));
     private static final double MINERAL_VEIN_LENGTH_MULTIPLIER = Double.parseDouble(System.getProperty("ukgeo.mineralVeinLengthMultiplier", "3.4"));
-    private static final double MINERAL_VEIN_RADIUS_MULTIPLIER = Double.parseDouble(System.getProperty("ukgeo.mineralVeinRadiusMultiplier", "1.05"));
+    private static final double MINERAL_VEIN_RADIUS_MULTIPLIER = Double.parseDouble(System.getProperty("ukgeo.mineralVeinRadiusMultiplier", "1.15"));
     private static final int MINERAL_VEIN_MIN_BLOCKS = Integer.getInteger("ukgeo.mineralVeinMinBlocks", 96);
     private static final int MINERAL_VEIN_MAX_BLOCKS = Integer.getInteger("ukgeo.mineralVeinMaxBlocks", 420);
     private static final int MAX_ORE_VEIN_LENGTH = 40;
@@ -1782,8 +1782,9 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
             double angle = random.nextDouble() * Math.PI * 2.0;
             double pitch = (random.nextDouble() - 0.5) * (mineralVein ? 0.28 : 0.62);
             double phase = random.nextDouble() * Math.PI * 2.0;
-            int length = veinLength(ore, mineralVein, random);
-            double radiusScale = veinRadiusScale(ore, mineralVein, length);
+            int veinScore = scoreLayer == null ? score : scoreLayer.sampleOrDefault((int) Math.floor(startX), (int) Math.floor(startZ), score);
+            int length = veinLength(ore, mineralVein, random, veinScore);
+            double radiusScale = veinRadiusScale(ore, mineralVein, length, veinScore);
             boolean branch = mineralVein && random.nextDouble() < 0.42;
             int branchAt = branch ? length / 5 + random.nextInt(Math.max(1, length / 2)) : -1;
             double branchAngle = angle + (random.nextDouble() - 0.5) * 1.6;
@@ -1822,23 +1823,44 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         return (long) dx * dx + (long) dz * dz <= (long) limit * limit;
     }
 
-    private static int veinLength(OreDefinition ore, boolean mineralVein, java.util.Random random) {
+    /** 0..1 from u8 score. No score layer → mid abundance (1.0). */
+    private static double veinAbundanceUnit(OreDefinition ore, int score) {
+        if (!ore.hasScoreLayer()) {
+            return 1.0;
+        }
+        return Math.clamp(score, 0, 255) / 255.0;
+    }
+
+    /** Radius multiplier: thin in sparse regions, thick in rich. */
+    private static double veinThicknessFactor(OreDefinition ore, int score) {
+        double u = veinAbundanceUnit(ore, score);
+        return lerp(0.55, 1.75, u); // score 0 → 0.55x, score 255 → 1.75x
+    }
+
+    private static double veinLengthFactor(OreDefinition ore, int score) {
+        double u = veinAbundanceUnit(ore, score);
+        return lerp(0.85, 1.30, u); // milder length swing
+    }
+
+    private static int veinLength(OreDefinition ore, boolean mineralVein, java.util.Random random, int score) {
+        double lengthFactor = veinLengthFactor(ore, score);
         if (mineralVein) {
-            int length = (int) Math.round(ore.veinSize() * MINERAL_VEIN_LENGTH_MULTIPLIER + random.nextInt(Math.max(1, ore.veinSize())));
+            int length = (int) Math.round((ore.veinSize() * MINERAL_VEIN_LENGTH_MULTIPLIER + random.nextInt(Math.max(1, ore.veinSize()))) * lengthFactor);
             return Math.clamp(Math.max(32, length), 32, MAX_MINERAL_VEIN_LENGTH);
         }
-        int length = ore.veinSize() + 8 + random.nextInt(Math.max(1, ore.veinSize() / 2 + 1));
+        int length = (int) Math.round((ore.veinSize() + 8 + random.nextInt(Math.max(1, ore.veinSize() / 2 + 1))) * lengthFactor);
         return Math.clamp(length, 12, MAX_ORE_VEIN_LENGTH);
     }
 
-    private static double veinRadiusScale(OreDefinition ore, boolean mineralVein, int length) {
+    private static double veinRadiusScale(OreDefinition ore, boolean mineralVein, int length, int score) {
         double target = mineralVein
             ? Math.clamp(ore.veinSize() * MINERAL_VEIN_SIZE_MULTIPLIER, MINERAL_VEIN_MIN_BLOCKS, MINERAL_VEIN_MAX_BLOCKS)
             : Math.max(ore.veinSize(), ore.veinSize() * 1.8);
-        double baseRadius = mineralVein ? 1.15 * MINERAL_VEIN_RADIUS_MULTIPLIER : 0.72 + ore.veinSize() / 48.0;
+        // Thicker baseline than before (was 1.15 / 0.72)
+        double baseRadius = mineralVein ? 1.45 * MINERAL_VEIN_RADIUS_MULTIPLIER : 1.05 + ore.veinSize() / 40.0;
         double estimated = length * Math.PI * baseRadius * baseRadius * (mineralVein ? 0.62 : 0.78);
-        double scale = Math.sqrt(Math.clamp(target / Math.max(1.0, estimated), 0.65, 1.45));
-        return baseRadius * scale;
+        double scale = Math.sqrt(Math.clamp(target / Math.max(1.0, estimated), 0.65, 1.55));
+        return baseRadius * scale * veinThicknessFactor(ore, score);
     }
 
     private static void walkOreVein(
@@ -1881,8 +1903,8 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
             double bulge = 0.62 + 0.38 * Math.sin(progress * Math.PI * (mineralVein ? 2.5 : 3.5) + phase);
             double heading = angle + Math.sin(step * 0.17 + phase) * (mineralVein ? 0.22 : 0.36);
             double slope = clamp(pitch + Math.sin(step * 0.11 + phase * 1.7) * (mineralVein ? 0.06 : 0.12), mineralVein ? -0.28 : -0.5, mineralVein ? 0.28 : 0.5);
-            double horizontalRadius = Math.max(0.55, radiusScale * (0.45 + taper * bulge));
-            double verticalRadius = Math.max(0.45, horizontalRadius * (mineralVein ? 0.58 : 0.82));
+            double horizontalRadius = Math.max(0.7, radiusScale * (0.45 + taper * bulge));
+            double verticalRadius = Math.max(0.55, horizontalRadius * (mineralVein ? 0.58 : 0.82));
             if (step == branchAt) {
                 branchX = x;
                 branchY = y;
