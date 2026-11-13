@@ -45,6 +45,12 @@ public final class ServerWeatherConfig {
     public static final ModConfigSpec.DoubleValue SUMMER_TEMPERATURE_BIAS_CELSIUS;
     public static final ModConfigSpec.DoubleValue AUTUMN_TEMPERATURE_BIAS_CELSIUS;
 
+    public static final ModConfigSpec.BooleanValue REALTIME_SEASONS_ENABLED;
+    public static final ModConfigSpec.IntValue REALTIME_SEASON_DAYS;
+    public static final ModConfigSpec.ConfigValue<String> REALTIME_SEASON_TIMEZONE;
+    public static final ModConfigSpec.IntValue REALTIME_SEASON_SYNC_INTERVAL_TICKS;
+    public static final ModConfigSpec.BooleanValue DISABLE_SERENE_MINECRAFT_SEASON_CYCLE;
+
     static {
         ModConfigSpec.Builder builder = new ModConfigSpec.Builder();
         builder.push("realtime_localised_weather");
@@ -87,6 +93,14 @@ public final class ServerWeatherConfig {
         SPRING_TEMPERATURE_BIAS_CELSIUS = builder.defineInRange("spring_temperature_bias_celsius", -1.0D, -20.0D, 10.0D);
         SUMMER_TEMPERATURE_BIAS_CELSIUS = builder.defineInRange("summer_temperature_bias_celsius", 2.0D, -20.0D, 10.0D);
         AUTUMN_TEMPERATURE_BIAS_CELSIUS = builder.defineInRange("autumn_temperature_bias_celsius", -1.0D, -20.0D, 10.0D);
+        builder.pop();
+
+        builder.push("serene_realtime_seasons");
+        REALTIME_SEASONS_ENABLED = builder.define("realtime_seasons_enabled", true);
+        REALTIME_SEASON_DAYS = builder.defineInRange("realtime_season_days", 7, 1, 365);
+        REALTIME_SEASON_TIMEZONE = builder.define("realtime_season_timezone", "Europe/London");
+        REALTIME_SEASON_SYNC_INTERVAL_TICKS = builder.defineInRange("realtime_season_sync_interval_ticks", 20, 1, 20 * 60 * 60);
+        DISABLE_SERENE_MINECRAFT_SEASON_CYCLE = builder.define("disable_serene_minecraft_season_cycle", true);
         builder.pop();
         SPEC = builder.build();
     }

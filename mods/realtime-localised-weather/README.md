@@ -43,6 +43,15 @@ That means:
 
 Serene Seasons does not create precipitation on its own. If Open-Meteo reports no precipitation, winter still remains dry.
 
+### Realtime season progression
+
+With Serene installed, this mod can drive the season calendar from real wall-clock time (`serene_realtime_seasons` in the server config, on by default):
+
+- each major season (Spring/Summer/Autumn/Winter) lasts 7 real days (28-day year, then loops)
+- progress within a season is continuous (Early→Mid→Late) so foliage and temperature still shift gradually
+- the first run on a world anchors at local midnight in the configured timezone (default `Europe/London`)
+- Serene's Minecraft-time `doSeasonCycle` is turned off so it does not fight the realtime clock
+
 ## Open-Meteo integration
 
 - Requests are performed only by the logical server.
@@ -130,5 +139,5 @@ These options do not change gameplay severity, server rain checks, snow placemen
 
 - Vanilla weather is replaced only where the weather manager is active in the configured UKGeo overworld.
 - Other dimensions keep vanilla weather behaviour.
-- Serene Seasons foliage colours, crop progression, and season progression are not replaced.
+- Serene Seasons foliage colours and crop rules still come from Serene; when realtime seasons are enabled, season *progression* is driven by wall-clock time instead of Minecraft day time.
 - Local weather uses vanilla-style textured precipitation; production compatibility still depends on in-game validation with the target modpack.
