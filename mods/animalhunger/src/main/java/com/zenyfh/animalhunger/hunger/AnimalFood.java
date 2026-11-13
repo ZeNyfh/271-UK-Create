@@ -50,7 +50,6 @@ public final class AnimalFood {
         put("wildernature", "dog", "wildernature/dog");
         put("wildernature", "hedgehog", "wildernature/hedgehog");
         put("wildernature", "minisheep", "wildernature/minisheep");
-        put("wildernature", "owl", "wildernature/owl");
         put("wildernature", "squirrel", "wildernature/squirrel");
     }
 
