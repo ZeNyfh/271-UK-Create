@@ -41,6 +41,7 @@ import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.WorldGenRegion;
+import net.minecraft.tags.BlockTags;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.LevelHeightAccessor;
 import net.minecraft.world.level.NaturalSpawner;
@@ -60,6 +61,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.DoubleBlockHalf;
 import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.ChunkGenerator;
+import net.minecraft.world.level.chunk.LevelChunkSection;
 import net.minecraft.world.level.levelgen.GenerationStep;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.levelgen.LegacyRandomSource;
@@ -4869,6 +4871,19 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         if (ENABLE_DEEP_CARVERS && carving == GenerationStep.Carving.AIR) {
             applyDeepCaves(seed, chunk);
         }
+        if (carving == GenerationStep.Carving.AIR && (ENABLE_NOISE_CAVES || ENABLE_DEEP_CARVERS)) {
+            int stripMinY = chunk.getMinBuildHeight();
+            int stripMaxY = chunk.getMaxBuildHeight() - 1;
+            if (ENABLE_NOISE_CAVES) {
+                stripMinY = Math.max(stripMinY, Math.max(chunk.getMinBuildHeight() + NOISE_CAVE_BOTTOM_MARGIN, NOISE_CAVE_MIN_Y));
+                stripMaxY = Math.min(stripMaxY, NOISE_CAVE_MAX_Y);
+            }
+            if (ENABLE_DEEP_CARVERS) {
+                stripMinY = Math.min(stripMinY, Math.max(chunk.getMinBuildHeight() + DEEP_CAVE_BOTTOM_MARGIN, DEEP_CAVE_MIN_Y));
+                stripMaxY = Math.max(stripMaxY, Math.min(chunk.getMaxBuildHeight() - 1, DEEP_CAVE_MAX_Y));
+            }
+            stripFloatingCaveVeins(chunk, stripMinY, stripMaxY);
+        }
     }
 
     private void applyNoiseCaves(long seed, ChunkAccess chunk) {
@@ -4963,7 +4978,7 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         smoothingEdits = afterSmoothingCount - carvedCount;
         carvedCount = afterSmoothingCount;
         edits += smoothingEdits;
-        int aquiferSealEdits = sealNoiseCaveAquiferContacts(caveTypes, carvedIndices, carvedCount, minY, height);
+        int aquiferDemoteEdits = demoteExposedAquifers(caveTypes, carvedIndices, carvedCount, minY, height);
 
         for (int i = 0; i < carvedCount; i++) {
             int index = carvedIndices[i];
@@ -4978,14 +4993,16 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
             }
             cursor.set(localX, y, localZ);
             if (type == CAVE_TYPE_WATER) {
-                boolean sealed = hasDryCaveNeighbor(caveTypes, localX, y, localZ, minY, height)
+                boolean exposed = hasDryCaveNeighbor(caveTypes, localX, y, localZ, minY, height)
                     || hasExistingDryAirNeighbor(chunk, cursor, localX, y, localZ);
                 cursor.set(localX, y, localZ);
-                if (sealed) {
-                    continue;
+                if (exposed) {
+                    chunk.setBlockState(cursor, Blocks.AIR.defaultBlockState(), false);
+                    airCount++;
+                } else {
+                    chunk.setBlockState(cursor, Blocks.WATER.defaultBlockState(), false);
+                    waterCount++;
                 }
-                chunk.setBlockState(cursor, Blocks.WATER.defaultBlockState(), false);
-                waterCount++;
             } else if (type == CAVE_TYPE_LAVA) {
                 boolean touchesWater = hasWaterNeighbor(caveTypes, localX, y, localZ, minY, height)
                     || hasExistingWaterNeighbor(chunk, cursor, localX, y, localZ);
@@ -5002,15 +5019,16 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
                 airCount++;
             }
         }
+        stripFloatingCaveVeins(chunk, minY, maxY);
         if (DEBUG_CAVES) {
             UkGeoMod.LOGGER.info(
-                "UKGeo cave debug applied sealed fast smoothed 3D noise caves chunk={} range={}..{} edits={} smoothingEdits={} aquiferSealEdits={} candidates={} thresholdBin={} thresholdKeep={}/{} budget={} air={} water={} lava={} bottom={} cellXZ={} cellY={} aquiferMax={} cheeseThreshold={} spaghettiThickness={} noodleThickness={}",
+                "UKGeo cave debug applied demoted fast smoothed 3D noise caves chunk={} range={}..{} edits={} smoothingEdits={} aquiferDemoteEdits={} candidates={} thresholdBin={} thresholdKeep={}/{} budget={} air={} water={} lava={} bottom={} cellXZ={} cellY={} aquiferMax={} cheeseThreshold={} spaghettiThickness={} noodleThickness={}",
                 chunkPos,
                 minY,
                 maxY,
                 edits,
                 smoothingEdits,
-                aquiferSealEdits,
+                aquiferDemoteEdits,
                 candidateCount,
                 threshold.bin(),
                 threshold.allowedAtThreshold(),
@@ -5081,6 +5099,95 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         }
         long hash = avalanche(seed ^ ((long) index * 0x9e3779b97f4a7c15L) ^ 0x5448524553434156L);
         return Long.remainderUnsigned(hash, total) < allowed;
+    }
+
+
+    private static int demoteExposedAquifers(byte[] caveTypes, int[] carvedIndices, int carvedCount, int minY, int height) {
+        int demotedTotal = 0;
+        for (int pass = 0; pass < 12; pass++) {
+            int demoted = 0;
+            for (int i = 0; i < carvedCount; i++) {
+                int index = carvedIndices[i];
+                if (caveTypes[index] != CAVE_TYPE_WATER) {
+                    continue;
+                }
+                int relY = index / 256;
+                int rem = index - relY * 256;
+                int localZ = rem / 16;
+                int localX = rem - localZ * 16;
+                int y = minY + relY;
+                if (hasDryCaveNeighbor(caveTypes, localX, y, localZ, minY, height)) {
+                    caveTypes[index] = CAVE_TYPE_AIR;
+                    demoted++;
+                }
+            }
+            demotedTotal += demoted;
+            if (demoted == 0) {
+                break;
+            }
+        }
+        return demotedTotal;
+    }
+
+    private static void stripFloatingCaveVeins(ChunkAccess chunk, int minY, int maxY) {
+        if (minY > maxY) {
+            return;
+        }
+        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+        int[][] offsets = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
+        int buildMin = chunk.getMinBuildHeight();
+        int buildMax = chunk.getMaxBuildHeight();
+        for (int y = minY; y <= maxY; ) {
+            LevelChunkSection section = chunk.getSection(chunk.getSectionIndex(y));
+            if (section.hasOnlyAir()) {
+                y = (y & ~15) + 16;
+                continue;
+            }
+            for (int localZ = 0; localZ < 16; localZ++) {
+                for (int localX = 0; localX < 16; localX++) {
+                    BlockState state = chunk.getBlockState(cursor.set(localX, y, localZ));
+                    if (!isStripableCaveVeinBlock(state)) {
+                        continue;
+                    }
+                    boolean touchesAirOrFluid = false;
+                    for (int[] offset : offsets) {
+                        int nx = localX + offset[0];
+                        int ny = y + offset[1];
+                        int nz = localZ + offset[2];
+                        if (nx < 0 || nx >= 16 || nz < 0 || nz >= 16 || ny < buildMin || ny >= buildMax) {
+                            continue;
+                        }
+                        BlockState neighbor = chunk.getBlockState(cursor.set(nx, ny, nz));
+                        if (neighbor.isAir() || !neighbor.getFluidState().isEmpty()) {
+                            touchesAirOrFluid = true;
+                            break;
+                        }
+                    }
+                    if (touchesAirOrFluid) {
+                        chunk.setBlockState(cursor.set(localX, y, localZ), Blocks.AIR.defaultBlockState(), false);
+                    }
+                }
+            }
+            y++;
+        }
+    }
+
+    private static boolean isStripableCaveVeinBlock(BlockState state) {
+        if (state.is(Blocks.CALCITE)) {
+            return true;
+        }
+        if (state.is(BlockTags.COAL_ORES)
+            || state.is(BlockTags.IRON_ORES)
+            || state.is(BlockTags.COPPER_ORES)
+            || state.is(BlockTags.GOLD_ORES)
+            || state.is(BlockTags.REDSTONE_ORES)
+            || state.is(BlockTags.LAPIS_ORES)
+            || state.is(BlockTags.DIAMOND_ORES)
+            || state.is(BlockTags.EMERALD_ORES)) {
+            return true;
+        }
+        String path = BuiltInRegistries.BLOCK.getKey(state.getBlock()).getPath();
+        return path.endsWith("_ore") || path.contains("_ore_");
     }
 
     private static int sealNoiseCaveAquiferContacts(byte[] caveTypes, int[] carvedIndices, int carvedCount, int minY, int height) {

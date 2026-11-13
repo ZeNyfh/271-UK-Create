@@ -13,6 +13,7 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.LevelChunkSection;
+import net.minecraft.world.level.material.Fluids;
 
 /**
  * Precomputes per-column terrain for one chunk on a background thread, then applies blocks in bulk.
@@ -319,10 +320,33 @@ final class ChunkTerrainPlanner {
             }
             BlockState current = chunk.getBlockState(cursor.set(placement.localX(), placement.y(), placement.localZ()));
             if (current.is(Blocks.STONE) || current.is(Blocks.DEEPSLATE)) {
+                if (hasAirOrWaterNeighbor(chunk, cursor, placement.localX(), placement.y(), placement.localZ())) {
+                    continue;
+                }
                 setBlock(chunk, cursor, placement.localX(), placement.y(), placement.localZ(), placement.state());
             }
         }
         logTiming("ChunkTerrainPlanner.applyOres", chunk, startNanos);
+    }
+
+
+    private static boolean hasAirOrWaterNeighbor(ChunkAccess chunk, BlockPos.MutableBlockPos cursor, int localX, int y, int localZ) {
+        int[][] offsets = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
+        int buildMin = chunk.getMinBuildHeight();
+        int buildMax = chunk.getMaxBuildHeight();
+        for (int[] offset : offsets) {
+            int nx = localX + offset[0];
+            int ny = y + offset[1];
+            int nz = localZ + offset[2];
+            if (nx < 0 || nx >= 16 || nz < 0 || nz >= 16 || ny < buildMin || ny >= buildMax) {
+                continue;
+            }
+            BlockState neighbor = chunk.getBlockState(cursor.set(nx, ny, nz));
+            if (neighbor.isAir() || neighbor.getFluidState().is(Fluids.WATER)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static boolean isSteep(int[] surfaceGrid, int gridSize, int gx, int gz) {
