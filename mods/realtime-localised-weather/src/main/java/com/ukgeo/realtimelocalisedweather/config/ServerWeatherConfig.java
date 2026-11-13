@@ -18,6 +18,7 @@ public final class ServerWeatherConfig {
     public static final ModConfigSpec.IntValue STALE_CACHE_HOURS;
     public static final ModConfigSpec.IntValue HARD_CACHE_EXPIRY_HOURS;
     public static final ModConfigSpec.IntValue MAXIMUM_CONCURRENT_REQUESTS;
+    public static final ModConfigSpec.IntValue MAX_TILES_PER_REFRESH;
     public static final ModConfigSpec.IntValue ZONE_SIZE_BLOCKS;
     public static final ModConfigSpec.IntValue ACTIVE_ZONE_RADIUS;
     public static final ModConfigSpec.IntValue PREFETCH_ZONE_RADIUS;
@@ -62,7 +63,8 @@ public final class ServerWeatherConfig {
         MINIMUM_FORCED_REFRESH_MINUTES = builder.defineInRange("minimum_forced_refresh_minutes", 5, 1, 120);
         STALE_CACHE_HOURS = builder.defineInRange("stale_cache_hours", 2, 1, 240);
         HARD_CACHE_EXPIRY_HOURS = builder.defineInRange("hard_cache_expiry_hours", 24, 1, 24 * 30);
-        MAXIMUM_CONCURRENT_REQUESTS = builder.defineInRange("maximum_concurrent_requests", 2, 1, 16);
+        MAXIMUM_CONCURRENT_REQUESTS = builder.defineInRange("maximum_concurrent_requests", 1, 1, 16);
+        MAX_TILES_PER_REFRESH = builder.defineInRange("max_tiles_per_refresh", 12, 1, 128);
         ZONE_SIZE_BLOCKS = builder.defineInRange("zone_size_blocks", 256, 32, 2048);
         ACTIVE_ZONE_RADIUS = builder.defineInRange("active_zone_radius", 2, 0, 12);
         PREFETCH_ZONE_RADIUS = builder.defineInRange("prefetch_zone_radius", 1, 0, 8);

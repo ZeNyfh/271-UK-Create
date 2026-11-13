@@ -6,28 +6,66 @@ import com.ukgeo.realtimelocalisedweather.weather.ResolvedPrecipitation;
 import com.ukgeo.realtimelocalisedweather.weather.SeasonalPrecipitationPolicy;
 
 public final class SerenePrecipitationResolver {
+    /** Open-Meteo snowfall (cm/h) above this forces snowy resolved type. */
+    public static final float OPEN_METEO_SNOWFALL_FORCE_CM_PER_HOUR = 0.05F;
+
     private SerenePrecipitationResolver() {
     }
 
     public static Resolution resolve(MeteorologicalPrecipitation precipitation, float temperatureCelsius, SereneSeasonSnapshot seasonSnapshot) {
+        return resolve(precipitation, temperatureCelsius, 0.0F, seasonSnapshot);
+    }
+
+    public static Resolution resolve(
+        MeteorologicalPrecipitation precipitation,
+        float temperatureCelsius,
+        float snowfallRateCmPerHour,
+        SereneSeasonSnapshot seasonSnapshot
+    ) {
         ResolvedPrecipitation direct = direct(precipitation);
+        Resolution base;
         if (direct == ResolvedPrecipitation.NONE || !seasonSnapshot.detected()) {
-            return new Resolution(direct, false);
+            base = new Resolution(direct, false);
+        } else {
+            SeasonalPrecipitationPolicy policy = ServerWeatherConfig.safeEnum(ServerWeatherConfig.SEASONAL_PRECIPITATION_POLICY, SeasonalPrecipitationPolicy.SERENE_SEASONS_WINTER_SNOW);
+            if (policy == SeasonalPrecipitationPolicy.REAL_DATA_ONLY) {
+                base = new Resolution(direct, false);
+            } else if (seasonSnapshot.tropicalBiome() && !ServerWeatherConfig.safeBoolean(ServerWeatherConfig.TROPICAL_WINTER_CONVERSION, false)) {
+                base = new Resolution(direct, false);
+            } else if (policy == SeasonalPrecipitationPolicy.SERENE_SEASONS_WINTER_SNOW && seasonSnapshot.winter()) {
+                base = new Resolution(winterResult(precipitation), true);
+            } else if (policy == SeasonalPrecipitationPolicy.TEMPERATURE_AND_SEASON) {
+                base = new Resolution(temperatureResult(precipitation, temperatureCelsius, seasonSnapshot), false);
+            } else {
+                base = new Resolution(direct, false);
+            }
         }
-        SeasonalPrecipitationPolicy policy = ServerWeatherConfig.safeEnum(ServerWeatherConfig.SEASONAL_PRECIPITATION_POLICY, SeasonalPrecipitationPolicy.SERENE_SEASONS_WINTER_SNOW);
-        if (policy == SeasonalPrecipitationPolicy.REAL_DATA_ONLY) {
-            return new Resolution(direct, false);
+        return preferOpenMeteoSnowfall(precipitation, snowfallRateCmPerHour, base);
+    }
+
+    /**
+     * Explicit Open-Meteo snowfall remains snow even outside winter / after season policy.
+     * Winter rain→snow conversion still applies when snowfall rate is zero.
+     */
+    private static Resolution preferOpenMeteoSnowfall(
+        MeteorologicalPrecipitation precipitation,
+        float snowfallRateCmPerHour,
+        Resolution base
+    ) {
+        if (snowfallRateCmPerHour <= OPEN_METEO_SNOWFALL_FORCE_CM_PER_HOUR) {
+            return base;
         }
-        if (seasonSnapshot.tropicalBiome() && !ServerWeatherConfig.safeBoolean(ServerWeatherConfig.TROPICAL_WINTER_CONVERSION, false)) {
-            return new Resolution(direct, false);
+        ResolvedPrecipitation resolved = base.resolvedPrecipitation();
+        boolean thunder = precipitation == MeteorologicalPrecipitation.THUNDERSTORM
+            || resolved == ResolvedPrecipitation.THUNDER_RAIN
+            || resolved == ResolvedPrecipitation.THUNDER_SNOW;
+        ResolvedPrecipitation forced = thunder
+            ? ResolvedPrecipitation.THUNDER_SNOW
+            : (resolved.isSnowy() ? resolved : ResolvedPrecipitation.SNOW);
+        if (forced == resolved) {
+            return base;
         }
-        if (policy == SeasonalPrecipitationPolicy.SERENE_SEASONS_WINTER_SNOW && seasonSnapshot.winter()) {
-            return new Resolution(winterResult(precipitation), true);
-        }
-        if (policy == SeasonalPrecipitationPolicy.TEMPERATURE_AND_SEASON) {
-            return new Resolution(temperatureResult(precipitation, temperatureCelsius, seasonSnapshot), false);
-        }
-        return new Resolution(direct, false);
+        return new Resolution(forced, base.seasonConversionApplied());
     }
 
     private static ResolvedPrecipitation direct(MeteorologicalPrecipitation precipitation) {

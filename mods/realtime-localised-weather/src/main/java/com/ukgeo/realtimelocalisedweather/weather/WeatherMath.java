@@ -31,14 +31,13 @@ public final class WeatherMath {
         if (previous == candidate) {
             return candidate;
         }
-        if ((previous == ResolvedPrecipitation.SNOW || previous == ResolvedPrecipitation.SLEET)
-            && candidate == ResolvedPrecipitation.RAIN
-            && temperatureCelsius < band) {
-            return previous;
+        // Never block a transition TO snowy types from the server/Open-Meteo.
+        // UK snow often arrives at 0–2°C after rain; the old RAIN→SNOW gate hid it.
+        if (candidate.isSnowy()) {
+            return candidate;
         }
-        if ((previous == ResolvedPrecipitation.RAIN || previous == ResolvedPrecipitation.DRIZZLE)
-            && candidate == ResolvedPrecipitation.SNOW
-            && temperatureCelsius > -band) {
+        // Briefly keep snow when flapping to liquid near freezing.
+        if (previous.isSnowy() && candidate.isLiquid() && temperatureCelsius < band) {
             return previous;
         }
         return candidate;

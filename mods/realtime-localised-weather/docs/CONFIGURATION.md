@@ -15,6 +15,7 @@ Primary controls:
 - `stale_cache_hours`
 - `hard_cache_expiry_hours`
 - `maximum_concurrent_requests`
+- `max_tiles_per_refresh`
 - `zone_size_blocks`
 - `active_zone_radius`
 - `prefetch_zone_radius`

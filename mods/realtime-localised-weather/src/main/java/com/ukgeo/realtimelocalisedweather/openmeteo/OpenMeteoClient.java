@@ -2,7 +2,6 @@ package com.ukgeo.realtimelocalisedweather.openmeteo;
 
 import com.ukgeo.realtimelocalisedweather.RealtimeLocalisedWeatherMod;
 import com.ukgeo.realtimelocalisedweather.config.ServerWeatherConfig;
-import java.io.IOException;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
@@ -15,6 +14,7 @@ import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
 
 public final class OpenMeteoClient {
     private static final String CURRENT_FIELDS = String.join(",",
@@ -30,6 +30,7 @@ public final class OpenMeteoClient {
         "wind_direction_10m",
         "wind_gusts_10m"
     );
+    private static final long INTER_BATCH_DELAY_MS = 250L;
 
     private final HttpClient httpClient;
     private final Semaphore concurrentRequests;
@@ -39,17 +40,34 @@ public final class OpenMeteoClient {
             .connectTimeout(Duration.ofSeconds(10))
             .executor(executor)
             .build();
-        this.concurrentRequests = new Semaphore(ServerWeatherConfig.safeInt(ServerWeatherConfig.MAXIMUM_CONCURRENT_REQUESTS, 2));
+        this.concurrentRequests = new Semaphore(Math.max(1, ServerWeatherConfig.safeInt(ServerWeatherConfig.MAXIMUM_CONCURRENT_REQUESTS, 1)));
     }
 
     public CompletableFuture<List<OpenMeteoResponse.LocationWeather>> fetchCurrent(List<OpenMeteoResponse.LocationRequest> requests) {
         List<List<OpenMeteoResponse.LocationRequest>> batches = OpenMeteoRequestBatcher.batch(requests);
-        List<CompletableFuture<List<OpenMeteoResponse.LocationWeather>>> futures = new ArrayList<>();
-        for (List<OpenMeteoResponse.LocationRequest> batch : batches) {
-            futures.add(fetchBatch(batch));
+        // Serialize batches: free-tier Open-Meteo 429s when parallel batch fans-out on cold start.
+        CompletableFuture<List<OpenMeteoResponse.LocationWeather>> chain = CompletableFuture.completedFuture(new ArrayList<>());
+        for (int i = 0; i < batches.size(); i++) {
+            List<OpenMeteoResponse.LocationRequest> batch = batches.get(i);
+            boolean delayBefore = i > 0;
+            chain = chain.thenCompose(accumulated -> {
+                CompletableFuture<Void> gate = delayBefore
+                    ? CompletableFuture.runAsync(() -> {
+                        try {
+                            TimeUnit.MILLISECONDS.sleep(INTER_BATCH_DELAY_MS);
+                        } catch (InterruptedException exception) {
+                            Thread.currentThread().interrupt();
+                        }
+                    }, httpClient.executor().orElse(Runnable::run))
+                    : CompletableFuture.completedFuture(null);
+                return gate.thenCompose(ignored -> fetchBatch(batch)).thenApply(locations -> {
+                    List<OpenMeteoResponse.LocationWeather> merged = new ArrayList<>(accumulated);
+                    merged.addAll(locations);
+                    return merged;
+                });
+            });
         }
-        return CompletableFuture.allOf(futures.toArray(CompletableFuture[]::new))
-            .thenApply(ignored -> futures.stream().flatMap(future -> future.join().stream()).toList());
+        return chain;
     }
 
     private CompletableFuture<List<OpenMeteoResponse.LocationWeather>> fetchBatch(List<OpenMeteoResponse.LocationRequest> batch) {
@@ -67,7 +85,11 @@ public final class OpenMeteoClient {
         return httpClient.sendAsync(request, HttpResponse.BodyHandlers.ofString())
             .thenApply(response -> {
                 if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                    throw new IllegalStateException("Open-Meteo HTTP " + response.statusCode());
+                    String detail = "Open-Meteo HTTP " + response.statusCode();
+                    if (response.statusCode() == 429) {
+                        detail += " (rate limited)";
+                    }
+                    throw new IllegalStateException(detail);
                 }
                 return OpenMeteoParser.parse(response.body()).locations();
             })

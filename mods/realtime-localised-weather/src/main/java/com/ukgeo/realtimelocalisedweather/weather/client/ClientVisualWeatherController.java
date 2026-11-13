@@ -11,8 +11,9 @@ import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
 
 /**
- * Drives only the local client's vanilla rain/thunder gradients.  Vanilla LevelRenderer then
- * remains responsible for ordinary rain and snow meshes, particles, audio, lighting, and roofs.
+ * Drives the local client's rain/thunder gradients. When CUSTOM precipitation rendering is enabled,
+ * {@link com.ukgeo.realtimelocalisedweather.mixin.VanillaPrecipitationRendererMixin} replaces vanilla
+ * snow/rain meshes with {@link com.ukgeo.realtimelocalisedweather.client.render.LocalisedPrecipitationRenderer}.
  */
 @EventBusSubscriber(modid = RealtimeLocalisedWeatherMod.MOD_ID, value = Dist.CLIENT)
 public final class ClientVisualWeatherController {

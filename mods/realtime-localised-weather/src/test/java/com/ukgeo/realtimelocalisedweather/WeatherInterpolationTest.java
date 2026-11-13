@@ -33,10 +33,15 @@ final class WeatherInterpolationTest {
     }
 
     @Test
-    void hysteresisPreventsRapidRainSnowFlips() {
+    void hysteresisNeverBlocksTransitionToSnow() {
+        // Keep snow briefly when flapping to rain near freezing.
         assertEquals(ResolvedPrecipitation.SNOW, WeatherMath.hysteresis(ResolvedPrecipitation.SNOW, ResolvedPrecipitation.RAIN, 0.4F, 1.0F));
-        assertEquals(ResolvedPrecipitation.RAIN, WeatherMath.hysteresis(ResolvedPrecipitation.RAIN, ResolvedPrecipitation.SNOW, 0.8F, 1.0F));
-        assertEquals(ResolvedPrecipitation.SNOW, WeatherMath.hysteresis(ResolvedPrecipitation.RAIN, ResolvedPrecipitation.SNOW, -2.0F, 1.0F));
+        // Always accept OM/server snow even at mild UK temperatures after rain.
+        assertEquals(ResolvedPrecipitation.SNOW, WeatherMath.hysteresis(ResolvedPrecipitation.RAIN, ResolvedPrecipitation.SNOW, 0.8F, 1.0F));
+        assertEquals(ResolvedPrecipitation.SNOW, WeatherMath.hysteresis(ResolvedPrecipitation.RAIN, ResolvedPrecipitation.SNOW, 1.5F, 1.0F));
+        assertEquals(ResolvedPrecipitation.THUNDER_SNOW, WeatherMath.hysteresis(ResolvedPrecipitation.RAIN, ResolvedPrecipitation.THUNDER_SNOW, 2.0F, 1.0F));
+        // Above the band, snow→rain is allowed.
+        assertEquals(ResolvedPrecipitation.RAIN, WeatherMath.hysteresis(ResolvedPrecipitation.SNOW, ResolvedPrecipitation.RAIN, 1.5F, 1.0F));
     }
 
     private static ServerWeatherSnapshot snapshot(float precipitationRate) {

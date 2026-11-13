@@ -1,5 +1,6 @@
 package com.ukgeo.realtimelocalisedweather.weather.client;
 
+import com.ukgeo.realtimelocalisedweather.config.ClientWeatherConfig;
 import com.ukgeo.realtimelocalisedweather.network.TileSnapshotPayload;
 import com.ukgeo.realtimelocalisedweather.network.UkGeoReferencePayload;
 import com.ukgeo.realtimelocalisedweather.network.WeatherAuthorityModePayload;
@@ -95,8 +96,15 @@ public final class ClientWeatherManager {
     }
 
     public static boolean shouldReplaceVanillaWeather() {
-        // Ordinary precipitation is intentionally rendered by vanilla LevelRenderer.
-        return false;
+        if (!ClientWeatherConfig.ENABLED.get() || !hasRealtimeData()) {
+            return false;
+        }
+        if (activeMode() == WeatherAuthorityMode.VANILLA) {
+            return false;
+        }
+        // CUSTOM uses Open-Meteo resolved type (snow where OM reports snow).
+        // VANILLA_FALLBACK / OFF keep biome-temperature rain vs snow.
+        return ClientWeatherConfig.PRECIPITATION_RENDERER.get() == ClientWeatherConfig.PrecipitationRendererMode.CUSTOM;
     }
 
     public static boolean hasRealtimeData() {
