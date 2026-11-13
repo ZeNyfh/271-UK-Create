@@ -150,7 +150,7 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     /** Minimum half-width (blocks from centerline) so streams never render as a 1-block trickle. */
     private static final int MIN_RIVER_CHANNEL_HALF_WIDTH = Integer.getInteger("ukgeo.minRiverChannelHalfWidth", 2);
     private static final int MAX_RIVER_SURFACE_STEP = 1;
-    private static final int RIVER_REACH_SMOOTHING_RADIUS = 6;
+    private static final int RIVER_REACH_SMOOTHING_RADIUS = 8;
     private static final double ALLOW_STEEP_RAPIDS_ONLY_ABOVE_SLOPE = 1.8;
     private static final int WATER_EDGE_SMOOTHING_RADIUS = 16;
     private static final int WATER_EDGE_SAMPLE_STEP = 4;
@@ -186,23 +186,25 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     private static final int NOISE_CAVE_MAX_Y = Integer.getInteger("ukgeo.noiseCaveMaxY", NOISE_CAVE_DEFAULT_MAX_Y);
     private static final int NOISE_CAVE_LAVA_LEVEL = Integer.getInteger("ukgeo.noiseCaveLavaLevel", -120);
     private static final int NOISE_CAVE_AQUIFER_MAX_Y = Integer.getInteger("ukgeo.noiseCaveAquiferMaxY", 24);
-    private static final int NOISE_CAVE_MAX_BLOCK_EDITS_PER_CHUNK = Integer.getInteger("ukgeo.noiseCaveMaxBlockEditsPerChunk", 8_000);
-    private static final int NOISE_CAVE_CELL_SIZE_XZ = Math.max(2, Integer.getInteger("ukgeo.noiseCaveCellSizeXZ", 4));
-    private static final int NOISE_CAVE_CELL_SIZE_Y = Math.max(2, Integer.getInteger("ukgeo.noiseCaveCellSizeY", 4));
+    private static final int NOISE_CAVE_MAX_BLOCK_EDITS_PER_CHUNK = Integer.getInteger("ukgeo.noiseCaveMaxBlockEditsPerChunk", 5_500);
+    private static final int NOISE_CAVE_CELL_SIZE_XZ = Math.max(2, Integer.getInteger("ukgeo.noiseCaveCellSizeXZ", 6));
+    private static final int NOISE_CAVE_CELL_SIZE_Y = Math.max(2, Integer.getInteger("ukgeo.noiseCaveCellSizeY", 6));
     private static final int NOISE_CAVE_MIN_ROOF_THICKNESS = Math.max(0, Integer.getInteger("ukgeo.noiseCaveMinRoofThickness", 8));
     private static final int NOISE_CAVE_EDGE_SMOOTHING_PASSES = Math.max(0, Integer.getInteger("ukgeo.noiseCaveEdgeSmoothingPasses", 1));
-    private static final int NOISE_CAVE_MAX_SMOOTHING_EDITS_PER_CHUNK = Math.max(0, Integer.getInteger("ukgeo.noiseCaveMaxSmoothingEditsPerChunk", 768));
+    private static final int NOISE_CAVE_MAX_SMOOTHING_EDITS_PER_CHUNK = Math.max(0, Integer.getInteger("ukgeo.noiseCaveMaxSmoothingEditsPerChunk", 384));
     private static final boolean SEAL_NOISE_CAVE_AQUIFERS = !Boolean.getBoolean("ukgeo.disableNoiseCaveAquiferSeals");
     private static final int NOISE_CAVE_AQUIFER_SEAL_PASSES = Math.max(0, Integer.getInteger("ukgeo.noiseCaveAquiferSealPasses", 1));
-    private static final int NOISE_CAVE_MAX_AQUIFER_SEAL_EDITS_PER_CHUNK = Math.max(0, Integer.getInteger("ukgeo.noiseCaveMaxAquiferSealEditsPerChunk", 2048));
+    private static final int NOISE_CAVE_MAX_AQUIFER_SEAL_EDITS_PER_CHUNK = Math.max(0, Integer.getInteger("ukgeo.noiseCaveMaxAquiferSealEditsPerChunk", 1536));
     private static final int NOISE_CAVE_DENSITY_BINS = 256;
     private static final double NOISE_CAVE_DENSITY_BIN_MAX = Double.parseDouble(System.getProperty("ukgeo.noiseCaveDensityBinMax", "1.0"));
     private static final boolean ENABLE_NOISE_CAVE_LAVA = !Boolean.getBoolean("ukgeo.disableNoiseCaveLava");
     private static final int MAX_CAVE_FLUID_TICKS_PER_CHUNK = Integer.getInteger("ukgeo.maxCaveFluidTicksPerChunk", 2_048);
     private static final boolean ENABLE_CAVE_FLUID_TICKS = !Boolean.getBoolean("ukgeo.disableCaveFluidTicks");
-    private static final double NOISE_CAVE_CHEESE_THRESHOLD = Double.parseDouble(System.getProperty("ukgeo.noiseCaveCheeseThreshold", "0.45"));
+    private static final double NOISE_CAVE_CHEESE_THRESHOLD = Double.parseDouble(System.getProperty("ukgeo.noiseCaveCheeseThreshold", "0.48"));
     private static final double NOISE_CAVE_SPAGHETTI_THICKNESS = Double.parseDouble(System.getProperty("ukgeo.noiseCaveSpaghettiThickness", "0.085"));
     private static final double NOISE_CAVE_NOODLE_THICKNESS = Double.parseDouble(System.getProperty("ukgeo.noiseCaveNoodleThickness", "0.043"));
+    private static final double NOISE_CAVE_CHEESE_EARLY_OUT = Double.parseDouble(System.getProperty("ukgeo.noiseCaveCheeseEarlyOut", "0.22"));
+    private static final double NOISE_CAVE_SPAGHETTI_EARLY_OUT = Double.parseDouble(System.getProperty("ukgeo.noiseCaveSpaghettiEarlyOut", "0.12"));
     private static final int DEFAULT_EFFECTIVE_ORE_TERRAIN_MAX_Y = Integer.getInteger("ukgeo.effectiveOreTerrainMaxY", 280);
     private static final int DEEP_CAVE_MIN_Y = Integer.getInteger("ukgeo.deepCaveMinY", -120);
     private static final int DEEP_CAVE_MAX_Y = Integer.getInteger("ukgeo.deepCaveMaxY", 72);
@@ -594,13 +596,13 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         int target = reachSurface.orElse(smoothedSurface) - 1;
         // Keep freeboard below surrounding land, but never above the local land surface.
         target = Math.min(target, originalSurfaceY - 1);
-        int minAllowedY = Math.max(riverBedY + 1, originalSurfaceY - 4);
+        int minAllowedY = riverBedY + 1;
         int maxAllowedY = Math.max(minAllowedY, originalSurfaceY - 1);
         return safeClampY(target, minAllowedY, maxAllowedY);
     }
 
     private OptionalInt riverReachWaterSurfaceY(RuntimeData data, HeightTileWindow heightWindow, int x, int z, int fallbackSurfaceY, int waterRadius, WaterShapeCache cache) {
-        int radius = Math.max(RIVER_REACH_SMOOTHING_RADIUS, Math.min(12, waterRadius + 3));
+        int radius = Math.max(RIVER_REACH_SMOOTHING_RADIUS, Math.min(14, waterRadius + 4));
         int total = 0;
         int count = 0;
         int min = Integer.MAX_VALUE;
@@ -629,7 +631,7 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         // Bias toward the lower third of the reach so water does not climb local terrain humps.
         int lowBias = Math.round((average * 2.0f + min) / 3.0f);
         int clamped = safeClampY(lowBias, min + MAX_RIVER_SURFACE_STEP, max - MAX_RIVER_SURFACE_STEP);
-        return OptionalInt.of(safeClampY(clamped, fallbackSurfaceY - 2, fallbackSurfaceY + 1));
+        return OptionalInt.of(safeClampY(clamped, fallbackSurfaceY - 4, fallbackSurfaceY + 2));
     }
 
     private static int safeClampY(int value, int minY, int maxY) {
@@ -690,11 +692,11 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         if (riverWater) {
             waterRadius = Math.max(waterRadius, riverHalfWidthValue(data, x, z, cache));
             int riverOrder = riverOrderValue(data, x, z, cache);
-            double edgeDistance = riverLayerValue(data, x, z, cache) > 0
-                ? nearestRiverBank(data, x, z, Math.max(4, waterRadius + 5), cache)
-                : Math.max(1.0, waterRadius + 0.5 - distance.blocks());
+            // Distance from the WIDENED channel edge (banks), not from the thin centerline mask.
+            // nearestRiverBank on 1-cell masks made the centerline shallow and the shoulders deep → W-bed.
+            double edgeDistance = Math.max(0.5, waterRadius + 0.5 - distance.blocks());
             int depth = riverDepth(data, heightWindow, x, z, edgeDistance, slope, waterRadius, riverOrder, cache);
-            double flowStrength = Math.clamp((waterRadius + 0.5 - distance.blocks()) / Math.max(1.0, waterRadius + 0.5), 0.0, 1.0);
+            double flowStrength = Math.clamp(edgeDistance / Math.max(1.0, waterRadius + 0.5), 0.0, 1.0);
             BlockState floor = waterFloorMaterial(x, z, vegetationClass, slope, true, flowStrength, depth, edgeDistance);
             int provisionalBed = riverBedY(originalSurfaceY, minBuildY, depth);
             int waterSurface = riverWaterSurfaceY(data, heightWindow, x, z, originalSurfaceY, provisionalBed, waterRadius, slope, cache);
@@ -1087,7 +1089,7 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         double slope = localSurfaceSlope(heightWindow, x, z, computeSurfaceY(data, heightWindow, x, z, cache), cache);
         int halfWidth = Math.max(riverWidenRadius, river.halfWidth());
         int order = Math.max(1, riverOrderValue(data, x, z, cache));
-        double riverEdge = nearestRiverBank(data, x, z, Math.max(4, halfWidth + 5), cache);
+        double riverEdge = Math.max(0.5, halfWidth + 0.5 - river.blocks());
         int riverDepth = riverDepth(data, heightWindow, x, z, riverEdge, slope, halfWidth, order, cache);
         double fade = smoothstep(Math.max(lakeEdgeDistance / 5.5, river.blocks() / 3.5));
         int target = riverDepth - Math.round((float) (fade * 2.0));
@@ -1315,14 +1317,16 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     private int rawRiverDepth(int x, int z, double edgeDistance, double slope, int halfWidth, int order) {
         int maxDepth = riverMaxDepth(edgeDistance, slope, order);
         double radius = Math.max(1.5, halfWidth + 0.5);
-        double u = Math.clamp((edgeDistance - 0.9) / radius, 0.0, 1.0);
-        double curved = 1.0 - Math.pow(1.0 - smoothstep(u), 1.35);
-        int depth = 1 + (int) Math.round(curved * (maxDepth - 1));
-        return Math.clamp(depth, 1, maxDepth);
+        double u = Math.clamp((edgeDistance - 0.5) / radius, 0.0, 1.0);
+        double curved = 1.0 - Math.pow(1.0 - smoothstep(u), 1.25);
+        int minDepth = edgeDistance >= Math.max(1.5, halfWidth * 0.35) ? Math.min(2, maxDepth) : 1;
+        int depth = minDepth + (int) Math.round(curved * (maxDepth - minDepth));
+        return Math.clamp(depth, minDepth, maxDepth);
     }
 
     private int riverMaxDepth(double edgeDistance, double slope, int order) {
         int widthDepth = edgeDistance <= 1.0 ? 2 : edgeDistance <= 2.0 ? 3 : edgeDistance <= 3.0 ? 4 : edgeDistance <= 4.0 ? 5 : 6;
+        widthDepth = Math.max(widthDepth, Math.min(riverCarveDepth, 6));
         int orderDepth = switch (Math.max(1, order)) {
             case 1 -> 3;
             case 2 -> 4;
@@ -5321,23 +5325,35 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         double topFade = depthBelowSurface >= 22 ? 1.0 : smoothstep01((double) Math.max(0, depthBelowSurface - 2) / 20.0);
         double heightFade = bottomFade * Math.max(0.16, topFade);
 
-        double cheese = fbm3(seed ^ 0x434845455345554bL, worldX * 0.014, y * 0.018, worldZ * 0.014, 3);
+        double cheese = fbm3(seed ^ 0x434845455345554bL, worldX * 0.014, y * 0.018, worldZ * 0.014, 2);
         double cheeseWarp = valueNoise3(seed ^ 0x5741525043484545L, worldX * 0.0045, y * 0.0075, worldZ * 0.0045) * 0.24;
         double cheeseDensity = cheese + cheeseWarp - NOISE_CAVE_CHEESE_THRESHOLD - (1.0 - heightFade) * 0.30;
+        if (cheeseDensity >= NOISE_CAVE_CHEESE_EARLY_OUT) {
+            return cheeseDensity;
+        }
 
         double spaghettiA = Math.abs(valueNoise3(seed ^ 0x5350414748455454L, worldX * 0.025, y * 0.020, worldZ * 0.025));
         double spaghettiB = Math.abs(valueNoise3(seed ^ 0x54554e4e454c554bL, worldX * 0.025, y * 0.020, worldZ * 0.025));
         double spaghettiWidth = NOISE_CAVE_SPAGHETTI_THICKNESS * (0.82 + 0.48 * smoothstep01((double) depthBelowSurface / 56.0));
         double spaghettiDensity = (spaghettiWidth - Math.max(spaghettiA, spaghettiB)) * 3.4 - (1.0 - heightFade) * 0.14;
+        double best = Math.max(cheeseDensity, spaghettiDensity);
+        if (best >= NOISE_CAVE_SPAGHETTI_EARLY_OUT) {
+            return best;
+        }
 
         double noodleA = Math.abs(valueNoise3(seed ^ 0x4e4f4f444c455531L, worldX * 0.047, y * 0.041, worldZ * 0.047));
         double noodleB = Math.abs(valueNoise3(seed ^ 0x4e4f4f444c455532L, worldX * 0.047, y * 0.041, worldZ * 0.047));
         double squeeze = valueNoise3(seed ^ 0x53515545455a4555L, worldX * 0.018, y * 0.026, worldZ * 0.018);
         double noodleDensity = (NOISE_CAVE_NOODLE_THICKNESS * (0.72 + 0.34 * Math.max(0.0, squeeze)) - Math.max(noodleA, noodleB)) * 3.8 - (1.0 - heightFade) * 0.16;
+        best = Math.max(best, noodleDensity);
 
-        double openingNoise = valueNoise3(seed ^ 0x535552464f50454eL, worldX * 0.020, y * 0.026, worldZ * 0.020);
-        double surfaceOpeningDensity = depthBelowSurface <= 16 && openingNoise > 0.72 ? openingNoise - 0.72 : -1.0;
-        return Math.max(Math.max(cheeseDensity, spaghettiDensity), Math.max(noodleDensity, surfaceOpeningDensity));
+        if (depthBelowSurface <= 16) {
+            double openingNoise = valueNoise3(seed ^ 0x535552464f50454eL, worldX * 0.020, y * 0.026, worldZ * 0.020);
+            if (openingNoise > 0.72) {
+                best = Math.max(best, openingNoise - 0.72);
+            }
+        }
+        return best;
     }
 
     private static byte plannedNoiseCaveFluid(long seed, int worldX, int y, int worldZ, int minY, int maxY) {

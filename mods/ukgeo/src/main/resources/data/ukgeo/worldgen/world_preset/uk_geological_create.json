@@ -39,7 +39,7 @@
         "highland_smoothing_radius": 20,
         "nodata_surface_y": 48,
         "river_widen_radius": 4,
-        "river_carve_depth": 3,
+        "river_carve_depth": 4,
         "min_y": -128,
         "gen_depth": 768,
         "fallback_height": 72
