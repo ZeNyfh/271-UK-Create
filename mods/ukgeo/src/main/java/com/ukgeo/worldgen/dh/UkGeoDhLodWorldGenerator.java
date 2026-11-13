@@ -49,8 +49,6 @@ public final class UkGeoDhLodWorldGenerator implements IDhApiWorldGenerator {
     private volatile IDhApiBlockStateWrapper podzolWrapper;
     private volatile IDhApiBlockStateWrapper coarseDirtWrapper;
     private volatile IDhApiBlockStateWrapper mossWrapper;
-    private volatile IDhApiBlockStateWrapper oakLeavesWrapper;
-    private volatile IDhApiBlockStateWrapper spruceLeavesWrapper;
     private volatile boolean wrappersReady;
 
     UkGeoDhLodWorldGenerator(IDhApiLevelWrapper levelWrapper, UkGeoChunkGenerator generator) {
@@ -173,17 +171,8 @@ public final class UkGeoDhLodWorldGenerator implements IDhApiWorldGenerator {
                 segments.add(new Segment(dirtBottom, surface, dirtWrapper));
             }
             segments.add(new Segment(surface, surface + 1, landTopBlock(sample, surfaceRock)));
-            int canopyTop = sample.canopyTopY();
             int aboveSurface = surface + 1;
-            if (canopyTop > aboveSurface) {
-                int leafTop = Math.min(canopyTop, maxY);
-                if (aboveSurface < leafTop) {
-                    segments.add(new Segment(aboveSurface, leafTop, canopyLeaves(sample.vegetationClass())));
-                }
-                if (leafTop < maxY) {
-                    segments.add(new Segment(leafTop, maxY, airWrapper));
-                }
-            } else if (aboveSurface < maxY) {
+            if (aboveSurface < maxY) {
                 segments.add(new Segment(aboveSurface, maxY, airWrapper));
             }
         }
@@ -250,19 +239,12 @@ public final class UkGeoDhLodWorldGenerator implements IDhApiWorldGenerator {
         }
         return switch (sample.vegetationClass()) {
             case UkGeoChunkGenerator.VEGETATION_ROCKY -> surfaceRock;
-            case UkGeoChunkGenerator.VEGETATION_ARABLE -> dirtWrapper;
             case UkGeoChunkGenerator.VEGETATION_HEATH -> podzolWrapper;
             case UkGeoChunkGenerator.VEGETATION_ACID_GRASSLAND -> coarseDirtWrapper;
             case UkGeoChunkGenerator.VEGETATION_WETLAND -> mossWrapper;
+            // Arable and default grasslands use grass (dirt painted big brown patches).
             default -> grassWrapper;
         };
-    }
-
-    private IDhApiBlockStateWrapper canopyLeaves(int vegetationClass) {
-        if (vegetationClass == UkGeoChunkGenerator.VEGETATION_CONIFER_WOODLAND) {
-            return spruceLeavesWrapper;
-        }
-        return oakLeavesWrapper;
     }
 
     private void appendDeepslateThenStone(ArrayList<Segment> segments, int fromY, int toY) {
@@ -297,8 +279,6 @@ public final class UkGeoDhLodWorldGenerator implements IDhApiWorldGenerator {
                 podzolWrapper = wrap(Blocks.PODZOL.defaultBlockState());
                 coarseDirtWrapper = wrap(Blocks.COARSE_DIRT.defaultBlockState());
                 mossWrapper = wrap(Blocks.MOSS_BLOCK.defaultBlockState());
-                oakLeavesWrapper = wrap(Blocks.OAK_LEAVES.defaultBlockState());
-                spruceLeavesWrapper = wrap(Blocks.SPRUCE_LEAVES.defaultBlockState());
                 // Warm biome cache with fallback so first columns don't race cold-init.
                 biomeWrapper(BIOME_FALLBACK);
                 wrappersReady = true;

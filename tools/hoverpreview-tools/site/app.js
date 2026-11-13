@@ -589,7 +589,8 @@ function normalizeLiveWeatherConfig(config) {
     api_base_url: config?.api_base_url || "https://api.open-meteo.com/v1/forecast",
     weather_model: config?.weather_model || "auto",
     batch_points: config?.batch_points || LIVE_WEATHER_BATCH_POINTS,
-    forecast_api_fallback: config?.forecast_api_fallback === true,
+    // Default true: map-tiles.open-meteo.com often fails DNS; forecast API still works.
+    forecast_api_fallback: config?.forecast_api_fallback !== false,
   };
 }
 
@@ -2174,12 +2175,24 @@ async function fetchLiveWeather(manifest, { prefetch = false } = {}) {
   if (state.liveWeather.loading) return;
   state.liveWeather.loading = true;
   try {
-    const metrics = await fetchOpenMeteoOmWeather(config).catch(async (error) => {
-      if (!config.forecast_api_fallback) throw error;
-      console.warn("[hoverpreview] Open-Meteo OM weather failed; using configured forecast API fallback", error);
-      const payloads = await fetchOpenMeteoWeather(config);
-      return decodeLiveWeatherMetrics(config, payloads);
-    });
+    // Prefer forecast API (api.open-meteo.com); OM map tiles often fail DNS.
+    let metrics;
+    if (config.prefer_forecast_api || config.forecast_api_fallback !== false) {
+      try {
+        const payloads = await fetchOpenMeteoWeather(config);
+        metrics = decodeLiveWeatherMetrics(config, payloads);
+      } catch (forecastError) {
+        console.warn("[hoverpreview] Forecast API weather failed; trying OM tiles", forecastError);
+        metrics = await fetchOpenMeteoOmWeather(config);
+      }
+    } else {
+      metrics = await fetchOpenMeteoOmWeather(config).catch(async (error) => {
+        if (!config.forecast_api_fallback) throw error;
+        console.warn("[hoverpreview] Open-Meteo OM weather failed; using configured forecast API fallback", error);
+        const payloads = await fetchOpenMeteoWeather(config);
+        return decodeLiveWeatherMetrics(config, payloads);
+      });
+    }
     state.liveWeather.downfall_coverage = await createLiveWeatherMetric("downfall_coverage", metrics.downfall_coverage, grid.columns, grid.rows);
     scheduleRender();
     refreshStatus();

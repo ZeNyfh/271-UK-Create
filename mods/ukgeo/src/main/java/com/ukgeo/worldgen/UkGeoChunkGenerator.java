@@ -2576,13 +2576,7 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
                 floorMaterial = Blocks.GRAVEL.defaultBlockState();
             }
 
-            if (!riverWater && hasHeight && surface >= seaLevelY) {
-                if (vegetationClass == VEGETATION_BROADLEAF_WOODLAND) {
-                    canopyTopY = surface + 6;
-                } else if (vegetationClass == VEGETATION_CONIFER_WOODLAND) {
-                    canopyTopY = surface + 8;
-                }
-            }
+            // canopyTopY stays 0 — custom DH LODs omit woodland leaf canopy cubes.
 
             // Cheap steep / coastal flags (mirror ChunkTerrainPlanner; no full height grids).
             if (hasHeight) {

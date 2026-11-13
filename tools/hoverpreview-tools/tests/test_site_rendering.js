@@ -137,7 +137,7 @@ test("live weather controls work with older manifests and fetch Open-Meteo", () 
   assert.match(appJs, /library\.omProtocol\(\{ url: omUrl, type: "json" \}/);
   assert.match(appJs, /library\.getValueFromLatLong\(latitude, longitude, precipitationUrl\)/);
   assert.match(appJs, /https:\/\/api\.open-meteo\.com\/v1\/forecast/);
-  assert.match(appJs, /forecast_api_fallback:\s*config\?\.forecast_api_fallback === true/);
+  assert.match(appJs, /forecast_api_fallback:\s*config\?\.forecast_api_fallback !== false/);
   assert.match(appJs, /const DEFAULT_VISIBLE_OVERLAYS = new Set\(\);/);
   assert.match(appJs, /const LIVE_WEATHER_GRID_COLUMNS = 256;/);
   assert.match(appJs, /const LIVE_WEATHER_SAMPLE_BATCH_POINTS = 512;/);
@@ -192,8 +192,8 @@ test("layer checkbox selections persist only selected layer names in a cookie", 
   assert.match(appJs, /document\.cookie = `\$\{SELECTED_LAYERS_COOKIE\}=\$\{value\}; Max-Age=\$\{SELECTED_LAYERS_COOKIE_MAX_AGE_SECONDS\}; Path=\/; SameSite=Lax\$\{secure\}`;/);
   assert.doesNotMatch(appJs, /localStorage\.(setItem|removeItem|clear)/);
   assert.doesNotMatch(appJs, /sessionStorage/);
-  assert.match(rootIndexHtml, /app\.js\?v=20260726-2/);
-  assert.match(siteIndexHtml, /app\.js\?v=20260726-2/);
+  assert.match(rootIndexHtml, /app\.js\?v=20261113-2/);
+  assert.match(siteIndexHtml, /app\.js\?v=20261113-2/);
 });
 
 test("hoverpreview defaults use larger tiles to reduce request count", () => {

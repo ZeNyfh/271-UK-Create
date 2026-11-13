@@ -58,9 +58,6 @@
 # -Dukgeo.highSpeedViewDistance=6
 
 # UKGeo Phase 5: custom Distant Horizons tile→LOD generator
-# Default ON when unset. Disabled so DH uses its normal server chunk loader
-# (real fillFromNoise + decoration → proper trees/surfaces). Custom path kept
-# rivers/height cheap but painted blocky leaf cubes + arable-as-dirt.
--Dukgeo.enableDhLodGenerator=false
-# -Dukgeo.enableDhLodGenerator=true
+# Custom tile LODs used for terrain/rivers (fast); vegetation canopy cubes removed.
+-Dukgeo.enableDhLodGenerator=true
 

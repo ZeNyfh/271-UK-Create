@@ -983,6 +983,12 @@ def _live_weather_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
         "weather_model": settings["weather_model"],
         "timeout_seconds": settings["timeout_seconds"],
         "batch_points": settings["batch_points"],
+        # Prefer forecast API when OM map tiles fail (map-tiles.open-meteo.com DNS often broken).
+        "forecast_api_fallback": True,
+        "tile_provider": {
+            "kind": "openmeteo-om",
+            "data_base_url": "https://map-tiles.open-meteo.com/data_spatial",
+        },
         "metrics": {
             "downfall_coverage": {"unit": "mm", "source": "current.precipitation"},
         },
