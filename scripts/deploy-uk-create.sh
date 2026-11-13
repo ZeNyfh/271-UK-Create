@@ -216,7 +216,7 @@ if [[ ! -f server.properties ]]; then
 motd=UK Create
 max-players=10
 online-mode=true
-difficulty=normal
+difficulty=hard
 gamemode=survival
 spawn-protection=0
 view-distance=10
@@ -232,6 +232,11 @@ if grep -q '^level-type=' server.properties; then
   sed -i 's/^level-type=.*/level-type=ukgeo\\:uk_geological_create/' server.properties
 else
   echo 'level-type=ukgeo\:uk_geological_create' >> server.properties
+fi
+if grep -q '^difficulty=' server.properties; then
+  sed -i 's/^difficulty=.*/difficulty=hard/' server.properties
+else
+  echo 'difficulty=hard' >> server.properties
 fi
 mkdir -p mods config kubejs uk_world_data logs
 REMOTE

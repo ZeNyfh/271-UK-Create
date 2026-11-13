@@ -7,6 +7,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.parse
 import urllib.request
@@ -20,8 +21,9 @@ INSTANCE = Path(
     "/mnt/f9e25c87-6bec-4284-bbee-92babc61d5c7/Games/Minecraft/Instances/UK Create (1)"
 )
 MODS = INSTANCE / "mods"
-BACKUP = Path("/home/zenyfh/Documents/GitHub/mapcreator/tools/mod-updates/backup")
-DOWNLOADS = Path("/home/zenyfh/Documents/GitHub/mapcreator/tools/mod-updates/downloads")
+_SCRATCH = Path(tempfile.mkdtemp(prefix="uk-create-mod-updates-"))
+BACKUP = _SCRATCH / "backup"
+DOWNLOADS = _SCRATCH / "downloads"
 REPO = Path("/home/zenyfh/Documents/GitHub/mapcreator")
 SSH = "zenyfh@zenvibelaptop"
 REMOTE = "/home/zenyfh/uk-create-server"
@@ -355,13 +357,14 @@ def main():
         except Exception as e:
             results.append({"slug": slug, "status": "error", "error": str(e)})
             print("ERROR", e, flush=True)
-    out = REPO / "tools/mod-updates/results.json"
-    out.write_text(json.dumps(results, indent=2))
-    print("\nWrote", out)
     updated = sum(1 for r in results if r.get("status") == "updated")
     reverted = sum(1 for r in results if r.get("status") == "reverted")
     print(f"Summary: updated={updated} reverted={reverted} total={len(results)}")
+    print(json.dumps(results, indent=2))
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    finally:
+        shutil.rmtree(_SCRATCH, ignore_errors=True)
