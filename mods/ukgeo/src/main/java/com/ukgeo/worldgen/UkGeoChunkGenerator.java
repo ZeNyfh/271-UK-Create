@@ -9,6 +9,8 @@ import net.minecraft.ReportedException;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.BitSet;
 import java.util.Collections;
 import java.util.EnumSet;
 import java.util.HashMap;
@@ -22,6 +24,10 @@ import java.util.OptionalInt;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
@@ -39,7 +45,9 @@ import net.minecraft.core.registries.Registries;
 import net.minecraft.data.worldgen.placement.VegetationPlacements;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.level.WorldGenRegion;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.world.level.ChunkPos;
@@ -110,7 +118,15 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     private static final boolean DEBUG_PERF_SUMMARY = Boolean.getBoolean("ukgeo.debugPerfSummary");
     private static final boolean FAST_BASE_HEIGHT_QUERIES = !Boolean.getBoolean("ukgeo.disableFastBaseHeightQueries");
     private static final boolean DEBUG_BASE_HEIGHT_QUERIES = Boolean.getBoolean("ukgeo.debugBaseHeightQueries");
-    private static final boolean ASYNC_CHUNK_PLANNING = Boolean.getBoolean("ukgeo.asyncChunkPlanning");
+    private static final boolean INLINE_CHUNK_PLANNING = Boolean.getBoolean("ukgeo.inlineChunkPlanning");
+    private static final boolean ASYNC_CHUNK_PLANNING_FLAG = Boolean.getBoolean("ukgeo.asyncChunkPlanning");
+    /** Dedicated plan pool when async is on and inline escape hatch is off — never nest on Worker-Main. */
+    private static final boolean USE_ASYNC_CHUNK_PLANNING = ASYNC_CHUNK_PLANNING_FLAG && !INLINE_CHUNK_PLANNING;
+    private static final boolean USE_DEDICATED_PLAN_POOL = Boolean.getBoolean("ukgeo.useDedicatedPlanPool");
+    private static final int PLAN_THREADS = resolvePlanThreads();
+    private static final ExecutorService CHUNK_PLAN_EXECUTOR = createChunkPlanExecutor();
+    private static final long[] EMPTY_PLAYER_CHUNK_KEYS = new long[0];
+    private static volatile long[] playerChunkKeys = EMPTY_PLAYER_CHUNK_KEYS;
     private static final long SLOW_FILL_FROM_NOISE_WARN_MS = Long.getLong("ukgeo.slowFillFromNoiseWarnMs", 500L);
     private static final long SLOW_APPLY_BIOME_DECORATION_WARN_MS = Long.getLong("ukgeo.slowApplyBiomeDecorationWarnMs", 500L);
     private static final long SLOW_BIOME_DECORATION_WARN_MS = Long.getLong("ukgeo.slowBiomeDecorationWarnMs", 1_000L);
@@ -127,19 +143,19 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     private static final int DEBUG_WATER_X = Integer.getInteger("ukgeo.debugWaterX", 30);
     private static final int DEBUG_WATER_Z = Integer.getInteger("ukgeo.debugWaterZ", 72);
     private static final int DEBUG_WATER_Y = Integer.getInteger("ukgeo.debugWaterY", 67);
-    private static final int DEBUG_WATER_RADIUS = Integer.getInteger("ukgeo.debugWaterRadius", 2);
-    private static final int VEGETATION_BROADLEAF_WOODLAND = 1;
-    private static final int VEGETATION_CONIFER_WOODLAND = 2;
-    private static final int VEGETATION_ARABLE = 3;
-    private static final int VEGETATION_IMPROVED_GRASSLAND = 4;
-    private static final int VEGETATION_NEUTRAL_GRASSLAND = 5;
-    private static final int VEGETATION_CALCAREOUS_GRASSLAND = 6;
-    private static final int VEGETATION_ACID_GRASSLAND = 7;
-    private static final int VEGETATION_WETLAND = 8;
-    private static final int VEGETATION_HEATH = 9;
-    static final int VEGETATION_FRESHWATER = 10;
-    private static final int VEGETATION_URBAN = 11;
-    private static final int VEGETATION_ROCKY = 12;
+    private static final int DEBUG_WATER_RADIUS = Integer.getInteger("ukgeo.debugWaterRadius", 8);
+    public static final int VEGETATION_BROADLEAF_WOODLAND = 1;
+    public static final int VEGETATION_CONIFER_WOODLAND = 2;
+    public static final int VEGETATION_ARABLE = 3;
+    public static final int VEGETATION_IMPROVED_GRASSLAND = 4;
+    public static final int VEGETATION_NEUTRAL_GRASSLAND = 5;
+    public static final int VEGETATION_CALCAREOUS_GRASSLAND = 6;
+    public static final int VEGETATION_ACID_GRASSLAND = 7;
+    public static final int VEGETATION_WETLAND = 8;
+    public static final int VEGETATION_HEATH = 9;
+    public static final int VEGETATION_FRESHWATER = 10;
+    public static final int VEGETATION_URBAN = 11;
+    public static final int VEGETATION_ROCKY = 12;
     private static final int LAKE_EDGE_SEARCH_RADIUS = Integer.getInteger("ukgeo.lakeEdgeSearchRadius", 18);
     private static final int LAKE_BANK_BLEND_RADIUS = 5;
     private static final int LAKE_ARTIFACT_SCAN_RADIUS = 24;
@@ -149,8 +165,8 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     private static final int WATERBED_PROTECTION_DEPTH = 6;
     private static final boolean ENABLE_RIVER_SEARCH_INDEX = Boolean.getBoolean("ukgeo.enableRiverSearchIndex");
     private static final int RIVER_SHELF_REMOVAL_EXTRA_WIDTH = Integer.getInteger("ukgeo.riverShelfRemovalExtraWidth", 2);
-    /** Minimum half-width (blocks from centerline) so streams never render as a 1-block trickle. */
-    private static final int MIN_RIVER_CHANNEL_HALF_WIDTH = Integer.getInteger("ukgeo.minRiverChannelHalfWidth", 2);
+    /** Minimum half-width (blocks from centerline). Order-1 brooks may be 1 block half-width. */
+    private static final int MIN_RIVER_CHANNEL_HALF_WIDTH = Integer.getInteger("ukgeo.minRiverChannelHalfWidth", 1);
     private static final int MAX_RIVER_SURFACE_STEP = 1;
     private static final int RIVER_REACH_SMOOTHING_RADIUS = 8;
     private static final double ALLOW_STEEP_RAPIDS_ONLY_ABOVE_SLOPE = 1.8;
@@ -169,7 +185,7 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     private static final int MAX_ORE_VEIN_ATTEMPTS_PER_CHUNK = Integer.getInteger("ukgeo.maxOreVeinAttemptsPerChunk", 6);
     private static final int MAX_MINERAL_VEIN_ATTEMPTS_PER_CHUNK = Integer.getInteger("ukgeo.maxMineralVeinAttemptsPerChunk", 8);
     private static final int ORE_VEIN_ORIGIN_RADIUS = Math.max(1, Integer.getInteger("ukgeo.oreVeinOriginRadius", 3));
-    private static final int MINERAL_VEIN_ORIGIN_RADIUS = Math.max(1, Integer.getInteger("ukgeo.mineralVeinOriginRadius", 8));
+    private static final int MINERAL_VEIN_ORIGIN_RADIUS = Math.max(1, Integer.getInteger("ukgeo.mineralVeinOriginRadius", 6));
     private static final double MINERAL_VEIN_SIZE_MULTIPLIER = Double.parseDouble(System.getProperty("ukgeo.mineralVeinSizeMultiplier", "8.0"));
     private static final double MINERAL_VEIN_LENGTH_MULTIPLIER = Double.parseDouble(System.getProperty("ukgeo.mineralVeinLengthMultiplier", "3.4"));
     private static final double MINERAL_VEIN_RADIUS_MULTIPLIER = Double.parseDouble(System.getProperty("ukgeo.mineralVeinRadiusMultiplier", "1.15"));
@@ -179,6 +195,29 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     private static final int MAX_MINERAL_VEIN_LENGTH = 72;
     private static final double ORE_VEIN_STEP = 0.95;
     private static final double MINERAL_VEIN_STEP = 1.55;
+    private static final double ORE_VEIN_BRANCH_STEP = 1.25;
+    private static final int MAX_ORE_VEIN_PLAN_CACHE = Integer.getInteger("ukgeo.maxOreVeinPlanCache", 4096);
+    private static final int MAX_ORE_SLICE_BAG_CACHE = Integer.getInteger("ukgeo.maxOreSliceBagCache", 4096);
+    /** 8×8-chunk regions map ore → origins whose SliceBag AABB overlaps the region (safer than dense voxel bags). */
+    private static final boolean ENABLE_ORE_REGION_INDEX = !Boolean.getBoolean("ukgeo.disableOreRegionIndex");
+    private static final int ORE_REGION_CHUNK_SIZE = Math.max(2, Integer.getInteger("ukgeo.oreRegionChunkSize", 8));
+    private static final int MAX_ORE_EMPTY_ORIGIN_CACHE = Integer.getInteger("ukgeo.maxOreEmptyOriginCache", 262144);
+    private static final int MAX_ORE_REGION_INDEX_ENTRIES = Integer.getInteger("ukgeo.maxOreRegionIndexEntries", 4096);
+    private static final VeinPlan[] NO_ORE_VEIN_PLANS = new VeinPlan[0];
+    private static final OreSliceBag EMPTY_ORE_SLICE_BAG = new OreSliceBag(
+        new double[0], new double[0], new double[0],
+        new double[0], new double[0], new long[0],
+        0, -1, 0, -1, 0
+    );
+    private static final BoundedCache<OriginOreKey, VeinPlan[]> ORE_VEIN_PLAN_CACHE = new BoundedCache<>(MAX_ORE_VEIN_PLAN_CACHE);
+    /** Terrain-independent vein slice centers per origin+ore — walk path once, expand ellipses only for target chunk. */
+    private static final BoundedCache<OriginOreKey, OreSliceBag> ORE_SLICE_BAG_CACHE = new BoundedCache<>(MAX_ORE_SLICE_BAG_CACHE);
+    /** Sticky set of origins that built an empty SliceBag — soft-capped, no BoundedCache thrash. */
+    private static final Set<Long> ORE_EMPTY_ORIGINS = ConcurrentHashMap.newKeySet();
+    private static final ConcurrentHashMap<String, Integer> ORE_EMPTY_ORIGIN_NAME_IDS = new ConcurrentHashMap<>();
+    private static final AtomicInteger ORE_EMPTY_ORIGIN_NEXT_ID = new AtomicInteger();
+    /** regionRx/Rz + oreName → packed origin chunk coords that can affect that region. */
+    private static final ConcurrentHashMap<OreRegionKey, OriginChunkList> ORE_REGION_INDEX = new ConcurrentHashMap<>();
     private static final int SNOW_ICE_MIN_Y = 501;
     private static final int VANILLA_MIN_Y = -64;
     private static final int VANILLA_MAX_Y = 320;
@@ -519,11 +558,14 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
             );
         }
         return baseNoise.thenCompose(noiseChunk -> {
+            PERF.recordFillStarted();
             long planSubmitNanos = System.nanoTime();
             AtomicLong planStartNanos = new AtomicLong(planSubmitNanos);
             AtomicLong planElapsedNanos = new AtomicLong();
             CompletableFuture<ChunkTerrainPlanner.Plan> planFuture;
-            if (ASYNC_CHUNK_PLANNING) {
+            if (USE_ASYNC_CHUNK_PLANNING) {
+                Executor planExecutor = (USE_DEDICATED_PLAN_POOL && CHUNK_PLAN_EXECUTOR != null)
+                    ? CHUNK_PLAN_EXECUTOR : Util.backgroundExecutor();
                 planFuture = CompletableFuture.supplyAsync(
                     Util.wrapThreadWithTaskName("ukgeo_plan", () -> {
                         try {
@@ -536,7 +578,7 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
                             throw new RuntimeException("Failed to plan UKGeo chunk " + noiseChunk.getPos(), ex);
                         }
                     }),
-                    Util.backgroundExecutor()
+                    planExecutor
                 );
             } else {
                 try {
@@ -551,7 +593,7 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
                     planFuture = failed;
                 }
             }
-            return planFuture.thenApply(plan -> {
+            java.util.function.Function<ChunkTerrainPlanner.Plan, ChunkAccess> applyPlan = plan -> {
                 chunkPlans.put(noiseChunk.getPos().toLong(), plan);
                 trimChunkPlanMap(chunkPlans, noiseChunk.getPos());
                 long applyStartNanos = System.nanoTime();
@@ -559,12 +601,19 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
                 long applyElapsedNanos = System.nanoTime() - applyStartNanos;
                 logTiming("fillFromNoise.apply", noiseChunk.getPos(), applyStartNanos);
                 long elapsedNanos = System.nanoTime() - fillStartNanos;
-                PERF.recordFill(elapsedNanos);
+                long planQueueNanos = Math.max(0L, planStartNanos.get() - planSubmitNanos);
+                PERF.recordFill(noiseChunk.getPos(), elapsedNanos, planQueueNanos, planElapsedNanos.get(), applyElapsedNanos);
+                PERF.maybeLog(noiseChunk.getPos());
                 logTiming("fillFromNoise.total", noiseChunk.getPos(), fillStartNanos);
                 logSlowFillBreakdown(noiseChunk.getPos(), fillStartNanos, planSubmitNanos, planStartNanos.get(), planElapsedNanos.get(), applyElapsedNanos, elapsedNanos);
                 logSlowTiming("fillFromNoise.total", noiseChunk.getPos(), elapsedNanos, SLOW_FILL_FROM_NOISE_WARN_MS);
                 return noiseChunk;
-            });
+            };
+            // Dedicated pool: hop apply onto MC background workers. Default backgroundExecutor: stay on same thread.
+            if (USE_ASYNC_CHUNK_PLANNING && USE_DEDICATED_PLAN_POOL && CHUNK_PLAN_EXECUTOR != null) {
+                return planFuture.thenApplyAsync(applyPlan, Util.backgroundExecutor());
+            }
+            return planFuture.thenApply(applyPlan);
         });
     }
 
@@ -592,10 +641,13 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     }
 
     private int riverWaterSurfaceY(RuntimeData data, HeightTileWindow heightWindow, int x, int z, int originalSurfaceY, int riverBedY, int waterRadius, double slope, WaterShapeCache cache) {
-        OptionalInt reachBank = riverReachBankSurfaceY(data, heightWindow, x, z, waterRadius, cache);
+        OptionalInt reachBank = riverReachBankSurfaceY(data, heightWindow, x, z, originalSurfaceY, waterRadius, cache);
         int smoothed = smoothedSurfaceY(heightWindow, x, z, Math.max(3, Math.max(riverWidenRadius, waterRadius))).orElse(originalSurfaceY);
-        // Flat bank-to-bank: no freeboard dip, and never follow in-channel valley DEM.
-        int target = reachBank.orElse(smoothed);
+        // Prefer min-biased bank height; without banks never follow hillside DEM above local land.
+        int target = reachBank.orElseGet(() -> Math.min(smoothed, originalSurfaceY));
+        if (reachBank.isPresent()) {
+            target = Math.min(target, reachBank.getAsInt());
+        }
         int minAllowedY = riverBedY + 1;
         return Math.max(minAllowedY, target);
     }
@@ -605,9 +657,10 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
      * Unlike the old reach average (which used river-mask DEM cells already low in valleys),
      * this keeps the water surface as a flat plane at bank height.
      */
-    private OptionalInt riverReachBankSurfaceY(RuntimeData data, HeightTileWindow heightWindow, int x, int z, int waterRadius, WaterShapeCache cache) {
+    private OptionalInt riverReachBankSurfaceY(RuntimeData data, HeightTileWindow heightWindow, int x, int z, int originalSurfaceY, int waterRadius, WaterShapeCache cache) {
         int radius = Math.max(RIVER_REACH_SMOOTHING_RADIUS, Math.min(14, waterRadius + 4));
         int bankSearch = waterRadius + 3;
+        int localSmoothed = smoothedSurfaceY(heightWindow, x, z, Math.max(3, Math.max(riverWidenRadius, waterRadius))).orElse(originalSurfaceY);
         int total = 0;
         int count = 0;
         int min = Integer.MAX_VALUE;
@@ -637,6 +690,10 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
                     continue;
                 }
                 int surface = rawSurfaceY(heightWindow, sampleX, sampleZ, sample);
+                // Reject outlier-high banks on slopes relative to the query column.
+                if (surface > localSmoothed + 2) {
+                    continue;
+                }
                 total += surface;
                 min = Math.min(min, surface);
                 max = Math.max(max, surface);
@@ -647,9 +704,8 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
             return OptionalInt.empty();
         }
         int average = Math.round((float) total / count);
-        // Bias toward the lower bank so water does not flood the higher bank.
-        int lowBias = Math.round((average * 2.0f + min) / 3.0f);
-        // Cap at the highest sampled bank so we never flood land; never clamp to in-channel DEM.
+        // Bias harder toward the lower bank so water does not climb hillside walls.
+        int lowBias = Math.round((min * 3.0f + average) / 4.0f);
         return OptionalInt.of(Math.min(lowBias, max));
     }
 
@@ -1077,16 +1133,27 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
                 return cached;
             }
         }
-        int radiusSquared = radius * radius;
-        boolean found = false;
-        for (int dz = -radius; dz <= radius && !found; dz++) {
-            for (int dx = -radius; dx <= radius; dx++) {
-                if (dx * dx + dz * dz > radiusSquared) {
-                    continue;
-                }
-                if (riverLayerValue(data, x + dx, z + dz, cache) > 0) {
-                    found = true;
-                    break;
+        boolean found;
+        if (data.riverDistanceLayer != null) {
+            int code = data.riverDistanceLayer.sampleOrDefault(x, z, 255);
+            if (code >= 255) {
+                found = false;
+            } else {
+                double blocks = code * 0.5;
+                found = blocks <= radius;
+            }
+        } else {
+            int radiusSquared = radius * radius;
+            found = false;
+            for (int dz = -radius; dz <= radius && !found; dz++) {
+                for (int dx = -radius; dx <= radius; dx++) {
+                    if (dx * dx + dz * dz > radiusSquared) {
+                        continue;
+                    }
+                    if (riverLayerValue(data, x + dx, z + dz, cache) > 0) {
+                        found = true;
+                        break;
+                    }
                 }
             }
         }
@@ -1665,10 +1732,12 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
                 case TRIANGLE, TWO_PEAKS -> scaledVanillaY(ore.vanillaPeakY(), chunk);
             };
             boolean mineralVeinOre = isMineralVeinOre(ore);
-            int reach = mineralVeinOre ? MINERAL_VEIN_ORIGIN_RADIUS : ORE_VEIN_ORIGIN_RADIUS;
             int maxTravelBlocks = mineralVeinOre
-                ? (int) Math.ceil(MAX_MINERAL_VEIN_LENGTH * MINERAL_VEIN_STEP + MAX_MINERAL_VEIN_LENGTH * 0.45 + 8.0)
+                ? (int) Math.ceil(MAX_MINERAL_VEIN_LENGTH * MINERAL_VEIN_STEP + (MAX_MINERAL_VEIN_LENGTH / 3.0) * ORE_VEIN_BRANCH_STEP + 8.0)
                 : (int) Math.ceil(MAX_ORE_VEIN_LENGTH * ORE_VEIN_STEP + 6.0);
+            // Cap configured origin radius by how far a vein can actually travel (keeps continuity, shrinks empty work).
+            int configuredReach = mineralVeinOre ? MINERAL_VEIN_ORIGIN_RADIUS : ORE_VEIN_ORIGIN_RADIUS;
+            int reach = Math.min(configuredReach, Math.max(1, (int) Math.ceil(maxTravelBlocks / 16.0)));
             int score = scoreLayer == null ? 0 : scoreLayer.sampleOrDefault(pos.getMinBlockX() + 8, pos.getMinBlockZ() + 8, 0);
             double normalAttempts = normalOreAttempts(ore, score);
             logOreHeightProfile(ore, chunk, normalAttempts, score > 0);
@@ -1682,17 +1751,64 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
                 maxTerrainTop = Math.max(maxTerrainTop, top);
             }
             // One seen-set per ore: veins from neighbouring origins share the chunk and must not double-place.
-            java.util.HashSet<Long> seen = new java.util.HashSet<>(512);
+            OreSeenSet seen = new OreSeenSet(chunk.getMinBuildHeight(), chunk.getMaxBuildHeight() - 1);
             BlockStatePair oreStates = states.get();
             int placementsBefore = placements.size();
+            // Origins already applied this chunk (index path) — reach fallback must not double-place.
+            BitSet processedOrigins = new BitSet((reach * 2 + 1) * (reach * 2 + 1));
+            if (ENABLE_ORE_REGION_INDEX) {
+                int regionRx = Math.floorDiv(pos.x, ORE_REGION_CHUNK_SIZE);
+                int regionRz = Math.floorDiv(pos.z, ORE_REGION_CHUNK_SIZE);
+                OriginChunkList indexed = ORE_REGION_INDEX.get(new OreRegionKey(regionRx, regionRz, ore.name()));
+                if (indexed != null) {
+                    PERF.recordOreIndexHit();
+                    long[] origins = indexed.snapshot();
+                    for (long packed : origins) {
+                        int originChunkX = unpackOriginChunkX(packed);
+                        int originChunkZ = unpackOriginChunkZ(packed);
+                        int dx = originChunkX - pos.x;
+                        int dz = originChunkZ - pos.z;
+                        if (dx < -reach || dx > reach || dz < -reach || dz > reach) {
+                            continue;
+                        }
+                        if (!originCanReachChunk(chunk, originChunkX, originChunkZ, maxTravelBlocks)) {
+                            continue;
+                        }
+                        markProcessedOrigin(processedOrigins, dx, dz, reach);
+                        acceptedCenters += placeOreVeinsFromOrigin(
+                            placements,
+                            ore,
+                            oreStates,
+                            scoreLayer,
+                            chunk,
+                            columns,
+                            seen,
+                            originChunkX,
+                            originChunkZ,
+                            bandMin,
+                            bandMax,
+                            mineralVeinOre
+                        );
+                    }
+                } else {
+                    PERF.recordOreIndexMiss();
+                }
+            }
             for (int dz = -reach; dz <= reach; dz++) {
                 for (int dx = -reach; dx <= reach; dx++) {
+                    if (isProcessedOrigin(processedOrigins, dx, dz, reach)) {
+                        continue;
+                    }
                     int originChunkX = pos.x + dx;
                     int originChunkZ = pos.z + dz;
+                    // Skip empty origins without per-probe counters (neighbour fills re-hit same keys).
+                    if (isRememberedEmptyOrigin(originChunkX, originChunkZ, ore.name())) {
+                        continue;
+                    }
                     if (!originCanReachChunk(chunk, originChunkX, originChunkZ, maxTravelBlocks)) {
                         continue;
                     }
-                    int accepted = placeOreVeinsFromOrigin(
+                    acceptedCenters += placeOreVeinsFromOrigin(
                         placements,
                         ore,
                         oreStates,
@@ -1706,7 +1822,6 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
                         bandMax,
                         mineralVeinOre
                     );
-                    acceptedCenters += accepted;
                 }
             }
             plannedPlacements = placements.size() - placementsBefore;
@@ -1749,7 +1864,130 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         U8OreTileLayer scoreLayer,
         ChunkAccess chunk,
         ChunkTerrainPlanner.ColumnPlan[] columns,
-        java.util.HashSet<Long> seen,
+        OreSeenSet seen,
+        int originChunkX,
+        int originChunkZ,
+        int bandMin,
+        int bandMax,
+        boolean mineralVein
+    ) {
+        OreSliceBag bag = oreSliceBagForOrigin(ore, scoreLayer, chunk, originChunkX, originChunkZ, bandMin, bandMax, mineralVein);
+        if (bag.isEmpty()) {
+            return 0;
+        }
+        int chunkMinX = chunk.getPos().getMinBlockX();
+        int chunkMinZ = chunk.getPos().getMinBlockZ();
+        if (!bag.mayOverlapChunk(chunkMinX, chunkMinZ)) {
+            return bag.veinCount();
+        }
+        int minY = chunk.getMinBuildHeight() + 1;
+        int maxY = chunk.getMaxBuildHeight() - 1;
+        boolean uniformHeight = ore.heightProfile() == OreDefinition.OreHeightProfile.UNIFORM;
+        double[] cx = bag.centerX();
+        double[] cy = bag.centerY();
+        double[] cz = bag.centerZ();
+        double[] hr = bag.horizontalRadius();
+        double[] vr = bag.verticalRadius();
+        long[] salts = bag.salt();
+        for (int i = 0; i < cx.length; i++) {
+            if (!veinSliceMayHitChunk(chunk, cx[i], cz[i], hr[i])) {
+                continue;
+            }
+            addOreVeinSlice(
+                placements, ore, states, chunk, columns, seen,
+                cx[i], cy[i], cz[i], hr[i], vr[i], salts[i],
+                bandMin, bandMax, minY, maxY, uniformHeight
+            );
+        }
+        return bag.veinCount();
+    }
+
+    private static OreSliceBag oreSliceBagForOrigin(
+        OreDefinition ore,
+        U8OreTileLayer scoreLayer,
+        LevelHeightAccessor level,
+        int originChunkX,
+        int originChunkZ,
+        int bandMin,
+        int bandMax,
+        boolean mineralVein
+    ) {
+        if (isRememberedEmptyOrigin(originChunkX, originChunkZ, ore.name())) {
+            PERF.recordSliceBagHit();
+            return EMPTY_ORE_SLICE_BAG;
+        }
+        OriginOreKey key = new OriginOreKey(originChunkX, originChunkZ, ore.name());
+        OreSliceBag cached = ORE_SLICE_BAG_CACHE.get(key);
+        if (cached != null) {
+            PERF.recordSliceBagHit();
+            return cached;
+        }
+        PERF.recordSliceBagMiss();
+        OreSliceBag built = buildOreSliceBag(ore, scoreLayer, level, originChunkX, originChunkZ, bandMin, bandMax, mineralVein);
+        if (built.isEmpty()) {
+            registerOreSliceBagOrigin(key, built);
+            return EMPTY_ORE_SLICE_BAG;
+        }
+        OreSliceBag existing = ORE_SLICE_BAG_CACHE.putIfAbsent(key, built);
+        if (existing == null) {
+            registerOreSliceBagOrigin(key, built);
+            return built;
+        }
+        return existing;
+    }
+
+    private static OreSliceBag buildOreSliceBag(
+        OreDefinition ore,
+        U8OreTileLayer scoreLayer,
+        LevelHeightAccessor level,
+        int originChunkX,
+        int originChunkZ,
+        int bandMin,
+        int bandMax,
+        boolean mineralVein
+    ) {
+        VeinPlan[] plans = oreVeinPlansForOrigin(ore, scoreLayer, level, originChunkX, originChunkZ, bandMin, bandMax, mineralVein);
+        if (plans.length == 0) {
+            return EMPTY_ORE_SLICE_BAG;
+        }
+        int minY = level.getMinBuildHeight() + 1;
+        int maxY = level.getMaxBuildHeight() - 1;
+        if (minY > maxY) {
+            return EMPTY_ORE_SLICE_BAG;
+        }
+        OreSliceCollector collector = new OreSliceCollector();
+        for (VeinPlan plan : plans) {
+            collectOreVeinSlices(collector, ore.name(), plan, mineralVein, minY, maxY);
+        }
+        return collector.toBag(plans.length);
+    }
+
+    private static VeinPlan[] oreVeinPlansForOrigin(
+        OreDefinition ore,
+        U8OreTileLayer scoreLayer,
+        LevelHeightAccessor level,
+        int originChunkX,
+        int originChunkZ,
+        int bandMin,
+        int bandMax,
+        boolean mineralVein
+    ) {
+        OriginOreKey key = new OriginOreKey(originChunkX, originChunkZ, ore.name());
+        VeinPlan[] cached = ORE_VEIN_PLAN_CACHE.get(key);
+        if (cached != null) {
+            PERF.recordVeinPlanHit();
+            return cached;
+        }
+        PERF.recordVeinPlanMiss();
+        VeinPlan[] built = buildOreVeinPlans(ore, scoreLayer, level, originChunkX, originChunkZ, bandMin, bandMax, mineralVein);
+        VeinPlan[] existing = ORE_VEIN_PLAN_CACHE.putIfAbsent(key, built);
+        return existing == null ? built : existing;
+    }
+
+    private static VeinPlan[] buildOreVeinPlans(
+        OreDefinition ore,
+        U8OreTileLayer scoreLayer,
+        LevelHeightAccessor level,
         int originChunkX,
         int originChunkZ,
         int bandMin,
@@ -1763,22 +2001,21 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         int attempts = scaledOreAttempts(normalOreAttempts(ore, score), score > 0, random);
         attempts = Math.min(attempts, mineralVein ? MAX_MINERAL_VEIN_ATTEMPTS_PER_CHUNK : MAX_ORE_VEIN_ATTEMPTS_PER_CHUNK);
         if (attempts <= 0) {
-            return 0;
+            return NO_ORE_VEIN_PLANS;
         }
-        int accepted = 0;
-        int minY = Math.max(chunk.getMinBuildHeight() + 1, bandMin);
-        int maxY = Math.min(chunk.getMaxBuildHeight() - 1, bandMax);
+        int minY = Math.max(level.getMinBuildHeight() + 1, bandMin);
+        int maxY = Math.min(level.getMaxBuildHeight() - 1, bandMax);
         if (minY > maxY) {
-            return 0;
+            return NO_ORE_VEIN_PLANS;
         }
+        List<VeinPlan> plans = new ArrayList<>(attempts);
         for (int attempt = 0; attempt < attempts; attempt++) {
             double startX = originChunkX * 16.0 + random.nextDouble() * 16.0;
             double startZ = originChunkZ * 16.0 + random.nextDouble() * 16.0;
             int startY = minY + random.nextInt(maxY - minY + 1);
-            if (!acceptOreHeight(ore, startY, bandMin, bandMax, chunk, random)) {
+            if (!acceptOreHeight(ore, startY, bandMin, bandMax, level, random)) {
                 continue;
             }
-            accepted++;
             double angle = random.nextDouble() * Math.PI * 2.0;
             double pitch = (random.nextDouble() - 0.5) * (mineralVein ? 0.28 : 0.62);
             double phase = random.nextDouble() * Math.PI * 2.0;
@@ -1790,12 +2027,27 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
             double branchAngle = angle + (random.nextDouble() - 0.5) * 1.6;
             double branchPitch = clamp(pitch * 0.4 + (random.nextDouble() - 0.5) * 0.2, -0.35, 0.35);
             int branchLength = branch ? Math.max(8, length / 3) : 0;
-            walkOreVein(
-                placements, ore, states, chunk, columns, seen, startX, startY + 0.5, startZ,
-                angle, pitch, phase, length, radiusScale, mineralVein, bandMin, bandMax, branchAt, branchAngle, branchPitch, branchLength
-            );
+            plans.add(new VeinPlan(
+                startX, startY + 0.5, startZ,
+                angle, pitch, phase, length, radiusScale,
+                branchAt, branchAngle, branchPitch, branchLength
+            ));
         }
-        return accepted;
+        if (plans.isEmpty()) {
+            return NO_ORE_VEIN_PLANS;
+        }
+        return plans.toArray(VeinPlan[]::new);
+    }
+
+    private static boolean veinPlanMayReachChunk(ChunkAccess chunk, VeinPlan plan, double stepDistance) {
+        double mainTravel = plan.length() * stepDistance;
+        double maxTravel = mainTravel;
+        if (plan.branchLength() > 0) {
+            double toBranch = Math.min(plan.branchAt(), plan.length()) * stepDistance;
+            maxTravel = Math.max(maxTravel, toBranch + plan.branchLength() * ORE_VEIN_BRANCH_STEP);
+        }
+        double radiusMargin = Math.max(2.5, plan.radiusScale() * 2.0) + 1.0;
+        return distancePointToChunkAabbXZ(chunk, plan.startX(), plan.startZ()) <= maxTravel + radiusMargin;
     }
 
     private static boolean originCanReachChunk(ChunkAccess chunk, int originChunkX, int originChunkZ, int maxTravelBlocks) {
@@ -1821,6 +2073,109 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         }
         int limit = maxTravelBlocks + 16;
         return (long) dx * dx + (long) dz * dz <= (long) limit * limit;
+    }
+
+    private static void registerOreSliceBagOrigin(OriginOreKey key, OreSliceBag bag) {
+        if (bag.isEmpty()) {
+            if (rememberEmptyOrigin(key.originChunkX(), key.originChunkZ(), key.oreName())) {
+                PERF.recordOreIndexNegHit(); // once per newly remembered empty origin
+            }
+            return;
+        }
+        if (!ENABLE_ORE_REGION_INDEX) {
+            return;
+        }
+        int minChunkX = Math.floorDiv(bag.minX(), 16);
+        int maxChunkX = Math.floorDiv(bag.maxX(), 16);
+        int minChunkZ = Math.floorDiv(bag.minZ(), 16);
+        int maxChunkZ = Math.floorDiv(bag.maxZ(), 16);
+        int minRx = Math.floorDiv(minChunkX, ORE_REGION_CHUNK_SIZE);
+        int maxRx = Math.floorDiv(maxChunkX, ORE_REGION_CHUNK_SIZE);
+        int minRz = Math.floorDiv(minChunkZ, ORE_REGION_CHUNK_SIZE);
+        int maxRz = Math.floorDiv(maxChunkZ, ORE_REGION_CHUNK_SIZE);
+        long packed = packOriginChunk(key.originChunkX(), key.originChunkZ());
+        for (int rz = minRz; rz <= maxRz; rz++) {
+            for (int rx = minRx; rx <= maxRx; rx++) {
+                OreRegionKey regionKey = new OreRegionKey(rx, rz, key.oreName());
+                ORE_REGION_INDEX.compute(regionKey, (k, list) -> {
+                    OriginChunkList target = list == null ? new OriginChunkList() : list;
+                    target.add(packed);
+                    return target;
+                });
+            }
+        }
+        if (ORE_REGION_INDEX.size() > MAX_ORE_REGION_INDEX_ENTRIES) {
+            trimOreRegionIndex();
+        }
+    }
+
+    private static void trimOreRegionIndex() {
+        int excess = ORE_REGION_INDEX.size() - MAX_ORE_REGION_INDEX_ENTRIES;
+        if (excess <= 0) {
+            return;
+        }
+        for (OreRegionKey key : ORE_REGION_INDEX.keySet()) {
+            ORE_REGION_INDEX.remove(key);
+            if (--excess <= 0) {
+                return;
+            }
+        }
+    }
+
+    private static long packOriginChunk(int originChunkX, int originChunkZ) {
+        return (((long) originChunkX) << 32) | (originChunkZ & 0xffffffffL);
+    }
+
+    private static int oreEmptyOriginNameId(String oreName) {
+        return ORE_EMPTY_ORIGIN_NAME_IDS.computeIfAbsent(oreName, n -> ORE_EMPTY_ORIGIN_NEXT_ID.getAndIncrement());
+    }
+
+    private static long packEmptyOriginKey(int originChunkX, int originChunkZ, String oreName) {
+        int oreId = oreEmptyOriginNameId(oreName);
+        return ((long) oreId << 42) ^ packOriginChunk(originChunkX, originChunkZ);
+    }
+
+    private static boolean isRememberedEmptyOrigin(int ox, int oz, String oreName) {
+        return ORE_EMPTY_ORIGINS.contains(packEmptyOriginKey(ox, oz, oreName));
+    }
+
+    /** @return true if newly remembered */
+    private static boolean rememberEmptyOrigin(int ox, int oz, String oreName) {
+        if (ORE_EMPTY_ORIGINS.size() >= MAX_ORE_EMPTY_ORIGIN_CACHE) {
+            return false; // soft cap: stop remembering new empties rather than thrashing
+        }
+        return ORE_EMPTY_ORIGINS.add(packEmptyOriginKey(ox, oz, oreName));
+    }
+
+    private static int unpackOriginChunkX(long packed) {
+        return (int) (packed >> 32);
+    }
+
+    private static int unpackOriginChunkZ(long packed) {
+        return (int) packed;
+    }
+
+    private static int processedOriginIndex(int dx, int dz, int reach) {
+        int width = reach * 2 + 1;
+        return (dz + reach) * width + (dx + reach);
+    }
+
+    private static void markProcessedOrigin(BitSet processed, int dx, int dz, int reach) {
+        processed.set(processedOriginIndex(dx, dz, reach));
+    }
+
+    private static boolean isProcessedOrigin(BitSet processed, int dx, int dz, int reach) {
+        return processed.get(processedOriginIndex(dx, dz, reach));
+    }
+
+    private static double distancePointToChunkAabbXZ(ChunkAccess chunk, double x, double z) {
+        int chunkMinX = chunk.getPos().getMinBlockX();
+        int chunkMinZ = chunk.getPos().getMinBlockZ();
+        double closestX = Math.clamp(x, chunkMinX, chunkMinX + 15);
+        double closestZ = Math.clamp(z, chunkMinZ, chunkMinZ + 15);
+        double dx = x - closestX;
+        double dz = z - closestZ;
+        return Math.sqrt(dx * dx + dz * dz);
     }
 
     /** 0..1 from u8 score. No score layer → mid abundance (1.0). */
@@ -1863,40 +2218,33 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         return baseRadius * scale * veinThicknessFactor(ore, score);
     }
 
-    private static void walkOreVein(
-        List<ChunkTerrainPlanner.OrePlacement> placements,
-        OreDefinition ore,
-        BlockStatePair states,
-        ChunkAccess chunk,
-        ChunkTerrainPlanner.ColumnPlan[] columns,
-        java.util.HashSet<Long> seen,
-        double startX,
-        double startY,
-        double startZ,
-        double angle,
-        double pitch,
-        double phase,
-        int length,
-        double radiusScale,
+    /** Walk vein path and record slice centers only — no per-voxel ellipse expansion. */
+    private static void collectOreVeinSlices(
+        OreSliceCollector collector,
+        String oreName,
+        VeinPlan plan,
         boolean mineralVein,
-        int bandMin,
-        int bandMax,
-        int branchAt,
-        double branchAngle,
-        double branchPitch,
-        int branchLength
+        int minY,
+        int maxY
     ) {
-        int minY = chunk.getMinBuildHeight() + 1;
-        int maxY = chunk.getMaxBuildHeight() - 1;
-        double x = startX;
-        double y = startY;
-        double z = startZ;
+        double x = plan.startX();
+        double y = plan.startY();
+        double z = plan.startZ();
+        double angle = plan.angle();
+        double pitch = plan.pitch();
+        double phase = plan.phase();
+        int length = plan.length();
+        double radiusScale = plan.radiusScale();
+        int branchAt = plan.branchAt();
+        double branchAngle = plan.branchAngle();
+        double branchPitch = plan.branchPitch();
+        int branchLength = plan.branchLength();
         double branchX = x;
         double branchY = y;
         double branchZ = z;
-        long salt = oreVeinOriginSeed((int) Math.floor(startX) >> 4, (int) Math.floor(startZ) >> 4, ore.name());
+        boolean branchCaptured = branchLength <= 0;
+        long salt = oreVeinOriginSeed((int) Math.floor(plan.startX()) >> 4, (int) Math.floor(plan.startZ()) >> 4, oreName);
         double stepDistance = mineralVein ? MINERAL_VEIN_STEP : ORE_VEIN_STEP;
-        boolean uniformHeight = ore.heightProfile() == OreDefinition.OreHeightProfile.UNIFORM;
         for (int step = 0; step < length; step++) {
             double progress = (double) step / Math.max(1, length - 1);
             double taper = Math.sin(Math.PI * progress);
@@ -1909,10 +2257,9 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
                 branchX = x;
                 branchY = y;
                 branchZ = z;
+                branchCaptured = true;
             }
-            if (veinSliceMayHitChunk(chunk, x, z, horizontalRadius)) {
-                addOreVeinSlice(placements, ore, states, chunk, columns, seen, x, y, z, horizontalRadius, verticalRadius, salt, bandMin, bandMax, minY, maxY, uniformHeight);
-            }
+            collector.add(x, y, z, horizontalRadius, verticalRadius, salt);
             double cosSlope = Math.cos(slope);
             x += Math.cos(heading) * cosSlope * stepDistance;
             z += Math.sin(heading) * cosSlope * stepDistance;
@@ -1921,10 +2268,11 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
                 y = clamp(y, minY + 1, maxY - 1);
             }
         }
-        if (branchLength > 0) {
+        if (branchLength > 0 && branchCaptured) {
             double x2 = branchX;
             double y2 = branchY;
             double z2 = branchZ;
+            long branchSalt = salt ^ 0xBEEFL;
             for (int step = 0; step < branchLength; step++) {
                 double progress = (double) step / Math.max(1, branchLength - 1);
                 double taper = Math.sin(Math.PI * progress);
@@ -1932,12 +2280,10 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
                 double slope = clamp(branchPitch + Math.sin(step * 0.13 + phase) * 0.05, -0.3, 0.3);
                 double horizontalRadius = Math.max(0.45, radiusScale * 0.72 * (0.4 + taper));
                 double verticalRadius = Math.max(0.4, horizontalRadius * 0.56);
-                if (veinSliceMayHitChunk(chunk, x2, z2, horizontalRadius)) {
-                    addOreVeinSlice(placements, ore, states, chunk, columns, seen, x2, y2, z2, horizontalRadius, verticalRadius, salt ^ 0xBEEFL, bandMin, bandMax, minY, maxY, uniformHeight);
-                }
+                collector.add(x2, y2, z2, horizontalRadius, verticalRadius, branchSalt);
                 double cosSlope = Math.cos(slope);
-                x2 += Math.cos(heading) * cosSlope * 1.25;
-                z2 += Math.sin(heading) * cosSlope * 1.25;
+                x2 += Math.cos(heading) * cosSlope * ORE_VEIN_BRANCH_STEP;
+                z2 += Math.sin(heading) * cosSlope * ORE_VEIN_BRANCH_STEP;
                 y2 = clamp(y2 + Math.sin(slope) * 0.45, minY + 1, maxY - 1);
             }
         }
@@ -1957,7 +2303,7 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         BlockStatePair states,
         ChunkAccess chunk,
         ChunkTerrainPlanner.ColumnPlan[] columns,
-        java.util.HashSet<Long> seen,
+        OreSeenSet seen,
         double centerX,
         double centerY,
         double centerZ,
@@ -2020,8 +2366,7 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
                     } else if (oreHeightWeight(ore, py, bandMin, bandMax, chunk) <= 0.0) {
                         continue;
                     }
-                    long key = (((long) py & 0xffffL) << 32) | ((long) localX << 16) | (long) localZ;
-                    if (!seen.add(key)) {
+                    if (!seen.add(localX, py, localZ)) {
                         continue;
                     }
                     placements.add(new ChunkTerrainPlanner.OrePlacement(localX, py, localZ, py < 0 ? states.deepslate : states.normal));
@@ -2053,6 +2398,25 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
             if (cached != null) {
                 return cached;
             }
+        }
+        if (data.riverDistanceLayer != null && data.riverNearestHalfWidthLayer != null) {
+            int code = data.riverDistanceLayer.sampleOrDefault(x, z, 255);
+            RiverDistance result;
+            if (code >= 255) {
+                result = RiverDistance.none();
+            } else {
+                double blocks = code * 0.5;
+                if (blocks > radius) {
+                    result = RiverDistance.none();
+                } else {
+                    int nearestHw = data.riverNearestHalfWidthLayer.sampleOrDefault(x, z, 0);
+                    result = new RiverDistance(blocks, 255, nearestHw);
+                }
+            }
+            if (cache != null) {
+                cache.nearestRivers.put(key, result);
+            }
+            return result;
         }
         int bestDistanceSquared = Integer.MAX_VALUE;
         int bestScore = 0;
@@ -2167,6 +2531,137 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         }
         int rawSurfaceY = rawSurfaceY(x, z, decimetres);
         return waterSmoothedSurfaceY(data, null, x, z, decimetres, rawSurfaceY, null);
+    }
+
+    /**
+     * Lightweight column snapshot for Distant Horizons LOD generation.
+     * Reuses {@link #surfaceY(int, int)} / vegetation / river distance — no ores, caves, or full river shaping.
+     */
+    public LodColumnSample sampleLodColumn(int x, int z) {
+        int surface = surfaceY(x, z);
+        RuntimeData runtime = data();
+        boolean hasHeight = runtime != null && hasHeightData(runtime, null, x, z);
+        BlockState surfaceRock = hasHeight ? sampleSurfaceRock(runtime, x, z, surface) : defaultBaseRock(surface);
+        BlockState exposedSurfaceRock = ChunkTerrainPlanner.exposedSurfaceRock(x, z, surfaceRock);
+        int maxY = minY + genDepth;
+
+        int vegetationClass = 0;
+        boolean riverWater = false;
+        int waterSurfaceY = surface;
+        int terrainFloorY = surface;
+        BlockState floorMaterial = Blocks.DIRT.defaultBlockState();
+        int canopyTopY = 0;
+        boolean steep = false;
+        boolean coastalBeach = false;
+
+        if (runtime != null) {
+            vegetationClass = sampleVegetationClass(runtime, x, z);
+
+            if (runtime.riverLayer != null) {
+                RiverDistance d = nearestRiver(runtime, x, z, riverSearchRadius(runtime) + 2, null);
+                int channel = Math.max(MIN_RIVER_CHANNEL_HALF_WIDTH, Math.max(riverWidenRadius, d.halfWidth()));
+                if (d.found() && d.blocks() <= channel) {
+                    riverWater = true;
+                    int depth = Math.clamp((int) Math.round(channel + 0.5 - d.blocks()) + 1, 2, 4);
+                    waterSurfaceY = surface;
+                    terrainFloorY = Math.max(minY + 1, waterSurfaceY - depth);
+                    floorMaterial = Blocks.GRAVEL.defaultBlockState();
+                }
+            }
+
+            if (!riverWater && vegetationClass == VEGETATION_FRESHWATER && hasHeight) {
+                riverWater = true;
+                terrainFloorY = Math.max(minY + 1, surface - 3);
+                waterSurfaceY = Math.max(surface, terrainFloorY + 1);
+                floorMaterial = Blocks.GRAVEL.defaultBlockState();
+            }
+
+            if (!riverWater && hasHeight && surface >= seaLevelY) {
+                if (vegetationClass == VEGETATION_BROADLEAF_WOODLAND) {
+                    canopyTopY = surface + 6;
+                } else if (vegetationClass == VEGETATION_CONIFER_WOODLAND) {
+                    canopyTopY = surface + 8;
+                }
+            }
+
+            // Cheap steep / coastal flags (mirror ChunkTerrainPlanner; no full height grids).
+            if (hasHeight) {
+                steep = isLodSteep(x, z, surface);
+                coastalBeach = isLodCoastalBeach(x, z, surface);
+            }
+        }
+
+        return new LodColumnSample(
+            surface,
+            seaLevelY,
+            minY,
+            maxY,
+            hasHeight,
+            surfaceRock,
+            exposedSurfaceRock,
+            vegetationClass,
+            riverWater,
+            waterSurfaceY,
+            terrainFloorY,
+            floorMaterial,
+            canopyTopY,
+            steep,
+            coastalBeach
+        );
+    }
+
+    /** Cheap steep check: 4-neighbor step=4, delta >= 6 (same as ChunkTerrainPlanner). */
+    private boolean isLodSteep(int x, int z, int surface) {
+        int max = surface;
+        int min = surface;
+        int step = 4;
+        int[] offsets = {step, 0, -step, 0, 0, step, 0, -step};
+        for (int i = 0; i < offsets.length; i += 2) {
+            int neighbor = surfaceY(x + offsets[i], z + offsets[i + 1]);
+            max = Math.max(max, neighbor);
+            min = Math.min(min, neighbor);
+        }
+        return max - min >= 6;
+    }
+
+    /** Cheap coastal beach: surface in [sea, sea+2] and a neighbor below sea within radius 3. */
+    private boolean isLodCoastalBeach(int x, int z, int surface) {
+        if (surface < seaLevelY || surface > seaLevelY + 2) {
+            return false;
+        }
+        int radius = 3;
+        int radiusSquared = radius * radius;
+        for (int dz = -radius; dz <= radius; dz++) {
+            for (int dx = -radius; dx <= radius; dx++) {
+                if (dx * dx + dz * dz > radiusSquared) {
+                    continue;
+                }
+                if (surfaceY(x + dx, z + dz) < seaLevelY) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /** DH-free LOD column inputs (see {@link #sampleLodColumn(int, int)}). */
+    public record LodColumnSample(
+        int surfaceY,
+        int seaLevelY,
+        int minY,
+        int maxY,
+        boolean hasHeightData,
+        BlockState surfaceRock,
+        BlockState exposedSurfaceRock,
+        int vegetationClass,
+        boolean riverWater,
+        int waterSurfaceY,
+        int terrainFloorY,
+        BlockState floorMaterial,
+        int canopyTopY,
+        boolean steep,
+        boolean coastalBeach
+    ) {
     }
 
     int computeSurfaceY(RuntimeData data, HeightTileWindow heightWindow, int x, int z) {
@@ -2577,7 +3072,9 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
                 U8OreTileLayer riverLayer = manifest.riversPath == null ? null : new U8OreTileLayer(manifest, "rivers", manifest.riversPath);
                 U8OreTileLayer riverOrderLayer = manifest.riverOrderPath == null ? null : new U8OreTileLayer(manifest, "river_order", manifest.riverOrderPath);
                 U8OreTileLayer riverHalfWidthLayer = manifest.riverHalfWidthPath == null ? null : new U8OreTileLayer(manifest, "river_half_width", manifest.riverHalfWidthPath);
-                runtimeData = new RuntimeData(manifest, new R16HeightTileLayer(manifest), surfaceLayer, vegetationLayer, biomeRegionLayer, riverLayer, riverOrderLayer, riverHalfWidthLayer, layers, OreSettings.defaults());
+                U8OreTileLayer riverDistanceLayer = manifest.riverDistancePath == null ? null : new U8OreTileLayer(manifest, "river_distance", manifest.riverDistancePath);
+                U8OreTileLayer riverNearestHalfWidthLayer = manifest.riverNearestHalfWidthPath == null ? null : new U8OreTileLayer(manifest, "river_nearest_half_width", manifest.riverNearestHalfWidthPath);
+                runtimeData = new RuntimeData(manifest, new R16HeightTileLayer(manifest), surfaceLayer, vegetationLayer, biomeRegionLayer, riverLayer, riverOrderLayer, riverHalfWidthLayer, riverDistanceLayer, riverNearestHalfWidthLayer, layers, OreSettings.defaults());
                 UkGeoMod.LOGGER.info("Loaded ukgeo manifest at {} with {}x{} tiles", root, manifest.tilesX(), manifest.tilesZ());
             } catch (IOException | RuntimeException ex) {
                 UkGeoMod.LOGGER.warn("UK world data is missing or invalid at {}; using fallback terrain: {}", root, ex.getMessage());
@@ -2592,7 +3089,7 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         if (data == null) {
             return "uk_world_data unavailable; fallback terrain active";
         }
-        return "tiles=%dx%d tileSize=%d bounds=x %d..%d z %d..%d origin=%s heightScale=%.3f lowExtra=%.3f highScale=%.3f nodataY=%d riverRadius=%d riverDepth=%d vegetation=%s biomeRegions=%s heightCache=%s".formatted(
+        return "tiles=%dx%d tileSize=%d bounds=x %d..%d z %d..%d origin=%s axisScale=%.2fx%.2f heightScale=%.3f lowExtra=%.3f highScale=%.3f nodataY=%d riverRadius=%d riverDepth=%d vegetation=%s biomeRegions=%s heightCache=%s".formatted(
             data.manifest.tilesX(),
             data.manifest.tilesZ(),
             data.manifest.tileSize,
@@ -2601,6 +3098,8 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
             data.manifest.minecraftMinZ,
             data.manifest.minecraftMaxZ,
             data.manifest.originSummary(),
+            data.manifest.axisScaleX,
+            data.manifest.axisScaleZ,
             heightScale,
             lowlandExtraScale,
             highlandScale,
@@ -2611,6 +3110,171 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
             data.biomeRegionLayer == null ? "none" : "loaded",
             data.height.cacheStats()
         );
+    }
+
+    private static int resolvePlanThreads() {
+        int defaultThreads = Math.max(4, Runtime.getRuntime().availableProcessors() - 1);
+        int configured = Integer.getInteger("ukgeo.planThreads", defaultThreads);
+        return Math.max(1, Math.min(12, configured));
+    }
+
+    private static ExecutorService createChunkPlanExecutor() {
+        if (!USE_ASYNC_CHUNK_PLANNING) {
+            UkGeoMod.LOGGER.info(
+                "UKGeo chunk planning: mode=sync (asyncChunkPlanning={} inlineChunkPlanning={})",
+                ASYNC_CHUNK_PLANNING_FLAG,
+                INLINE_CHUNK_PLANNING
+            );
+            return null;
+        }
+        if (!USE_DEDICATED_PLAN_POOL) {
+            UkGeoMod.LOGGER.info(
+                "UKGeo chunk planning: mode=async backgroundExecutor (asyncChunkPlanning=true useDedicatedPlanPool=false)"
+            );
+            return null;
+        }
+        AtomicInteger seq = new AtomicInteger();
+        ThreadFactory factory = runnable -> {
+            Thread thread = new Thread(runnable, "ukgeo-plan-" + seq.getAndIncrement());
+            thread.setDaemon(true);
+            return thread;
+        };
+        ExecutorService executor = Executors.newFixedThreadPool(PLAN_THREADS, factory);
+        UkGeoMod.LOGGER.info(
+            "UKGeo chunk planning: mode=async dedicatedPool threads={} names=ukgeo-plan-* (asyncChunkPlanning=true useDedicatedPlanPool=true)",
+            PLAN_THREADS
+        );
+        return executor;
+    }
+
+    /** Snapshot player chunk positions for near/far fill counters (server tick). */
+    static void refreshPlayerChunkSnapshot(MinecraftServer server) {
+        List<ServerPlayer> players = server.getPlayerList().getPlayers();
+        if (players.isEmpty()) {
+            playerChunkKeys = EMPTY_PLAYER_CHUNK_KEYS;
+            return;
+        }
+        long[] keys = new long[players.size()];
+        int i = 0;
+        for (ServerPlayer player : players) {
+            ChunkPos pos = player.chunkPosition();
+            keys[i++] = ChunkPos.asLong(pos.x, pos.z);
+        }
+        playerChunkKeys = keys;
+    }
+
+    private static int chebyshevToNearestPlayer(ChunkPos chunkPos) {
+        long[] keys = playerChunkKeys;
+        if (keys.length == 0) {
+            return -1;
+        }
+        int best = Integer.MAX_VALUE;
+        for (long key : keys) {
+            int dx = Math.abs(ChunkPos.getX(key) - chunkPos.x);
+            int dz = Math.abs(ChunkPos.getZ(key) - chunkPos.z);
+            int dist = Math.max(dx, dz);
+            if (dist < best) {
+                best = dist;
+            }
+        }
+        return best;
+    }
+
+    String dumpPerfSummary() {
+        return PERF.dump();
+    }
+
+    /** Aggregates plan-stage timings for continuous `/ukgeo perf` and interval logs. */
+    void recordPlanStageTimings(
+        long heightWindowNanos,
+        long surfaceGridNanos,
+        long waterPlanningNanos,
+        long orePlanningNanos,
+        long totalPlanNanos
+    ) {
+        PERF.recordPlanStages(heightWindowNanos, surfaceGridNanos, waterPlanningNanos, orePlanningNanos, totalPlanNanos);
+    }
+
+    public int sampleRiverHalfWidth(int x, int z) {
+        RuntimeData data = data();
+        if (data == null || data.riverHalfWidthLayer == null) {
+            return 0;
+        }
+        if (!hasHeightData(data, null, x, z)) {
+            return 0;
+        }
+        return data.riverHalfWidthLayer.sampleOrDefault(x, z, 0);
+    }
+
+    public int sampleRiverOrder(int x, int z) {
+        RuntimeData data = data();
+        if (data == null || data.riverOrderLayer == null) {
+            return 0;
+        }
+        if (!hasHeightData(data, null, x, z)) {
+            return 0;
+        }
+        return Math.max(1, data.riverOrderLayer.sampleOrDefault(x, z, 1));
+    }
+
+    public String sampleWaterPlanLine(int x, int z) {
+        RuntimeData data = data();
+        if (data == null) {
+            return "x=" + x + " z=" + z + " no_runtime_data";
+        }
+        try {
+            HeightTileWindow heightWindow = HeightTileWindow.forChunk(data.height(), data.manifest(), x, z, sampleMargin());
+            int originalSurfaceY = computeSurfaceY(data, heightWindow, x, z);
+            int vegetation = sampleVegetationClass(data, x, z);
+            RiverShape shape = computeSurfaceWaterShape(data, heightWindow, x, z, originalSurfaceY, minY, vegetation);
+            RiverDistance river = data.riverLayer == null ? RiverDistance.none() : nearestRiver(data, x, z, riverSearchRadius(data) + 2, null);
+            return ("x=%d z=%d riverDist=%.2f halfWidth=%d order=%d hasWater=%s bed=%d surface=%d floor=%s originalSurfaceY=%d vegetation=%d"
+                ).formatted(
+                    x,
+                    z,
+                    river.found() ? river.blocks() : -1.0,
+                    Math.max(riverWidenRadius, river.halfWidth()),
+                    riverOrderValue(data, x, z, null),
+                    shape.hasWater(),
+                    shape.terrainSurfaceY(),
+                    shape.waterSurfaceY(),
+                    BuiltInRegistries.BLOCK.getKey(shape.floorMaterial().getBlock()),
+                    originalSurfaceY,
+                    vegetation
+                );
+        } catch (IOException e) {
+            return "x=" + x + " z=" + z + " error=" + e.getMessage();
+        }
+    }
+
+    public String describeWhere(int x, int z) {
+        RuntimeData data = data();
+        if (data == null) {
+            return "mc=(" + x + "," + z + ") no_runtime_data";
+        }
+        TileManifest m = data.manifest;
+        boolean inside = x >= m.minecraftMinX && x <= m.minecraftMaxX && z >= m.minecraftMinZ && z <= m.minecraftMaxZ;
+        String bng = reference()
+            .flatMap(ref -> ref.minecraftToBng(x, z))
+            .map(c -> "BNG E %.0f N %.0f".formatted(c.easting(), c.northing()))
+            .orElse("BNG unavailable");
+        String scaleNote = m.axisScaleX >= 1.5 || m.axisScaleZ >= 1.5
+            ? "axis_scale~2 (website-style); if comparing to server 1x use serverXZ≈websiteXZ/2"
+            : "axis_scale~1 (server-style); website hover_manifest is often 2x so serverXZ≈websiteXZ/2";
+        return ("mc=(%d,%d) insideBounds=%s bounds=x %d..%d z %d..%d axisScale=%.2fx%.2f %s note=%s"
+            ).formatted(
+                x,
+                z,
+                inside,
+                m.minecraftMinX,
+                m.minecraftMaxX,
+                m.minecraftMinZ,
+                m.minecraftMaxZ,
+                m.axisScaleX,
+                m.axisScaleZ,
+                bng,
+                scaleNote
+            );
     }
 
     public Optional<UkGeoReference> reference() {
@@ -4761,9 +5425,21 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     }
 
     private static final class PerfCounters {
+        private static final int LATENCY_RING_CAPACITY = 256;
+
+        private final LongAdder fillsStarted = new LongAdder();
         private final LongAdder chunksFilled = new LongAdder();
         private final LongAdder fillNanos = new LongAdder();
         private final LongAdder maxFillNanos = new LongAdder();
+        private final LongAdder planQueueNanos = new LongAdder();
+        private final LongAdder maxPlanQueueNanos = new LongAdder();
+        private final LongAdder planNanos = new LongAdder();
+        private final LongAdder applyNanos = new LongAdder();
+        private final LongAdder heightWindowNanos = new LongAdder();
+        private final LongAdder surfaceGridNanos = new LongAdder();
+        private final LongAdder waterPlanningNanos = new LongAdder();
+        private final LongAdder orePlanningNanos = new LongAdder();
+        private final LongAdder plansStaged = new LongAdder();
         private final LongAdder chunksDecorated = new LongAdder();
         private final LongAdder decorationNanos = new LongAdder();
         private final LongAdder maxDecorationNanos = new LongAdder();
@@ -4774,11 +5450,89 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         private final LongAdder ancientCleanupNanos = new LongAdder();
         private final LongAdder riceCleanupCalls = new LongAdder();
         private final LongAdder riceCleanupNanos = new LongAdder();
+        private final LongAdder noiseCaveChunks = new LongAdder();
+        private final LongAdder noiseCaveNanos = new LongAdder();
+        private final LongAdder veinPlanHits = new LongAdder();
+        private final LongAdder veinPlanMisses = new LongAdder();
+        private final LongAdder sliceBagHits = new LongAdder();
+        private final LongAdder sliceBagMisses = new LongAdder();
+        private final LongAdder oreIndexHits = new LongAdder();
+        private final LongAdder oreIndexMisses = new LongAdder();
+        private final LongAdder oreIndexNegHits = new LongAdder();
+        private final LongAdder nearFieldFills = new LongAdder();
+        private final LongAdder farFieldFills = new LongAdder();
+        private final LatencySampleRing planQueueSamples = new LatencySampleRing(LATENCY_RING_CAPACITY);
+        private final LatencySampleRing fillSamples = new LatencySampleRing(LATENCY_RING_CAPACITY);
+        private final LatencySampleRing oreSamples = new LatencySampleRing(LATENCY_RING_CAPACITY);
+        private final AtomicLong lastLogNanos = new AtomicLong();
+        private final AtomicLong lastLogFilled = new AtomicLong();
+        private volatile double lastIntervalFillRate;
 
-        void recordFill(long nanos) {
+        void recordFillStarted() {
+            fillsStarted.increment();
+        }
+
+        void recordFill(ChunkPos chunkPos, long totalNanos, long planQueue, long plan, long apply) {
             chunksFilled.increment();
-            fillNanos.add(nanos);
-            addMax(maxFillNanos, nanos);
+            fillNanos.add(totalNanos);
+            planQueueNanos.add(planQueue);
+            planNanos.add(plan);
+            applyNanos.add(apply);
+            addMax(maxFillNanos, totalNanos);
+            addMax(maxPlanQueueNanos, planQueue);
+            fillSamples.add(totalNanos);
+            planQueueSamples.add(planQueue);
+            int playerDist = chebyshevToNearestPlayer(chunkPos);
+            if (playerDist >= 0) {
+                if (playerDist <= 2) {
+                    nearFieldFills.increment();
+                } else if (playerDist > 6) {
+                    farFieldFills.increment();
+                }
+            }
+        }
+
+        void recordPlanStages(
+            long heightWindow,
+            long surfaceGrid,
+            long waterPlanning,
+            long orePlanning,
+            long totalPlan
+        ) {
+            heightWindowNanos.add(heightWindow);
+            surfaceGridNanos.add(surfaceGrid);
+            waterPlanningNanos.add(waterPlanning);
+            orePlanningNanos.add(orePlanning);
+            oreSamples.add(orePlanning);
+            plansStaged.increment();
+        }
+
+        void recordVeinPlanHit() {
+            veinPlanHits.increment();
+        }
+
+        void recordVeinPlanMiss() {
+            veinPlanMisses.increment();
+        }
+
+        void recordSliceBagHit() {
+            sliceBagHits.increment();
+        }
+
+        void recordSliceBagMiss() {
+            sliceBagMisses.increment();
+        }
+
+        void recordOreIndexHit() {
+            oreIndexHits.increment();
+        }
+
+        void recordOreIndexMiss() {
+            oreIndexMisses.increment();
+        }
+
+        void recordOreIndexNegHit() {
+            oreIndexNegHits.increment();
         }
 
         void recordApplyDecoration(long nanos) {
@@ -4803,34 +5557,86 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
             riceCleanupNanos.add(nanos);
         }
 
+        void recordNoiseCave(long nanos) {
+            noiseCaveChunks.increment();
+            noiseCaveNanos.add(nanos);
+        }
+
+        String dump() {
+            long filled = chunksFilled.sum();
+            long started = fillsStarted.sum();
+            long decorated = chunksDecorated.sum();
+            long fullCalls = fullDecorationCalls.sum();
+            long caves = noiseCaveChunks.sum();
+            long staged = plansStaged.sum();
+            long veinHits = veinPlanHits.sum();
+            long veinMisses = veinPlanMisses.sum();
+            long bagHits = sliceBagHits.sum();
+            long bagMisses = sliceBagMisses.sum();
+            long indexHits = oreIndexHits.sum();
+            long indexMisses = oreIndexMisses.sum();
+            long indexNegHits = oreIndexNegHits.sum();
+            double estFillHz = filled / Math.max(1e-6, fillNanos.sum() / 1_000_000_000.0);
+            return ("UKGeo perf filled=%d fillsStarted=%d avgFill=%.3fms maxFill=%.3fms p99Fill=%.3fms avgPlanQueue=%.3fms maxPlanQueue=%.3fms p99PlanQueue=%.3fms avgPlan=%.3fms avgApply=%.3fms avgHeightWin=%.3fms avgSurface=%.3fms avgWater=%.3fms avgOre=%.3fms p99Ore=%.3fms veinPlanHitRate=%.1f%% sliceBagHitRate=%.1f%% oreIndexHitRate=%.1f%% emptyOriginsCached=%d nearFieldFills=%d farFieldFills=%d estFillHz=%.1f intervalFillRate=%.1fc/s decorated=%d avgDecor=%.3fms maxDecor=%.3fms fullDecorCalls=%d avgFullDecor=%.3fms maxFullDecor=%.3fms noiseCaveChunks=%d avgNoiseCave=%.3fms ancientCleanupCalls=%d ancientCleanupMs=%.3f riceCleanupCalls=%d riceCleanupMs=%.3f fullDecorAutoDisabled=%s"
+                ).formatted(
+                    filled,
+                    started,
+                    avgMillis(fillNanos.sum(), filled),
+                    millis(maxFillNanos.sum()),
+                    fillSamples.p99Millis(),
+                    avgMillis(planQueueNanos.sum(), filled),
+                    millis(maxPlanQueueNanos.sum()),
+                    planQueueSamples.p99Millis(),
+                    avgMillis(planNanos.sum(), filled),
+                    avgMillis(applyNanos.sum(), filled),
+                    avgMillis(heightWindowNanos.sum(), staged),
+                    avgMillis(surfaceGridNanos.sum(), staged),
+                    avgMillis(waterPlanningNanos.sum(), staged),
+                    avgMillis(orePlanningNanos.sum(), staged),
+                    oreSamples.p99Millis(),
+                    hitRatePercent(veinHits, veinMisses),
+                    hitRatePercent(bagHits, bagMisses),
+                    hitRatePercent(indexHits, indexMisses),
+                    indexNegHits,
+                    nearFieldFills.sum(),
+                    farFieldFills.sum(),
+                    estFillHz,
+                    lastIntervalFillRate,
+                    decorated,
+                    avgMillis(decorationNanos.sum(), decorated),
+                    millis(maxDecorationNanos.sum()),
+                    fullCalls,
+                    avgMillis(fullDecorationNanos.sum(), fullCalls),
+                    millis(maxFullDecorationNanos.sum()),
+                    caves,
+                    avgMillis(noiseCaveNanos.sum(), caves),
+                    ancientCleanupCalls.sum(),
+                    millis(ancientCleanupNanos.sum()),
+                    riceCleanupCalls.sum(),
+                    millis(riceCleanupNanos.sum()),
+                    FULL_BIOME_DECORATION_RUNTIME_DISABLED.get()
+                );
+        }
+
         void maybeLog(ChunkPos chunkPos) {
             if (!DEBUG_PERF_SUMMARY) {
                 return;
             }
-            long decorated = chunksDecorated.sum();
-            if (decorated <= 0 || decorated % Math.max(1, PERF_LOG_INTERVAL_CHUNKS) != 0) {
+            long filled = chunksFilled.sum();
+            int interval = Math.max(1, PERF_LOG_INTERVAL_CHUNKS);
+            if (filled <= 0 || filled % interval != 0) {
                 return;
             }
-            long filled = chunksFilled.sum();
-            long fullCalls = fullDecorationCalls.sum();
-            UkGeoMod.LOGGER.info(
-                "UKGeo perf chunk={} filled={} avgFill={}ms maxFill={}ms decorated={} avgDecor={}ms maxDecor={}ms fullDecorCalls={} avgFullDecor={}ms maxFullDecor={}ms ancientCleanupCalls={} ancientCleanupMs={} riceCleanupCalls={} riceCleanupMs={} fullDecorAutoDisabled={}",
-                chunkPos,
-                filled,
-                avgMillis(fillNanos.sum(), filled),
-                millis(maxFillNanos.sum()),
-                decorated,
-                avgMillis(decorationNanos.sum(), decorated),
-                millis(maxDecorationNanos.sum()),
-                fullCalls,
-                avgMillis(fullDecorationNanos.sum(), fullCalls),
-                millis(maxFullDecorationNanos.sum()),
-                ancientCleanupCalls.sum(),
-                millis(ancientCleanupNanos.sum()),
-                riceCleanupCalls.sum(),
-                millis(riceCleanupNanos.sum()),
-                FULL_BIOME_DECORATION_RUNTIME_DISABLED.get()
-            );
+            long now = System.nanoTime();
+            long prevNanos = lastLogNanos.getAndSet(now);
+            long prevFilled = lastLogFilled.getAndSet(filled);
+            if (prevNanos > 0L && filled > prevFilled) {
+                double elapsedSec = (now - prevNanos) / 1_000_000_000.0;
+                if (elapsedSec > 0.0) {
+                    lastIntervalFillRate = (filled - prevFilled) / elapsedSec;
+                }
+            }
+            UkGeoMod.LOGGER.info("UKGeo perf chunk={} {}", chunkPos, dump());
         }
 
         private static void addMax(LongAdder adder, long value) {
@@ -4848,6 +5654,44 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
 
         private static double millis(long nanos) {
             return nanos / 1_000_000.0;
+        }
+
+        private static double hitRatePercent(long hits, long misses) {
+            long total = hits + misses;
+            return total <= 0L ? 0.0 : (100.0 * hits) / total;
+        }
+    }
+
+    /** Ring of the last N latency samples for cheap p99 approximation. */
+    private static final class LatencySampleRing {
+        private final long[] samples;
+        private int index;
+        private int count;
+
+        LatencySampleRing(int capacity) {
+            this.samples = new long[Math.max(1, capacity)];
+        }
+
+        void add(long nanos) {
+            synchronized (this) {
+                samples[index] = nanos;
+                index = (index + 1) % samples.length;
+                if (count < samples.length) {
+                    count++;
+                }
+            }
+        }
+
+        double p99Millis() {
+            synchronized (this) {
+                if (count <= 0) {
+                    return 0.0;
+                }
+                long[] copy = Arrays.copyOf(samples, count);
+                Arrays.sort(copy);
+                int idx = Math.min(count - 1, Math.max(0, (count * 99 + 99) / 100 - 1));
+                return copy[idx] / 1_000_000.0;
+            }
         }
     }
 
@@ -4893,18 +5737,16 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         if (ENABLE_DEEP_CARVERS && carving == GenerationStep.Carving.AIR) {
             applyDeepCaves(seed, chunk);
         }
-        if (carving == GenerationStep.Carving.AIR && (ENABLE_NOISE_CAVES || ENABLE_DEEP_CARVERS)) {
-            int stripMinY = chunk.getMinBuildHeight();
-            int stripMaxY = chunk.getMaxBuildHeight() - 1;
-            if (ENABLE_NOISE_CAVES) {
-                stripMinY = Math.max(stripMinY, Math.max(chunk.getMinBuildHeight() + NOISE_CAVE_BOTTOM_MARGIN, NOISE_CAVE_MIN_Y));
-                stripMaxY = Math.min(stripMaxY, NOISE_CAVE_MAX_Y);
+        if (carving == GenerationStep.Carving.AIR) {
+            stripFloatingCaveVeins(chunk, chunk.getMinBuildHeight(), chunk.getMaxBuildHeight() - 1);
+            long key = chunk.getPos().toLong();
+            ChunkTerrainPlanner.Plan plan = decorationWaterPlans.get(key);
+            if (plan == null) {
+                plan = chunkPlans.get(key);
             }
-            if (ENABLE_DEEP_CARVERS) {
-                stripMinY = Math.min(stripMinY, Math.max(chunk.getMinBuildHeight() + DEEP_CAVE_BOTTOM_MARGIN, DEEP_CAVE_MIN_Y));
-                stripMaxY = Math.max(stripMaxY, Math.min(chunk.getMaxBuildHeight() - 1, DEEP_CAVE_MAX_Y));
+            if (plan != null) {
+                ChunkTerrainPlanner.enforceWaterColumns(plan, chunk);
             }
-            stripFloatingCaveVeins(chunk, stripMinY, stripMaxY);
         }
     }
 
@@ -4914,7 +5756,7 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         if (minY > maxY || NOISE_CAVE_MAX_BLOCK_EDITS_PER_CHUNK <= 0) {
             return;
         }
-        long startNanos = DEBUG_GEN_TIMINGS ? System.nanoTime() : 0L;
+        long startNanos = System.nanoTime();
         ChunkPos chunkPos = chunk.getPos();
         int chunkMinX = chunkPos.getMinBlockX();
         int chunkMinZ = chunkPos.getMinBlockZ();
@@ -5068,6 +5910,8 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
                 NOISE_CAVE_NOODLE_THICKNESS
             );
         }
+        long caveNanos = System.nanoTime() - startNanos;
+        PERF.recordNoiseCave(caveNanos);
         logTiming("applyNoiseCaves", chunkPos, startNanos);
     }
 
@@ -5195,7 +6039,7 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     }
 
     private static boolean isStripableCaveVeinBlock(BlockState state) {
-        if (state.is(Blocks.CALCITE)) {
+        if (state.is(Blocks.CALCITE) || state.is(Blocks.SMOOTH_BASALT)) {
             return true;
         }
         if (state.is(BlockTags.COAL_ORES)
@@ -5209,7 +6053,20 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
             return true;
         }
         String path = BuiltInRegistries.BLOCK.getKey(state.getBlock()).getPath();
-        return path.endsWith("_ore") || path.contains("_ore_");
+        if (path.endsWith("_ore") || path.contains("_ore_")) {
+            return true;
+        }
+        // Create mineral veins / filler rocks that float in caves/water voids.
+        return path.equals("crimsite")
+            || path.equals("ochrum")
+            || path.equals("asurine")
+            || path.equals("veridium")
+            || path.equals("scoria")
+            || path.equals("limestone")
+            || path.equals("andesite")
+            || path.equals("diorite")
+            || path.equals("granite")
+            || path.equals("smooth_basalt");
     }
 
     private static int sealNoiseCaveAquiferContacts(byte[] caveTypes, int[] carvedIndices, int carvedCount, int minY, int height) {
@@ -6103,6 +6960,8 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         U8OreTileLayer riverLayer,
         U8OreTileLayer riverOrderLayer,
         U8OreTileLayer riverHalfWidthLayer,
+        U8OreTileLayer riverDistanceLayer,
+        U8OreTileLayer riverNearestHalfWidthLayer,
         Map<String, U8OreTileLayer> oreLayers,
         List<OreDefinition> ores
     ) {
@@ -6147,5 +7006,159 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     }
 
     private record OptionalBlock(BlockState state) {
+    }
+
+    private record OriginOreKey(int originChunkX, int originChunkZ, String oreName) {
+    }
+
+    private record OreRegionKey(int regionRx, int regionRz, String oreName) {
+    }
+
+    /** Compact packed origin-chunk list for one region+ore bucket. */
+    private static final class OriginChunkList {
+        private long[] packed = new long[4];
+        private int size;
+
+        synchronized void add(long originPacked) {
+            for (int i = 0; i < size; i++) {
+                if (packed[i] == originPacked) {
+                    return;
+                }
+            }
+            if (size == packed.length) {
+                packed = java.util.Arrays.copyOf(packed, size << 1);
+            }
+            packed[size++] = originPacked;
+        }
+
+        synchronized long[] snapshot() {
+            return size == 0 ? new long[0] : java.util.Arrays.copyOf(packed, size);
+        }
+    }
+
+    private record VeinPlan(
+        double startX,
+        double startY,
+        double startZ,
+        double angle,
+        double pitch,
+        double phase,
+        int length,
+        double radiusScale,
+        int branchAt,
+        double branchAngle,
+        double branchPitch,
+        int branchLength
+    ) {
+    }
+
+    /**
+     * Terrain-independent vein slice centers for one origin chunk + ore.
+     * Parallel arrays of ellipsoid slices; XZ AABB enables cheap target-chunk reject.
+     */
+    private record OreSliceBag(
+        double[] centerX,
+        double[] centerY,
+        double[] centerZ,
+        double[] horizontalRadius,
+        double[] verticalRadius,
+        long[] salt,
+        int minX,
+        int maxX,
+        int minZ,
+        int maxZ,
+        int veinCount
+    ) {
+        boolean isEmpty() {
+            return centerX.length == 0;
+        }
+
+        boolean mayOverlapChunk(int chunkMinX, int chunkMinZ) {
+            return maxX >= chunkMinX && minX <= chunkMinX + 15
+                && maxZ >= chunkMinZ && minZ <= chunkMinZ + 15;
+        }
+    }
+
+    /** Grows slice parallel arrays while walking vein paths (no voxel expansion). */
+    private static final class OreSliceCollector {
+        private double[] centerX = new double[64];
+        private double[] centerY = new double[64];
+        private double[] centerZ = new double[64];
+        private double[] horizontalRadius = new double[64];
+        private double[] verticalRadius = new double[64];
+        private long[] salt = new long[64];
+        private int size;
+        private int minX = Integer.MAX_VALUE;
+        private int maxX = Integer.MIN_VALUE;
+        private int minZ = Integer.MAX_VALUE;
+        private int maxZ = Integer.MIN_VALUE;
+
+        void add(double x, double y, double z, double hRadius, double vRadius, long sliceSalt) {
+            if (size == centerX.length) {
+                int n = size << 1;
+                centerX = java.util.Arrays.copyOf(centerX, n);
+                centerY = java.util.Arrays.copyOf(centerY, n);
+                centerZ = java.util.Arrays.copyOf(centerZ, n);
+                horizontalRadius = java.util.Arrays.copyOf(horizontalRadius, n);
+                verticalRadius = java.util.Arrays.copyOf(verticalRadius, n);
+                salt = java.util.Arrays.copyOf(salt, n);
+            }
+            centerX[size] = x;
+            centerY[size] = y;
+            centerZ[size] = z;
+            horizontalRadius[size] = hRadius;
+            verticalRadius[size] = vRadius;
+            salt[size] = sliceSalt;
+            size++;
+            int sliceMinX = (int) Math.floor(x - hRadius);
+            int sliceMaxX = (int) Math.ceil(x + hRadius);
+            int sliceMinZ = (int) Math.floor(z - hRadius);
+            int sliceMaxZ = (int) Math.ceil(z + hRadius);
+            if (sliceMinX < minX) minX = sliceMinX;
+            if (sliceMaxX > maxX) maxX = sliceMaxX;
+            if (sliceMinZ < minZ) minZ = sliceMinZ;
+            if (sliceMaxZ > maxZ) maxZ = sliceMaxZ;
+        }
+
+        OreSliceBag toBag(int veinCount) {
+            if (size == 0) {
+                return EMPTY_ORE_SLICE_BAG;
+            }
+            return new OreSliceBag(
+                java.util.Arrays.copyOf(centerX, size),
+                java.util.Arrays.copyOf(centerY, size),
+                java.util.Arrays.copyOf(centerZ, size),
+                java.util.Arrays.copyOf(horizontalRadius, size),
+                java.util.Arrays.copyOf(verticalRadius, size),
+                java.util.Arrays.copyOf(salt, size),
+                minX, maxX, minZ, maxZ,
+                veinCount
+            );
+        }
+    }
+
+    /** Chunk-local ore occupancy: BitSet over packed localX/localZ/y — cheaper than HashSet<Long> under dense mineral fills. */
+    private static final class OreSeenSet {
+        private final int minY;
+        private final BitSet bits;
+
+        OreSeenSet(int minY, int maxY) {
+            this.minY = minY;
+            int ySpan = Math.max(1, maxY - minY + 1);
+            this.bits = new BitSet(ySpan << 8);
+        }
+
+        boolean add(int localX, int y, int localZ) {
+            int yi = y - minY;
+            if (yi < 0) {
+                return false;
+            }
+            int index = (yi << 8) | (localX << 4) | localZ;
+            if (bits.get(index)) {
+                return false;
+            }
+            bits.set(index);
+            return true;
+        }
     }
 }

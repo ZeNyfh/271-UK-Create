@@ -20,7 +20,7 @@ const DEFAULT_ANIMALS_TEXT = `
 12|rocky|upland|mountain|stony_peaks|minecraft:stony_peaks|ukgeo:rocky: Sheep, Rabbit, Bat
 13|coastal_ocean|ocean|sea|beach|coast|minecraft:ocean|ukgeo:coastal_ocean: —
 `;
-const START_STATUS = "Mouse wheel zooms. Left/middle drag pans. Right click copies coordinates. Right drag measures distance.";
+const START_STATUS = "Mouse wheel zooms. Left/middle drag pans. Right click copies coordinates. Right drag measures distance. Thin blue lines are Strahler order 1–2 headwater streams.";
 const DEFAULT_VISIBLE_OVERLAYS = new Set();
 const DEFAULT_VISIBLE_ORES = new Set(["coal", "iron", "copper", "zinc", "gold"]);
 const MAX_DEVICE_PIXEL_RATIO = 2;
@@ -1950,6 +1950,9 @@ function statusDetails(sample) {
     }
   }
 
+  const riverExtras = riverOrderHalfWidthExtras(sample);
+  if (riverExtras.length) overlays.push(...riverExtras);
+
   const parts = [];
   if (overlays.length) parts.push(overlays.join(" | "));
   if (ores.length) parts.push(`Ores ${ores.join(", ")}`);
@@ -1959,6 +1962,34 @@ function statusDetails(sample) {
   }
 
   return parts.length ? ` | ${parts.join(" | ")}` : "";
+}
+
+/** When river_order / river_half_width sample layers exist in the hover manifest, show them on river cells. */
+function riverOrderHalfWidthExtras(sample) {
+  const extras = [];
+  const riversEntry = state.layers.get("rivers") || state.layers.get("river");
+  if (!riversEntry) return extras;
+  const riverValue = samplePixel("rivers", sample.imageX, sample.imageY);
+  const riverAlt = riverValue == null ? samplePixel("river", sample.imageX, sample.imageY) : riverValue;
+  if (riverAlt === null || riverAlt === undefined || riverAlt === 0) return extras;
+
+  const orderNames = ["river_order", "order"];
+  const widthNames = ["river_half_width", "half_width"];
+  for (const name of orderNames) {
+    if (!state.layers.has(name)) continue;
+    const value = samplePixel(name, sample.imageX, sample.imageY);
+    if (value === null || value === undefined || value === 0) continue;
+    extras.push(`Strahler ${value}`);
+    break;
+  }
+  for (const name of widthNames) {
+    if (!state.layers.has(name)) continue;
+    const value = samplePixel(name, sample.imageX, sample.imageY);
+    if (value === null || value === undefined || value === 0) continue;
+    extras.push(`half_width ${value}`);
+    break;
+  }
+  return extras;
 }
 
 function hasEnabledAnimalLayer() {
@@ -2093,6 +2124,18 @@ function overlayValueLabel(layer, value) {
     const number = Number(value) || 0;
     if (number < 0.05) return "trace";
     return `${number.toFixed(number < 1 ? 1 : 0)} mm/h`;
+  }
+  const name = String(layer?.name || "");
+  if (name === "rivers" || name === "river") {
+    const score = Number(value) || 0;
+    if (score <= 0) return "—";
+    return `present (${score})`;
+  }
+  if (name === "river_order" || name === "order") {
+    return `Strahler ${Number(value) || 0}`;
+  }
+  if (name === "river_half_width" || name === "half_width") {
+    return `half_width ${Number(value) || 0}`;
   }
   return classLabel(layer?.name || "", value);
 }

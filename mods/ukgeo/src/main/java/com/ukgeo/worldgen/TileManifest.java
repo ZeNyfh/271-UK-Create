@@ -52,7 +52,12 @@ public final class TileManifest {
     public final String riversExtension;
     public final String riverOrderPath;
     public final String riverHalfWidthPath;
+    public final String riverDistancePath;
+    public final String riverNearestHalfWidthPath;
+    public final int riverDistanceSearchRadius;
     public final int maxRiverHalfWidth;
+    public final double axisScaleX;
+    public final double axisScaleZ;
 
     private TileManifest(Path root, JsonObject json) {
         this.root = root;
@@ -66,6 +71,9 @@ public final class TileManifest {
         this.minecraftMinZ = world.get("minecraft_min_z").getAsInt();
         this.minecraftMaxX = world.get("minecraft_max_x").getAsInt();
         this.minecraftMaxZ = world.get("minecraft_max_z").getAsInt();
+        JsonObject axisScale = json.getAsJsonObject("axis_scale");
+        this.axisScaleX = axisScale != null && axisScale.has("x") ? axisScale.get("x").getAsDouble() : 1.0;
+        this.axisScaleZ = axisScale != null && axisScale.has("z") ? axisScale.get("z").getAsDouble() : 1.0;
         JsonObject georeferencing = json.getAsJsonObject("georeferencing");
         this.crs = georeferencing != null && georeferencing.has("crs") ? georeferencing.get("crs").getAsString() : "EPSG:27700";
         this.bngMinEasting = optionalDouble(georeferencing, "bng_min_easting");
@@ -131,6 +139,9 @@ public final class TileManifest {
             this.riversExtension = DEFAULT_U8_EXTENSION;
             this.riverOrderPath = null;
             this.riverHalfWidthPath = null;
+            this.riverDistancePath = null;
+            this.riverNearestHalfWidthPath = null;
+            this.riverDistanceSearchRadius = 0;
             this.maxRiverHalfWidth = 0;
         } else {
             this.riversPath = rivers.get("path").getAsString();
@@ -138,11 +149,20 @@ public final class TileManifest {
             this.u8Storages.put("rivers", LayerStorage.fromRiver(rivers, "path", null, this.riversPath, this.riversExtension, ".u8rg", 0));
             this.riverOrderPath = rivers.has("order_path") ? rivers.get("order_path").getAsString() : null;
             this.riverHalfWidthPath = rivers.has("half_width_path") ? rivers.get("half_width_path").getAsString() : null;
+            this.riverDistancePath = rivers.has("distance_path") ? rivers.get("distance_path").getAsString() : null;
+            this.riverNearestHalfWidthPath = rivers.has("nearest_half_width_path") ? rivers.get("nearest_half_width_path").getAsString() : null;
+            this.riverDistanceSearchRadius = rivers.has("distance_search_radius") ? Math.max(0, rivers.get("distance_search_radius").getAsInt()) : 0;
             if (this.riverOrderPath != null) {
                 this.u8Storages.put("river_order", LayerStorage.fromRiver(rivers, "order_path", "order", this.riverOrderPath, this.riversExtension, ".u8rg", 0));
             }
             if (this.riverHalfWidthPath != null) {
                 this.u8Storages.put("river_half_width", LayerStorage.fromRiver(rivers, "half_width_path", "half_width", this.riverHalfWidthPath, this.riversExtension, ".u8rg", 0));
+            }
+            if (this.riverDistancePath != null) {
+                this.u8Storages.put("river_distance", LayerStorage.fromRiver(rivers, "distance_path", "distance", this.riverDistancePath, this.riversExtension, ".u8rg", 255));
+            }
+            if (this.riverNearestHalfWidthPath != null) {
+                this.u8Storages.put("river_nearest_half_width", LayerStorage.fromRiver(rivers, "nearest_half_width_path", "nearest_half_width", this.riverNearestHalfWidthPath, this.riversExtension, ".u8rg", 0));
             }
             this.maxRiverHalfWidth = rivers.has("max_half_width") ? Math.max(0, rivers.get("max_half_width").getAsInt()) : 0;
         }
@@ -185,7 +205,7 @@ public final class TileManifest {
             case "surface_geology" -> surfaceGeologyExtension;
             case "vegetation" -> vegetationExtension;
             case "biome_regions" -> biomeRegionsExtension;
-            case "rivers", "river_order", "river_half_width" -> riversExtension;
+            case "rivers", "river_order", "river_half_width", "river_distance", "river_nearest_half_width" -> riversExtension;
             default -> oreExtensions.getOrDefault(layerName, DEFAULT_U8_EXTENSION);
         };
     }

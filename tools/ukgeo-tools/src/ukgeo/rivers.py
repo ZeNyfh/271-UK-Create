@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from collections import defaultdict, deque
 import math
@@ -18,12 +19,27 @@ from tqdm import tqdm
 from .bgs import resolve_gpkg
 from .manifest import read_manifest, write_manifest
 from .raster_memory import U8Raster, find_memmap_path, maximum_in_place, row_windows
-from .tiles import HEIGHT_NODATA, read_r16_tile, write_u8_tile, u8_extension, r16_extension
+from .tiles import (
+    HEIGHT_NODATA,
+    layer_uses_regions,
+    read_layer_tile,
+    read_r16_tile,
+    region_metadata,
+    river_u8_layer,
+    write_region_file_from_tiles,
+    write_u8_tile,
+    u8_extension,
+    r16_extension,
+)
 
 console = Console()
 
-MAX_RIVER_HALFWIDTH = 40
-MIN_RIVER_HALFWIDTH_BY_ORDER = {1: 2, 2: 3, 3: 5}
+MAX_RIVER_HALFWIDTH = 60  # room for ORN order-7 pre-output bases (~52–60) before /6 → 10
+# Floor before RIVER_OUTPUT_WIDTH_FACTOR. OpenRiverNetwork (ORN) Strahler on GB
+# runs order 1–7 (order-1 headwaters ≈47% of network length; max 7 on
+# Severn/Clyde/Ouse/Great Ouse). Survival finals at axis_scale 1.0 after the
+# output factor: 1→1, 2→1, 3→2, 4→3, 5→5, 6→7, 7→10.
+MIN_RIVER_HALFWIDTH_BY_ORDER = {1: 1, 2: 1, 3: 2}
 SOURCE_ORDER_FIELDS = ("ORDER_", "ORDER", "US_ORDER", "STRAHLER", "STRAHLER_ORDER", "STREAM_ORDER")
 SOURCE_DATASET_FIELDS = ("source_dataset", "SOURCE_DATASET")
 SOURCE_START_NODE_FIELDS = ("start_node", "START_NODE", "source_start_node", "FROM_NODE", "from_node")
@@ -32,8 +48,10 @@ SOURCE_FLOW_DIRECTION_FIELDS = ("flow_direction", "FLOW_DIRECTION", "direction")
 THINNER_RIVER_DATASETS = {"epa_river_network_routes_ie", "ni_river_segment"}
 THINNER_RIVER_WIDTH_FACTOR = 0.7
 GB_RIVER_DATASETS = {"os_open_rivers_gb"}
-GB_SMALL_STREAM_HALF_WIDTH_BONUS = 2
-GB_MAJOR_RIVER_WIDTH_FACTOR = 1.5
+# Kept at 0 so ORN order 2–3 stay thin brooks/streams (was +2 fattening).
+GB_SMALL_STREAM_HALF_WIDTH_BONUS = 0
+# Mild arterial boost for ORN order ≥6 only (Severn-scale channels).
+GB_MAJOR_RIVER_WIDTH_FACTOR = 1.15
 TOP_ORDER_THINNING_FACTORS = (0.5, 1.0 / 1.5, 1.0 / 1.25, 1.0 / 1.125)
 RIVER_OUTPUT_WIDTH_FACTOR = 1.0 / 6.0
 RIVER_RASTER_BATCH_SIZE = 25000
@@ -216,14 +234,197 @@ def make_river_tiles(
                 "half_width_path": "water/river_half_width",
                 "preview_radius_path": "water/river_preview_radius",
                 "max_half_width": max_half_width,
-                "note": "255 marks cells inside variable-width river/watercourse vectors. Widths are derived from source river order where present, otherwise approximate Strahler stream order, then scaled to one-third output width for in-world readability.",
+                "note": "255 marks cells inside variable-width river/watercourse vectors. Widths follow OpenRiverNetwork Strahler order 1–7 survival half-widths (order 1–2 thin brooks; 3 creek; 4–5 small/mid; 6–7 large/arterial), from source ORDER_ where present or computed Strahler otherwise, then scaled by RIVER_OUTPUT_WIDTH_FACTOR for in-world readability. Runtime no longer floors channels with river_widen_radius.",
             }
             write_manifest(manifest_path, manifest)
             if debug_geotiff:
                 _write_debug(debug_geotiff, arr, transform)
+            bake_river_distance_grids(out, manifest_path=manifest_path)
     finally:
         if tmp is not None:
             tmp.cleanup()
+
+
+def bake_river_distance_grids(root: Path, *, manifest_path: Path | None = None) -> None:
+    """Offline-bake river distance + nearest-half-width u8 layers for O(1) runtime samples."""
+    from scipy.ndimage import distance_transform_edt
+
+    manifest_file = manifest_path or (root / "manifest.json")
+    manifest = read_manifest(manifest_file)
+    rivers = manifest.get("rivers")
+    if not rivers:
+        console.print("[yellow]No rivers layer in manifest; skipping distance bake.[/yellow]")
+        return
+    if "half_width_path" not in rivers:
+        console.print("[yellow]No river half_width_path; skipping distance bake.[/yellow]")
+        return
+
+    tile_size = int(manifest["tile_size"])
+    padded_width = int(manifest["world"]["padded_width"])
+    padded_depth = int(manifest["world"]["padded_depth"])
+    tiles_x = math.ceil(padded_width / tile_size)
+    tiles_z = math.ceil(padded_depth / tile_size)
+    max_half_width = int(rivers.get("max_half_width", 0))
+    search_radius = max(max_half_width, 1) + 4
+    halo = search_radius
+
+    river_layer = river_u8_layer(rivers)
+    half_layer = river_u8_layer(rivers, "half_width_path", "half_width")
+    use_regions = layer_uses_regions(river_layer)
+    region_tiles = int(rivers.get("region_tiles", river_layer.get("region_tiles", 8)))
+
+    distance_path = "water/river_distance"
+    nearest_hw_path = "water/river_nearest_half_width"
+    extension = rivers.get("extension", u8_extension())
+
+    @lru_cache(maxsize=2048)
+    def read_tile(layer_name: str, tile_x: int, tile_z: int) -> np.ndarray:
+        if tile_x < 0 or tile_z < 0 or tile_x >= tiles_x or tile_z >= tiles_z:
+            return np.zeros((tile_size, tile_size), dtype=np.uint8)
+        layer = river_layer if layer_name == "rivers" else half_layer
+        return np.array(read_layer_tile(root, layer, tile_x, tile_z, tile_size), dtype=np.uint8, copy=True)
+
+    def halo_stack(layer_name: str, tile_x: int, tile_z: int) -> np.ndarray:
+        size = tile_size + halo * 2
+        out = np.zeros((size, size), dtype=np.uint8)
+        world_x0 = tile_x * tile_size - halo
+        world_z0 = tile_z * tile_size - halo
+        world_x1 = world_x0 + size
+        world_z1 = world_z0 + size
+        src_tx0 = max(0, world_x0 // tile_size)
+        src_tz0 = max(0, world_z0 // tile_size)
+        src_tx1 = min(tiles_x - 1, (world_x1 - 1) // tile_size)
+        src_tz1 = min(tiles_z - 1, (world_z1 - 1) // tile_size)
+        for src_tz in range(src_tz0, src_tz1 + 1):
+            for src_tx in range(src_tx0, src_tx1 + 1):
+                tile = read_tile(layer_name, src_tx, src_tz)
+                tx0 = src_tx * tile_size
+                tz0 = src_tz * tile_size
+                ix0 = max(world_x0, tx0)
+                iz0 = max(world_z0, tz0)
+                ix1 = min(world_x1, tx0 + tile_size)
+                iz1 = min(world_z1, tz0 + tile_size)
+                if ix0 >= ix1 or iz0 >= iz1:
+                    continue
+                out_z0 = iz0 - world_z0
+                out_x0 = ix0 - world_x0
+                tile_z0 = iz0 - tz0
+                tile_x0 = ix0 - tx0
+                out[out_z0 : out_z0 + (iz1 - iz0), out_x0 : out_x0 + (ix1 - ix0)] = tile[
+                    tile_z0 : tile_z0 + (iz1 - iz0), tile_x0 : tile_x0 + (ix1 - ix0)
+                ]
+        return out
+
+    def _source_region_file(region_x: int, region_z: int) -> Path:
+        region_path = str(river_layer.get("region_path", f"{river_layer['path']}/regions"))
+        region_ext = str(river_layer.get("region_extension", ".u8rg"))
+        return root / region_path / f"{region_x:03d}_{region_z:03d}{region_ext}"
+
+    def encode_tile(tile_x: int, tile_z: int) -> tuple[np.ndarray, np.ndarray]:
+        dist_tile = np.full((tile_size, tile_size), 255, dtype=np.uint8)
+        hw_tile = np.zeros((tile_size, tile_size), dtype=np.uint8)
+        center = read_tile("rivers", tile_x, tile_z)
+        if not np.any(center):
+            # Cheap neighbor probe before assembling a full halo stack / EDT.
+            tile_radius = (halo + tile_size - 1) // tile_size
+            has_nearby = False
+            for dz in range(-tile_radius, tile_radius + 1):
+                for dx in range(-tile_radius, tile_radius + 1):
+                    if dx == 0 and dz == 0:
+                        continue
+                    if np.any(read_tile("rivers", tile_x + dx, tile_z + dz)):
+                        has_nearby = True
+                        break
+                if has_nearby:
+                    break
+            if not has_nearby:
+                return dist_tile, hw_tile
+        mask_halo = halo_stack("rivers", tile_x, tile_z) > 0
+        if not np.any(mask_halo):
+            return dist_tile, hw_tile
+        half_halo = halo_stack("half_width", tile_x, tile_z)
+        distances, indices = distance_transform_edt(~mask_halo, return_indices=True)
+        center_dist = distances[halo : halo + tile_size, halo : halo + tile_size]
+        nearest_z = indices[0][halo : halo + tile_size, halo : halo + tile_size]
+        nearest_x = indices[1][halo : halo + tile_size, halo : halo + tile_size]
+        nearest_hw = half_halo[nearest_z, nearest_x]
+        within = center_dist <= search_radius
+        codes = np.minimum(254, np.rint(center_dist * 2.0).astype(np.int16)).astype(np.uint8)
+        dist_tile = np.where(within, codes, np.uint8(255)).astype(np.uint8)
+        hw_tile = np.where(within, nearest_hw, np.uint8(0)).astype(np.uint8)
+        return dist_tile, hw_tile
+
+    if use_regions:
+        regions_x = math.ceil(tiles_x / region_tiles)
+        regions_z = math.ceil(tiles_z / region_tiles)
+        dist_region_root = root / distance_path / "regions"
+        hw_region_root = root / nearest_hw_path / "regions"
+        dist_region_root.mkdir(parents=True, exist_ok=True)
+        hw_region_root.mkdir(parents=True, exist_ok=True)
+        for region_z in tqdm(range(regions_z), desc="river distance regions"):
+            for region_x in range(regions_x):
+                dist_out = dist_region_root / f"{region_x:03d}_{region_z:03d}.u8rg"
+                hw_out = hw_region_root / f"{region_x:03d}_{region_z:03d}.u8rg"
+                if not _source_region_file(region_x, region_z).exists():
+                    dist_out.unlink(missing_ok=True)
+                    hw_out.unlink(missing_ok=True)
+                    continue
+                dist_tiles: list[np.ndarray | None] = []
+                hw_tiles: list[np.ndarray | None] = []
+                for local_z in range(region_tiles):
+                    for local_x in range(region_tiles):
+                        tile_x = region_x * region_tiles + local_x
+                        tile_z = region_z * region_tiles + local_z
+                        if tile_x >= tiles_x or tile_z >= tiles_z:
+                            dist_tiles.append(None)
+                            hw_tiles.append(None)
+                            continue
+                        dist_tile, hw_tile = encode_tile(tile_x, tile_z)
+                        dist_tiles.append(None if np.all(dist_tile == 255) else dist_tile)
+                        hw_tiles.append(None if not np.any(hw_tile) else hw_tile)
+                write_region_file_from_tiles(
+                    dist_out,
+                    tiles=dist_tiles,
+                    tile_size=tile_size,
+                    region_tiles=region_tiles,
+                    dtype="uint8",
+                    missing_tile=255,
+                )
+                write_region_file_from_tiles(
+                    hw_out,
+                    tiles=hw_tiles,
+                    tile_size=tile_size,
+                    region_tiles=region_tiles,
+                    dtype="uint8",
+                    missing_tile=0,
+                )
+    else:
+        dist_root = root / distance_path
+        hw_root = root / nearest_hw_path
+        dist_root.mkdir(parents=True, exist_ok=True)
+        hw_root.mkdir(parents=True, exist_ok=True)
+        for tile_z in tqdm(range(tiles_z), desc="river distance tiles"):
+            for tile_x in range(tiles_x):
+                dist_tile, hw_tile = encode_tile(tile_x, tile_z)
+                write_u8_tile(dist_root / f"{tile_x:03d}_{tile_z:03d}{extension}", dist_tile, tile_size, sparse_fill=255)
+                write_u8_tile(hw_root / f"{tile_x:03d}_{tile_z:03d}{extension}", hw_tile, tile_size)
+
+    rivers["distance_path"] = distance_path
+    rivers["nearest_half_width_path"] = nearest_hw_path
+    rivers["distance_search_radius"] = int(search_radius)
+    rivers["distance_units"] = "half_blocks"
+    if use_regions:
+        for key, value in region_metadata(distance_path, "uint8", region_tiles=region_tiles, missing_tile=255).items():
+            rivers[f"distance_{key}"] = value
+        for key, value in region_metadata(nearest_hw_path, "uint8", region_tiles=region_tiles, missing_tile=0).items():
+            rivers[f"nearest_half_width_{key}"] = value
+    write_manifest(manifest_file, manifest)
+    console.print(
+        f"[green]Baked river distance grids[/green] search_radius={search_radius} "
+        f"storage={'regions' if use_regions else 'tiles'}"
+    )
+
+
 
 
 def _resolve_resume_paths(out: Path) -> dict[str, Path]:
@@ -680,10 +881,11 @@ def _apply_gb_width_adjustments(edges: list[_Edge], axis_scale: float) -> None:
     for edge in edges:
         if edge.source_dataset not in GB_RIVER_DATASETS:
             continue
-        if edge.order <= 1:
-            continue
-        if edge.order <= 3:
+        # Order 1–5 stay data-driven (bonus is 0; no major factor).
+        if edge.order <= 3 and GB_SMALL_STREAM_HALF_WIDTH_BONUS:
             edge.half_width = min(max_half_width, edge.half_width + GB_SMALL_STREAM_HALF_WIDTH_BONUS)
+            continue
+        if edge.order < 6:
             continue
         edge.half_width = min(
             max_half_width,
@@ -777,12 +979,9 @@ def _scaled_half_width_for_order(order: int, base_half_width: int) -> int:
     return max(_minimum_half_width_for_order(order), scaled)
 
 
-def _width_multiplier_for_order(order: int) -> float:
-    if order <= 1:
-        return 2.0
-    if order == 2:
-        return 1.8
-    return 1.5
+def _width_multiplier_for_order(_order: int) -> float:
+    # Bases already encode ORN survival scale; do not fatten headwaters.
+    return 1.0
 
 
 def _minimum_half_width_for_order(order: int) -> int:
@@ -796,14 +995,19 @@ def _minimum_half_width_for_order(order: int) -> int:
 
 
 def _half_width_for_order(order: int) -> int:
+    # Pre-RIVER_OUTPUT_WIDTH_FACTOR (~6×) so finals match ORN survival half-widths
+    # at axis_scale 1.0: 1→1, 2→1, 3→2, 4→3, 5→5, 6→7, 7→10. Orders ≥6 are set
+    # slightly under target so GB_MAJOR_RIVER_WIDTH_FACTOR (1.15) lands on it.
     if order <= 1:
-        return 1
-    if order == 2:
-        return 2
-    if order == 3:
-        return 4
-    if order == 4:
         return 6
+    if order == 2:
+        return 6
+    if order == 3:
+        return 12
+    if order == 4:
+        return 18
     if order == 5:
-        return 9
-    return 12 + min(8, (order - 6) * 3)
+        return 30
+    if order == 6:
+        return 36
+    return 52 + min(18, (order - 7) * 6)

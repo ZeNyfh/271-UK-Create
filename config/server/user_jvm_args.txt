@@ -22,3 +22,45 @@
 -XX:MaxTenuringThreshold=1
 -Dusing.aikars.flags=https://mcflags.emc.gs
 -Daikars.new.flags=true
+# UKGeo: async plan defaults to Util.backgroundExecutor (do NOT enableParallelChunkPlanning — fights MC workers)
+# Opt-in dedicated ukgeo-plan-* pool: -Dukgeo.useDedicatedPlanPool=true
+# planThreads default = max(4, cpus-1) capped at 12; inlineChunkPlanning=true forces sync A/B
+-Dukgeo.debugPerfSummary=true
+-Dukgeo.perfLogIntervalChunks=50
+-Dukgeo.asyncChunkPlanning=true
+# -Dukgeo.useDedicatedPlanPool=true
+# -Dukgeo.planThreads=4
+# -Dukgeo.inlineChunkPlanning=true
+-Dukgeo.enableRiverSearchIndex=true
+-Dukgeo.slowFillFromNoiseWarnMs=250
+-Dukgeo.slowApplyBiomeDecorationWarnMs=250
+-Dukgeo.slowPlanWarnMs=250
+
+# UKGeo Phase 3: region origin index for ore SliceBags (default on; safer than voxel bags)
+# Sticky empty-origin set soft cap (default 262144; stop remembering rather than thrash)
+# -Dukgeo.disableOreRegionIndex=true
+# -Dukgeo.oreRegionChunkSize=8
+# -Dukgeo.maxOreEmptyOriginCache=262144
+# -Dukgeo.maxOreRegionIndexEntries=4096
+# Section writes still on unless: -Dukgeo.disableFastSectionWrites=true
+
+# UKGeo Phase 4: velocity-aware travel prefetch corridor (temporary TicketType tickets)
+-Dukgeo.enableTravelPrefetch=true
+# -Dukgeo.prefetchMinSpeedBps=40
+# -Dukgeo.prefetchLookAheadSeconds=2.5
+# -Dukgeo.prefetchHalfWidthChunks=1
+# -Dukgeo.prefetchMaxTickets=128
+# -Dukgeo.prefetchIntervalTicks=10
+# -Dukgeo.debugTravelPrefetch=true
+# OPTIONAL high-speed view-distance (GLOBAL — affects all players; risk of client desync / lag spikes)
+# -Dukgeo.enableHighSpeedViewDistance=true
+# -Dukgeo.highSpeedViewDistanceBps=80
+# -Dukgeo.highSpeedViewDistance=6
+
+# UKGeo Phase 5: custom Distant Horizons tile→LOD generator
+# Default ON when unset. Disabled so DH uses its normal server chunk loader
+# (real fillFromNoise + decoration → proper trees/surfaces). Custom path kept
+# rivers/height cheap but painted blocky leaf cubes + arable-as-dirt.
+-Dukgeo.enableDhLodGenerator=false
+# -Dukgeo.enableDhLodGenerator=true
+

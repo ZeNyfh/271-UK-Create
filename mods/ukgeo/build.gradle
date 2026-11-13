@@ -10,6 +10,10 @@ group = mod_group_id
 repositories {
     mavenLocal()
     mavenCentral()
+    maven {
+        name = "Modrinth"
+        url = "https://api.modrinth.com/maven"
+    }
 }
 
 base {
@@ -68,4 +72,6 @@ neoForge.ideSyncTask generateModMetadata
 dependencies {
     implementation("org.locationtech.proj4j:proj4j:1.4.1")
     jarJar("org.locationtech.proj4j:proj4j:1.4.1")
+    // Distant Horizons API only (compile-time). Soft runtime dep via mods.toml optional.
+    compileOnly "maven.modrinth:DistantHorizonsApi:7.0.0"
 }

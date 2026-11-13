@@ -158,17 +158,19 @@ def test_thin_top_order_half_widths_scales_top_four_order_levels_for_irish_datas
     assert edges[5].half_width == 20
 
 
-def test_apply_gb_width_adjustments_keeps_order_one_and_boosts_larger_gb_rivers():
+def test_apply_gb_width_adjustments_keeps_low_orders_and_mildly_boosts_order_six_plus():
     edges = [
         _Edge(LineString([(0, 0), (1, 1)]), 1, 4, "os_open_rivers_gb"),
         _Edge(LineString([(0, 0), (1, 1)]), 2, 8, "os_open_rivers_gb"),
         _Edge(LineString([(0, 0), (1, 1)]), 5, 28, "os_open_rivers_gb"),
-        _Edge(LineString([(0, 0), (1, 1)]), 5, 28, "ni_river_segment"),
+        _Edge(LineString([(0, 0), (1, 1)]), 6, 36, "os_open_rivers_gb"),
+        _Edge(LineString([(0, 0), (1, 1)]), 6, 36, "ni_river_segment"),
     ]
 
     _apply_gb_width_adjustments(edges, 2.0)
 
-    assert [edge.half_width for edge in edges] == [4, 10, 42, 28]
+    # Order ≤5 unchanged; GB order ≥6 gets mild 1.15 factor; NI untouched.
+    assert [edge.half_width for edge in edges] == [4, 8, 28, 41, 36]
 
 
 def test_normalize_computed_order_to_source_scale_compresses_to_source_max():
@@ -283,5 +285,31 @@ def test_strahler_scales_half_widths_with_axis_scale(tmp_path):
     two_x = _strahler_widths(lines, _test_manifest(x=2.0, z=2.0), tmp_path)
 
     assert [edge.order for edge in one_x.edges] == [edge.order for edge in two_x.edges]
+    # Y-network: two ORN order-1 headwaters + order-2 stem → survival half-widths 1 @1×, 2 @2×.
     assert [edge.half_width for edge in one_x.edges] == [1, 1, 1]
-    assert [edge.half_width for edge in two_x.edges] == [1, 1, 2]
+    assert [edge.half_width for edge in two_x.edges] == [2, 2, 2]
+
+
+def test_survival_half_width_table_at_axis_scales():
+    """ORN Strahler survival half-widths after axis + GB + output scale."""
+    from ukgeo.rivers import (
+        _apply_axis_scale_to_half_widths,
+        _apply_gb_width_adjustments,
+        _apply_output_width_scale,
+        _half_width_for_order,
+        _scaled_half_width_for_order,
+    )
+
+    def finals(axis_scale: float) -> list[int]:
+        edges = []
+        for order in range(1, 8):
+            base = _half_width_for_order(order)
+            half = _scaled_half_width_for_order(order, base)
+            edges.append(_Edge(LineString([(0, 0), (1, 1)]), order, half, "os_open_rivers_gb"))
+        _apply_axis_scale_to_half_widths(edges, axis_scale)
+        _apply_gb_width_adjustments(edges, axis_scale)
+        _apply_output_width_scale(edges)
+        return [edge.half_width for edge in edges]
+
+    assert finals(1.0) == [1, 1, 2, 3, 5, 7, 10]
+    assert finals(2.0) == [2, 2, 4, 6, 10, 14, 20]

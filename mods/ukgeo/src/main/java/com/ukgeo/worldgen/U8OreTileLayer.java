@@ -59,13 +59,18 @@ public final class U8OreTileLayer {
     }
 
     private byte[] load(TileCoord coord) throws IOException {
+        int missing = storage.missingTile();
         if (storage.usesRegions()) {
-            return PackedRegionTileReader.readTile(manifest.root, storage, manifest.tileSize, coord.tileX(), coord.tileZ(), 1, 0);
+            return PackedRegionTileReader.readTile(manifest.root, storage, manifest.tileSize, coord.tileX(), coord.tileZ(), 1, missing);
         }
         Path tilePath = manifest.root.resolve(path).resolve(coord.fileStem() + extension);
         Path resolved = R16HeightTileLayer.resolveTilePath(tilePath);
         if (!Files.exists(resolved)) {
-            return new byte[manifest.tileSize * manifest.tileSize];
+            byte[] empty = new byte[manifest.tileSize * manifest.tileSize];
+            if (missing != 0) {
+                java.util.Arrays.fill(empty, (byte) (missing & 0xff));
+            }
+            return empty;
         }
         return R16HeightTileLayer.readTileBytes(resolved, manifest.tileSize * manifest.tileSize);
     }
@@ -76,7 +81,7 @@ public final class U8OreTileLayer {
 
     private static int cacheEntriesFor(String oreName) {
         int defaultEntries = switch (oreName) {
-            case "vegetation", "biome_regions", "surface_geology", "rivers", "river_half_width", "river_order" -> 192;
+            case "vegetation", "biome_regions", "surface_geology", "rivers", "river_half_width", "river_order", "river_distance", "river_nearest_half_width" -> 192;
             default -> 96;
         };
         return Math.max(1, Integer.getInteger("ukgeo.u8TileCacheEntries." + oreName, Integer.getInteger("ukgeo.u8TileCacheEntries", defaultEntries)));

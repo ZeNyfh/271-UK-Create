@@ -32,6 +32,19 @@ public final class UkGeoCommands {
                     ctx.getSource().sendSuccess(() -> Component.literal(generator == null ? "No ukgeo generator cache" : generator.status()), false);
                     return 1;
                 }))
+                .then(Commands.literal("perf").requires(source -> source.hasPermission(2)).executes(ctx -> {
+                    UkGeoChunkGenerator generator = generator(ctx.getSource().getLevel().getChunkSource().getGenerator());
+                    if (generator == null) {
+                        ctx.getSource().sendFailure(Component.literal("Active generator is not ukgeo:heightmap"));
+                        return 0;
+                    }
+                    ctx.getSource().sendSuccess(() -> Component.literal(generator.dumpPerfSummary()), false);
+                    return 1;
+                }))
+                .then(Commands.literal("prefetch").requires(source -> source.hasPermission(2)).executes(ctx -> {
+                    ctx.getSource().sendSuccess(() -> Component.literal(TravelChunkPrefetch.statusLine()), false);
+                    return 1;
+                }))
                 .then(Commands.literal("sample")
                     .requires(source -> source.hasPermission(2))
                     .then(Commands.argument("x", IntegerArgumentType.integer())
@@ -50,11 +63,43 @@ public final class UkGeoCommands {
                                     .append(" vegetation=").append(generator.sampleVegetation(x, z))
                                     .append(" biomeRegion=").append(generator.sampleBiomeRegion(x, z))
                                     .append(" river=").append(generator.sampleRiver(x, z))
+                                    .append(" riverHalfWidth=").append(generator.sampleRiverHalfWidth(x, z))
+                                    .append(" riverOrder=").append(generator.sampleRiverOrder(x, z))
                                     .append(" oilMb=").append(generator.sampleOilAmount(ctx.getSource().getLevel().getSeed(), x, z));
                                 for (Map.Entry<String, Integer> entry : generator.sampleOres(x, z).entrySet()) {
                                     message.append(" ").append(entry.getKey()).append("=").append(entry.getValue());
                                 }
                                 ctx.getSource().sendSuccess(() -> Component.literal(message.toString()), false);
+                                return 1;
+                            }))))
+                .then(Commands.literal("water")
+                    .requires(source -> source.hasPermission(2))
+                    .then(Commands.argument("x", IntegerArgumentType.integer())
+                        .then(Commands.argument("z", IntegerArgumentType.integer())
+                            .executes(ctx -> {
+                                int x = IntegerArgumentType.getInteger(ctx, "x");
+                                int z = IntegerArgumentType.getInteger(ctx, "z");
+                                UkGeoChunkGenerator generator = generator(ctx.getSource().getLevel().getChunkSource().getGenerator());
+                                if (generator == null) {
+                                    ctx.getSource().sendFailure(Component.literal("Active generator is not ukgeo:heightmap"));
+                                    return 0;
+                                }
+                                ctx.getSource().sendSuccess(() -> Component.literal(generator.sampleWaterPlanLine(x, z)), false);
+                                return 1;
+                            }))))
+                .then(Commands.literal("where")
+                    .requires(source -> source.hasPermission(2))
+                    .then(Commands.argument("x", IntegerArgumentType.integer())
+                        .then(Commands.argument("z", IntegerArgumentType.integer())
+                            .executes(ctx -> {
+                                int x = IntegerArgumentType.getInteger(ctx, "x");
+                                int z = IntegerArgumentType.getInteger(ctx, "z");
+                                UkGeoChunkGenerator generator = generator(ctx.getSource().getLevel().getChunkSource().getGenerator());
+                                if (generator == null) {
+                                    ctx.getSource().sendFailure(Component.literal("Active generator is not ukgeo:heightmap"));
+                                    return 0;
+                                }
+                                ctx.getSource().sendSuccess(() -> Component.literal(generator.describeWhere(x, z)), false);
                                 return 1;
                             }))))
                 .then(spawnVanillaTreeCommand())

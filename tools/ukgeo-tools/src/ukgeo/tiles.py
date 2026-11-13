@@ -105,11 +105,11 @@ def read_r16_tile(path: Path, tile_size: int = 512) -> np.ndarray:
     return np.frombuffer(data, dtype="<i2").reshape((tile_size, tile_size))
 
 
-def write_u8_tile(path: Path, array: np.ndarray, tile_size: int = 512) -> None:
+def write_u8_tile(path: Path, array: np.ndarray, tile_size: int = 512, *, sparse_fill: int = 0) -> None:
     arr = np.asarray(array, dtype=np.uint8)
     if arr.shape != (tile_size, tile_size):
         raise ValueError(f"uint8 tile must be {tile_size}x{tile_size}, got {arr.shape}")
-    if not np.any(arr):
+    if np.all(arr == sparse_fill):
         path.unlink(missing_ok=True)
         gzip_alternate(path).unlink(missing_ok=True)
         return
@@ -157,13 +157,19 @@ def tile_dtype(dtype: str) -> np.dtype:
     return np.dtype("<i2") if dtype == "int16_le" else np.dtype(np.uint8)
 
 
-def region_metadata(layer_path: str, dtype: str, *, region_tiles: int = DEFAULT_REGION_TILES) -> dict[str, Any]:
+def region_metadata(
+    layer_path: str,
+    dtype: str,
+    *,
+    region_tiles: int = DEFAULT_REGION_TILES,
+    missing_tile: int | None = None,
+) -> dict[str, Any]:
     return {
         "storage": "regions",
         "region_path": f"{layer_path}/regions",
         "region_extension": region_extension(dtype),
         "region_tiles": int(region_tiles),
-        "missing_tile": default_tile_value(dtype),
+        "missing_tile": int(missing_tile) if missing_tile is not None else default_tile_value(dtype),
     }
 
 
@@ -195,7 +201,12 @@ def read_layer_tile(root: Path, layer: dict[str, Any], tile_x: int, tile_z: int,
         return read_region_tile(root, layer, tile_x, tile_z, tile_size)
     extension = str(layer.get("extension", r16_extension() if dtype == "int16_le" else u8_extension()))
     path = root / str(layer["path"]) / tile_filename(tile_x, tile_z, extension)
-    return read_r16_tile_or_nodata(path, tile_size) if dtype == "int16_le" else read_u8_tile(path, tile_size)
+    if dtype == "int16_le":
+        return read_r16_tile_or_nodata(path, tile_size)
+    default = int(layer.get("missing_tile", default_tile_value(dtype)))
+    if not resolve_existing_tile(path).exists():
+        return np.full((tile_size, tile_size), default, dtype=np.uint8)
+    return read_u8_tile(path, tile_size)
 
 
 def read_region_tile(root: Path, layer: dict[str, Any], tile_x: int, tile_z: int, tile_size: int) -> np.ndarray:
@@ -247,9 +258,13 @@ def pack_manifest_regions(root: Path, manifest: dict[str, Any], *, region_tiles:
             ("order_path", "order"),
             ("half_width_path", "half_width"),
             ("preview_radius_path", "preview_radius"),
+            ("distance_path", "distance"),
+            ("nearest_half_width_path", "nearest_half_width"),
         ):
             if path_key in rivers:
                 aux = river_u8_layer(rivers, path_key, prefix)
+                if path_key == "distance_path":
+                    aux["missing_tile"] = 255
                 pack_layer_regions(root, aux, manifest, region_tiles=region_tiles, delete_raw=delete_raw)
                 _copy_layer_region_metadata(aux, rivers, prefix=prefix)
     for layer in manifest.get("ore_layers", {}).values():
@@ -279,9 +294,16 @@ def iter_packable_layers(manifest: dict[str, Any]) -> Iterable[dict[str, Any]]:
     rivers = manifest.get("rivers")
     if rivers:
         yield {"path": rivers["path"], "extension": rivers.get("extension", u8_extension()), "dtype": "uint8"}
-        for key in ("order_path", "half_width_path", "preview_radius_path"):
+        for key in ("order_path", "half_width_path", "preview_radius_path", "nearest_half_width_path"):
             if key in rivers:
                 yield {"path": rivers[key], "extension": rivers.get("extension", u8_extension()), "dtype": "uint8"}
+        if "distance_path" in rivers:
+            yield {
+                "path": rivers["distance_path"],
+                "extension": rivers.get("extension", u8_extension()),
+                "dtype": "uint8",
+                "missing_tile": 255,
+            }
     yield from manifest.get("ore_layers", {}).values()
     for layer in manifest.get("animal_habitats", {}).get("entities", {}).values():
         yield layer
@@ -303,10 +325,11 @@ def pack_layer_regions(root: Path, layer: dict[str, Any], manifest: dict[str, An
     # Resume-safe: if raw tiles were already deleted after a prior pack, keep existing
     # regions and only refresh metadata. Re-reading missing raws would zero-fill and
     # overwrite good region files.
+    missing_tile = int(layer.get("missing_tile", default_tile_value(dtype)))
     if not _has_raw_tiles(raw_root, extension) and _has_region_files(region_root, region_ext):
-        layer.update(region_metadata(layer_path, dtype, region_tiles=region_tiles))
+        layer.update(region_metadata(layer_path, dtype, region_tiles=region_tiles, missing_tile=missing_tile))
         return
-    source_layer = {**layer, "extension": extension, "dtype": dtype}
+    source_layer = {**layer, "extension": extension, "dtype": dtype, "missing_tile": missing_tile}
     if _has_raw_tiles(raw_root, extension):
         source_layer["storage"] = "tiles"
     region_root.mkdir(parents=True, exist_ok=True)
@@ -325,8 +348,9 @@ def pack_layer_regions(root: Path, layer: dict[str, Any], manifest: dict[str, An
                 region_tiles,
                 dtype,
                 extension,
+                missing_tile=missing_tile,
             )
-    layer.update(region_metadata(layer_path, dtype, region_tiles=region_tiles))
+    layer.update(region_metadata(layer_path, dtype, region_tiles=region_tiles, missing_tile=missing_tile))
     if delete_raw and raw_root.exists():
         for tile in raw_root.glob(f"*{extension}"):
             tile.unlink(missing_ok=True)
@@ -365,13 +389,14 @@ def write_region_file_from_tiles(
     tile_size: int,
     region_tiles: int,
     dtype: str,
+    missing_tile: int | None = None,
 ) -> None:
     """Write one region file from a row-major list of tile arrays (None = missing/default)."""
     expected = region_tiles * region_tiles
     if len(tiles) != expected:
         raise ValueError(f"expected {expected} tiles for region, got {len(tiles)}")
     tile_bytes = raw_tile_bytes(dtype, tile_size)
-    default = default_tile_value(dtype)
+    default = int(missing_tile) if missing_tile is not None else default_tile_value(dtype)
     payloads: list[bytes | None] = []
     for tile in tiles:
         if tile is None or np.all(tile == default):
@@ -415,9 +440,12 @@ def _write_region_file(
     region_tiles: int,
     dtype: str,
     extension: str,
+    *,
+    missing_tile: int | None = None,
 ) -> None:
     tiles: list[np.ndarray | None] = []
-    source = {**layer, "extension": extension, "dtype": dtype}
+    default = int(missing_tile) if missing_tile is not None else int(layer.get("missing_tile", default_tile_value(dtype)))
+    source = {**layer, "extension": extension, "dtype": dtype, "missing_tile": default}
     for local_z in range(region_tiles):
         for local_x in range(region_tiles):
             tile_x = region_x * region_tiles + local_x
@@ -432,4 +460,5 @@ def _write_region_file(
         tile_size=tile_size,
         region_tiles=region_tiles,
         dtype=dtype,
+        missing_tile=default,
     )

@@ -21,6 +21,7 @@ dependencies = [
   "tqdm",
   "Pillow",
   "PyYAML",
+  "scipy",
 ]
 
 [project.optional-dependencies]

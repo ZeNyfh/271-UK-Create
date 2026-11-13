@@ -149,6 +149,24 @@ From the repository root:
 
 This uses `tools/hoverpreview-tools/config.yml` section `local_server` and serves the repository root over HTTP so the site can load preview assets with the same relative paths it uses on GitHub Pages.
 
+## Rivers / Strahler order
+
+GB rivers are baked from [OpenRiverNetwork](https://openrivers.net/) / OS Open Rivers topology using **Strahler stream order** 1–7 (order-1 headwaters are ~47% of network length; max 7 on the Severn, Clyde, Ouse, and Great Ouse).
+
+Survival channel **half-widths** (blocks from centerline) after the pipeline at `axis_scale` 1.0, and roughly doubled at 2.0:
+
+| Strahler | half_width @1× | half_width @2× | notes |
+|----------|----------------|----------------|-------|
+| 1 | 1 | 2 | fordable brook |
+| 2 | 1 | 2 | small stream |
+| 3 | 2 | 4 | creek |
+| 4 | 3 | 6 | small river |
+| 5 | 5 | 10 | mid river |
+| 6 | 7 | 14 | large |
+| 7 | 10 | 20 | arterial (Severn etc.) |
+
+Runtime no longer floors every channel with `river_widen_radius` (preset is `0`) or a high `MIN_RIVER_CHANNEL_HALF_WIDTH` (default `1`), so order 1–2 stay thin streams instead of fat mountain channels. Widths come from the baked `river_half_width` / order tiles.
+
 ## Published site
 
 The published map at:

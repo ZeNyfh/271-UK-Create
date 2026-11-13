@@ -65,13 +65,63 @@ If the Minecraft UI does not expose custom presets in your pack, create the worl
 }
 ```
 
+## Rivers / Strahler order
+
+Channel half-widths follow OpenRiverNetwork Strahler order 1–7 ([openrivers.net](https://openrivers.net/)). At axis scale 1.0 the baked survival table is 1→1, 2→1, 3→2, 4→3, 5→5, 6→7, 7→10 (roughly ×2 at axis scale 2.0). The `uk_geological_create` preset sets `river_widen_radius` to `0` so runtime uses data-driven widths; `MIN_RIVER_CHANNEL_HALF_WIDTH` defaults to `1` so order-1 brooks can stay a single-block half-width.
+
 ## Commands
 
 ```text
 /ukgeo check
-/ukgeo sample <x> <z>
 /ukgeo cache
+/ukgeo perf
+/ukgeo sample <x> <z>
+/ukgeo water <x> <z>
+/ukgeo where <x> <z>
 ```
+
+
+## Distant Horizons (LOD)
+
+When [Distant Horizons](https://modrinth.com/mod/distanthorizons) (`distanthorizons`) is installed, UKGeo registers a custom DH world generator for levels using `ukgeo:heightmap`. LODs are built from UK height/surface tiles via `surfaceY` / `sampleLodColumn` — **not** via Minecraft `fillFromNoise` / DH `INTERNAL_SERVER` full chunk generation. Ores, caves, trees, and structures are skipped on the LOD path.
+
+Enable (default when DH is present / flag unset):
+
+```text
+-Dukgeo.enableDhLodGenerator=true
+```
+
+Disable (dedicated server `config/server/user_jvm_args.txt` sets this so DH uses normal chunk loading):
+
+```text
+-Dukgeo.enableDhLodGenerator=false
+```
+
+Look for `UKGeo DH LOD generator registered` (or a skipped reason) in the log once per session.
+
+## Debug / perf JVM flags
+
+Useful dedicated-server `-D` flags (see `config/server/user_jvm_args.txt`):
+
+```text
+-Dukgeo.debugPerfSummary=true
+-Dukgeo.perfLogIntervalChunks=100
+-Dukgeo.debugWaterPlan=true
+-Dukgeo.debugWaterX=-43
+-Dukgeo.debugWaterZ=26
+-Dukgeo.debugWaterY=75
+-Dukgeo.debugWaterRadius=48
+-Dukgeo.slowFillFromNoiseWarnMs=250
+-Dukgeo.slowApplyBiomeDecorationWarnMs=250
+```
+
+Do **not** enable `-Dukgeo.debugTimingSpam` (too noisy). Optional: `-Dukgeo.debugGenTimings`, `-Dukgeo.debugCaves`, `-Dukgeo.debugOrePlacement`.
+
+`/ukgeo check` and `/ukgeo where` print `axis_scale` from the TileManifest when present.
+
+## Map scale (website vs server)
+
+Runtime `uk_world_data` targets `axis_scale` **2.0** (~13 m/block, world ~68462×100000). Older 1.0 datasets (~26 m/block, ~33462×50000) need `serverXZ ≈ websiteXZ / 2` if mixed with a 2× hover map. Vertical `height_scale` in the world preset is terrain exaggeration only, not horizontal map scale.
 
 ## Create zinc
 

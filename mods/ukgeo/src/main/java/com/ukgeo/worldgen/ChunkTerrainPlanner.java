@@ -87,12 +87,20 @@ final class ChunkTerrainPlanner {
         }
         long waterElapsedNanos = System.nanoTime() - waterStartNanos;
         logTiming("ChunkTerrainPlanner.waterPlanning", chunk, waterStartNanos);
+        flattenRiverWaterSurfaces(columns, minBuildY, maxBuildY);
         long oreStartNanos = System.nanoTime();
         Plan plan = new Plan(columns, generator.buildOrePlacements(data, chunk, columns), generator.seaLevel());
         long oreElapsedNanos = System.nanoTime() - oreStartNanos;
         logTiming("ChunkTerrainPlanner.orePlanning", chunk, oreStartNanos);
         long totalElapsedNanos = System.nanoTime() - startNanos;
         logTiming("ChunkTerrainPlanner.compute", chunk, startNanos);
+        generator.recordPlanStageTimings(
+            windowElapsedNanos,
+            surfaceElapsedNanos,
+            waterElapsedNanos,
+            oreElapsedNanos,
+            totalElapsedNanos
+        );
         logSlowPlanBreakdown(chunk, windowElapsedNanos, surfaceElapsedNanos, waterElapsedNanos, oreElapsedNanos, totalElapsedNanos);
         return plan;
     }
@@ -194,6 +202,8 @@ final class ChunkTerrainPlanner {
         int chunkMinX = chunk.getPos().getMinBlockX();
         int chunkMinZ = chunk.getPos().getMinBlockZ();
         WaterProtection[] waterProtections = waterProtections(plan);
+        LevelChunkSection[] sectionCache = FAST_SECTION_WRITES ? new LevelChunkSection[chunk.getSectionsCount()] : null;
+        SectionWriteCursor sectionCursor = FAST_SECTION_WRITES ? new SectionWriteCursor() : null;
         long fillNanos = 0L;
         for (int localZ = 0; localZ < CHUNK_SIZE; localZ++) {
             for (int localX = 0; localX < CHUNK_SIZE; localX++) {
@@ -204,6 +214,8 @@ final class ChunkTerrainPlanner {
                 fillColumn(
                     chunk,
                     cursor,
+                    sectionCache,
+                    sectionCursor,
                     localX,
                     localZ,
                     chunkMinX + localX,
@@ -226,7 +238,7 @@ final class ChunkTerrainPlanner {
         // Ores/mineral deposits must be part of the base terrain, not a late surface/decoration pass.
         // Placing them here means later carvers and structures can cut through or overwrite them,
         // preventing mineral blocks from appearing in the air inside generated structures.
-        applyOres(plan, chunk);
+        applyOres(plan, chunk, sectionCache, sectionCursor);
         chunk.setUnsaved(true);
         logTiming("ChunkTerrainPlanner.apply", chunk, startNanos);
     }
@@ -260,14 +272,104 @@ final class ChunkTerrainPlanner {
                     clearUnplannedSurfaceWater(chunk, cursor, localX, localZ, column.terrainTop());
                     continue;
                 }
-                for (int y = Math.max(minBuildY, column.terrainTop()); y <= waterSurfaceY; y++) {
-                    BlockState state = enforcedWaterColumnState(y, column, minBuildY, plan.seaLevelY());
-                    setBlock(chunk, cursor, localX, y, localZ, state);
+                int solidContact = Math.max(minBuildY, column.terrainTop());
+                boolean foundSolid = false;
+                for (int y = column.terrainTop(); y >= minBuildY + 1; y--) {
+                    BlockState existing = chunk.getBlockState(cursor.set(localX, y, localZ));
+                    if (existing.isAir() || existing.is(Blocks.WATER) || !existing.getFluidState().isEmpty()) {
+                        continue;
+                    }
+                    solidContact = y;
+                    foundSolid = true;
+                    break;
+                }
+                if (!foundSolid) {
+                    solidContact = minBuildY;
+                }
+                BlockState floor = column.river().hasWater()
+                    ? column.river().floorMaterial()
+                    : Blocks.GRAVEL.defaultBlockState();
+                if (floor == null) {
+                    floor = Blocks.GRAVEL.defaultBlockState();
+                }
+                if (solidContact >= minBuildY) {
+                    setBlock(chunk, cursor, localX, solidContact, localZ, floor);
+                }
+                for (int y = solidContact + 1; y <= waterSurfaceY; y++) {
+                    setBlock(chunk, cursor, localX, y, localZ, Blocks.WATER.defaultBlockState());
                 }
                 clearWaterAboveSurface(chunk, cursor, localX, localZ, waterSurfaceY);
             }
         }
         logTiming("ChunkTerrainPlanner.enforceWaterColumns", chunk, startNanos);
+    }
+
+    private static void flattenRiverWaterSurfaces(ColumnPlan[] columns, int minBuildY, int maxBuildY) {
+        int[] medians = new int[columns.length];
+        for (int index = 0; index < columns.length; index++) {
+            ColumnPlan column = columns[index];
+            if (!column.river().hasWater()) {
+                medians[index] = Integer.MIN_VALUE;
+                continue;
+            }
+            int localZ = index / CHUNK_SIZE;
+            int localX = index - localZ * CHUNK_SIZE;
+            int[] samples = new int[25];
+            int count = 0;
+            for (int dz = -2; dz <= 2; dz++) {
+                for (int dx = -2; dx <= 2; dx++) {
+                    int nx = localX + dx;
+                    int nz = localZ + dz;
+                    if (nx < 0 || nz < 0 || nx >= CHUNK_SIZE || nz >= CHUNK_SIZE) {
+                        continue;
+                    }
+                    ColumnPlan neighbor = columns[nz * CHUNK_SIZE + nx];
+                    if (!neighbor.river().hasWater()) {
+                        continue;
+                    }
+                    samples[count++] = neighbor.river().waterSurfaceY();
+                }
+            }
+            if (count <= 0) {
+                medians[index] = column.river().waterSurfaceY();
+                continue;
+            }
+            java.util.Arrays.sort(samples, 0, count);
+            medians[index] = samples[count / 2];
+        }
+        for (int index = 0; index < columns.length; index++) {
+            int median = medians[index];
+            if (median == Integer.MIN_VALUE) {
+                continue;
+            }
+            ColumnPlan column = columns[index];
+            UkGeoChunkGenerator.RiverShape river = column.river();
+            int oldWater = river.waterSurfaceY();
+            int oldBed = river.terrainSurfaceY();
+            int depth = Math.max(1, oldWater - oldBed);
+            int newWater = Math.clamp(median, minBuildY + 1, maxBuildY);
+            int newBed = Math.max(minBuildY + 1, newWater - depth);
+            UkGeoChunkGenerator.RiverShape flat = new UkGeoChunkGenerator.RiverShape(
+                true,
+                river.influenced(),
+                newBed,
+                newWater,
+                river.floorMaterial()
+            );
+            int columnTop = Math.clamp(Math.max(column.columnTop(), newWater), minBuildY, maxBuildY);
+            columns[index] = new ColumnPlan(
+                column.originalSurfaceY(),
+                newBed,
+                columnTop,
+                column.steep(),
+                column.coastalBeach(),
+                flat,
+                column.vegetationClass(),
+                column.surfaceRock(),
+                column.exposedSurfaceRock(),
+                column.hasHeightData()
+            );
+        }
     }
 
     private static void clearUnplannedSurfaceWater(ChunkAccess chunk, BlockPos.MutableBlockPos cursor, int localX, int localZ, int terrainTop) {
@@ -311,8 +413,18 @@ final class ChunkTerrainPlanner {
     }
 
     static void applyOres(Plan plan, ChunkAccess chunk) {
+        applyOres(plan, chunk, null, null);
+    }
+
+    private static void applyOres(Plan plan, ChunkAccess chunk, LevelChunkSection[] sectionCache, SectionWriteCursor sectionCursor) {
         long startNanos = System.nanoTime();
         BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+        LevelChunkSection[] cache = sectionCache;
+        SectionWriteCursor writeCursor = sectionCursor;
+        if (FAST_SECTION_WRITES && cache == null) {
+            cache = new LevelChunkSection[chunk.getSectionsCount()];
+            writeCursor = new SectionWriteCursor();
+        }
         for (OrePlacement placement : plan.orePlacements) {
             ColumnPlan column = plan.columns[placement.localZ() * CHUNK_SIZE + placement.localX()];
             if (isProtectedWaterColumn(column, placement.y(), plan.seaLevelY())) {
@@ -323,7 +435,7 @@ final class ChunkTerrainPlanner {
                 if (hasAirOrWaterNeighbor(chunk, cursor, placement.localX(), placement.y(), placement.localZ())) {
                     continue;
                 }
-                setBlock(chunk, cursor, placement.localX(), placement.y(), placement.localZ(), placement.state());
+                setBlock(chunk, cursor, cache, writeCursor, placement.localX(), placement.y(), placement.localZ(), placement.state());
             }
         }
         logTiming("ChunkTerrainPlanner.applyOres", chunk, startNanos);
@@ -398,6 +510,8 @@ final class ChunkTerrainPlanner {
     private static void fillColumn(
         ChunkAccess chunk,
         BlockPos.MutableBlockPos cursor,
+        LevelChunkSection[] sectionCache,
+        SectionWriteCursor sectionCursor,
         int localX,
         int localZ,
         int worldX,
@@ -420,7 +534,7 @@ final class ChunkTerrainPlanner {
         boolean coastalBeach = column.coastalBeach();
         int vegetationClass = column.vegetationClass();
 
-        setBlock(chunk, cursor, localX, minBuildY, localZ, Blocks.BEDROCK.defaultBlockState());
+        setBlock(chunk, cursor, sectionCache, sectionCursor, localX, minBuildY, localZ, Blocks.BEDROCK.defaultBlockState());
         int stoneTop = Math.max(minBuildY + 1, terrainTop - 12);
         for (int y = minBuildY + 1; y < stoneTop; y++) {
             CaveState caveState = y <= terrainTop && caveMask.mayCarveAtY(y, vanillaTop)
@@ -428,20 +542,20 @@ final class ChunkTerrainPlanner {
                 : CaveState.SOLID;
             if (caveState == CaveState.AIR) {
                 if (isProtectedWaterCave(protection, y)) {
-                    setBlock(chunk, cursor, localX, y, localZ, protectedWaterState(column, protection, y, minBuildY, surfaceRock, steep, river, originalSurfaceY, vegetationClass, seaLevelY));
+                    setBlock(chunk, cursor, sectionCache, sectionCursor, localX, y, localZ, protectedWaterState(column, protection, y, minBuildY, surfaceRock, steep, river, originalSurfaceY, vegetationClass, seaLevelY));
                     continue;
                 }
-                setBlock(chunk, cursor, localX, y, localZ, Blocks.AIR.defaultBlockState());
+                setBlock(chunk, cursor, sectionCache, sectionCursor, localX, y, localZ, Blocks.AIR.defaultBlockState());
                 continue;
             } else if (caveState == CaveState.LAVA) {
                 if (isProtectedWaterCave(protection, y)) {
-                    setBlock(chunk, cursor, localX, y, localZ, protectedWaterState(column, protection, y, minBuildY, surfaceRock, steep, river, originalSurfaceY, vegetationClass, seaLevelY));
+                    setBlock(chunk, cursor, sectionCache, sectionCursor, localX, y, localZ, protectedWaterState(column, protection, y, minBuildY, surfaceRock, steep, river, originalSurfaceY, vegetationClass, seaLevelY));
                     continue;
                 }
-                setBlock(chunk, cursor, localX, y, localZ, Blocks.LAVA.defaultBlockState());
+                setBlock(chunk, cursor, sectionCache, sectionCursor, localX, y, localZ, Blocks.LAVA.defaultBlockState());
                 continue;
             }
-            setBlock(chunk, cursor, localX, y, localZ, y < 0 ? Blocks.DEEPSLATE.defaultBlockState() : Blocks.STONE.defaultBlockState());
+            setBlock(chunk, cursor, sectionCache, sectionCursor, localX, y, localZ, y < 0 ? Blocks.DEEPSLATE.defaultBlockState() : Blocks.STONE.defaultBlockState());
         }
         for (int y = stoneTop; y <= clearTop; y++) {
             CaveState caveState = y <= terrainTop && caveMask.mayCarveAtY(y, vanillaTop)
@@ -449,21 +563,21 @@ final class ChunkTerrainPlanner {
                 : CaveState.SOLID;
             if (caveState == CaveState.AIR) {
                 if (isProtectedWaterCave(protection, y)) {
-                    setBlock(chunk, cursor, localX, y, localZ, protectedWaterState(column, protection, y, minBuildY, surfaceRock, steep, river, originalSurfaceY, vegetationClass, seaLevelY));
+                    setBlock(chunk, cursor, sectionCache, sectionCursor, localX, y, localZ, protectedWaterState(column, protection, y, minBuildY, surfaceRock, steep, river, originalSurfaceY, vegetationClass, seaLevelY));
                     continue;
                 }
-                setBlock(chunk, cursor, localX, y, localZ, Blocks.AIR.defaultBlockState());
+                setBlock(chunk, cursor, sectionCache, sectionCursor, localX, y, localZ, Blocks.AIR.defaultBlockState());
                 continue;
             } else if (caveState == CaveState.LAVA) {
                 if (isProtectedWaterCave(protection, y)) {
-                    setBlock(chunk, cursor, localX, y, localZ, protectedWaterState(column, protection, y, minBuildY, surfaceRock, steep, river, originalSurfaceY, vegetationClass, seaLevelY));
+                    setBlock(chunk, cursor, sectionCache, sectionCursor, localX, y, localZ, protectedWaterState(column, protection, y, minBuildY, surfaceRock, steep, river, originalSurfaceY, vegetationClass, seaLevelY));
                     continue;
                 }
-                setBlock(chunk, cursor, localX, y, localZ, Blocks.LAVA.defaultBlockState());
+                setBlock(chunk, cursor, sectionCache, sectionCursor, localX, y, localZ, Blocks.LAVA.defaultBlockState());
                 continue;
             }
             BlockState state = columnStateFor(y, terrainTop, minBuildY, surfaceRock, exposedSurfaceRock, steep, river, originalSurfaceY, coastalBeach, vegetationClass, seaLevelY);
-            setBlock(chunk, cursor, localX, y, localZ, state);
+            setBlock(chunk, cursor, sectionCache, sectionCursor, localX, y, localZ, state);
         }
     }
 
@@ -706,12 +820,60 @@ final class ChunkTerrainPlanner {
         int localZ,
         BlockState state
     ) {
+        setBlock(chunk, cursor, null, null, localX, y, localZ, state);
+    }
+
+    private static void setBlock(
+        ChunkAccess chunk,
+        BlockPos.MutableBlockPos cursor,
+        LevelChunkSection[] sectionCache,
+        SectionWriteCursor sectionCursor,
+        int localX,
+        int y,
+        int localZ,
+        BlockState state
+    ) {
         if (FAST_SECTION_WRITES && !chunk.isOutsideBuildHeight(y)) {
-            LevelChunkSection section = chunk.getSection(chunk.getSectionIndex(y));
+            int sectionIndex = chunk.getSectionIndex(y);
+            LevelChunkSection section;
+            if (sectionCursor != null) {
+                section = sectionCursor.sectionFor(chunk, sectionCache, sectionIndex);
+            } else if (sectionCache != null) {
+                section = sectionCache[sectionIndex];
+                if (section == null) {
+                    section = chunk.getSection(sectionIndex);
+                    sectionCache[sectionIndex] = section;
+                }
+            } else {
+                section = chunk.getSection(sectionIndex);
+            }
             section.setBlockState(localX, y & 15, localZ, state, false);
             return;
         }
         chunk.setBlockState(cursor.set(localX, y, localZ), state, false);
+    }
+
+    /** Reuses the current LevelChunkSection across consecutive Y writes in a column. */
+    private static final class SectionWriteCursor {
+        private int sectionIndex = Integer.MIN_VALUE;
+        private LevelChunkSection section;
+
+        LevelChunkSection sectionFor(ChunkAccess chunk, LevelChunkSection[] sectionCache, int index) {
+            if (index == sectionIndex && section != null) {
+                return section;
+            }
+            sectionIndex = index;
+            if (sectionCache != null) {
+                section = sectionCache[index];
+                if (section == null) {
+                    section = chunk.getSection(index);
+                    sectionCache[index] = section;
+                }
+            } else {
+                section = chunk.getSection(index);
+            }
+            return section;
+        }
     }
 
     private static void logTiming(String label, ChunkAccess chunk, long startNanos) {

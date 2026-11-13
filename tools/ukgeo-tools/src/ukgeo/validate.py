@@ -33,6 +33,20 @@ def validate_tiles(root: Path) -> list[str]:
             errors.extend(_check_layer(root, river_u8_layer(rivers, "half_width_path", "half_width"), tiles_x, tiles_z, tile_size))
         if "preview_radius_path" in rivers:
             errors.extend(_check_layer(root, river_u8_layer(rivers, "preview_radius_path", "preview_radius"), tiles_x, tiles_z, tile_size))
+        if "distance_path" in rivers:
+            distance_layer = river_u8_layer(rivers, "distance_path", "distance")
+            distance_layer["missing_tile"] = int(rivers.get("distance_missing_tile", 255))
+            errors.extend(_check_layer(root, distance_layer, tiles_x, tiles_z, tile_size))
+        if "nearest_half_width_path" in rivers:
+            errors.extend(
+                _check_layer(
+                    root,
+                    river_u8_layer(rivers, "nearest_half_width_path", "nearest_half_width"),
+                    tiles_x,
+                    tiles_z,
+                    tile_size,
+                )
+            )
     if "vegetation" in manifest:
         vegetation = manifest["vegetation"]
         cell_blocks = int(vegetation.get("cell_blocks", 1))
@@ -91,6 +105,14 @@ def tile_summary(root: Path) -> dict[str, Any]:
             summary["river_order"] = _u8_summary(root, river_u8_layer(rivers, "order_path", "order"), tiles_x, tiles_z, tile_size)
         if "half_width_path" in rivers:
             summary["river_half_width"] = _u8_summary(root, river_u8_layer(rivers, "half_width_path", "half_width"), tiles_x, tiles_z, tile_size)
+        if "distance_path" in rivers:
+            distance_layer = river_u8_layer(rivers, "distance_path", "distance")
+            distance_layer["missing_tile"] = int(rivers.get("distance_missing_tile", 255))
+            summary["river_distance"] = _u8_summary(root, distance_layer, tiles_x, tiles_z, tile_size)
+        if "nearest_half_width_path" in rivers:
+            summary["river_nearest_half_width"] = _u8_summary(
+                root, river_u8_layer(rivers, "nearest_half_width_path", "nearest_half_width"), tiles_x, tiles_z, tile_size
+            )
     if "vegetation" in manifest:
         vegetation = manifest["vegetation"]
         cell_blocks = int(vegetation.get("cell_blocks", 1))

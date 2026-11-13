@@ -31,6 +31,7 @@ from .ore_image_overlay import apply_named_svg_ore_overlays as apply_named_svg_o
 from .ore_image_overlay import apply_ore_image_overlay as apply_ore_image_overlay_impl
 from .ores import make_ore_tiles as make_ore_tiles_impl
 from .preview import make_preview
+from .rivers import bake_river_distance_grids as bake_river_distance_grids_impl
 from .rivers import make_river_tiles as make_river_tiles_impl
 from .surface import make_surface_geology_tiles as make_surface_geology_tiles_impl
 from .ni_height import add_osni_height_tiles as add_osni_height_tiles_impl
@@ -373,6 +374,13 @@ def make_river_tiles(
         resume_memmaps=resume_memmaps,
         skip_edges=skip_edges,
     )
+
+
+@app.command("bake-river-distance")
+def bake_river_distance(
+    root: Path = typer.Option(..., "--root", help="UKGeo data root containing manifest.json and river tiles."),
+) -> None:
+    bake_river_distance_grids_impl(root, manifest_path=root / "manifest.json")
 
 
 @app.command("make-vegetation-tiles")
