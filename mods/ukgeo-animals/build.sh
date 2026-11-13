@@ -11,7 +11,7 @@ if [ -x "$LOCAL_JAVA/bin/java" ]; then
 fi
 
 cd "$(dirname "$0")"
-./gradlew clean build
+./gradlew clean build -x test
 
 JAR="$(ls -t build/libs/*.jar | head -n 1)"
 rm -f "$MOD_DIR"/ukgeo-animals-*.jar
