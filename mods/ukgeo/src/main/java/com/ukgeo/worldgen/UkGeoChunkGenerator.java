@@ -147,6 +147,8 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     private static final int WATERBED_PROTECTION_DEPTH = 6;
     private static final boolean ENABLE_RIVER_SEARCH_INDEX = Boolean.getBoolean("ukgeo.enableRiverSearchIndex");
     private static final int RIVER_SHELF_REMOVAL_EXTRA_WIDTH = Integer.getInteger("ukgeo.riverShelfRemovalExtraWidth", 2);
+    /** Minimum half-width (blocks from centerline) so streams never render as a 1-block trickle. */
+    private static final int MIN_RIVER_CHANNEL_HALF_WIDTH = Integer.getInteger("ukgeo.minRiverChannelHalfWidth", 2);
     private static final int MAX_RIVER_SURFACE_STEP = 1;
     private static final int RIVER_REACH_SMOOTHING_RADIUS = 6;
     private static final double ALLOW_STEEP_RAPIDS_ONLY_ABOVE_SLOPE = 1.8;
@@ -587,10 +589,13 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
 
     private int riverWaterSurfaceY(RuntimeData data, HeightTileWindow heightWindow, int x, int z, int originalSurfaceY, int riverBedY, int waterRadius, double slope, WaterShapeCache cache) {
         OptionalInt reachSurface = riverReachWaterSurfaceY(data, heightWindow, x, z, originalSurfaceY, waterRadius, cache);
-        int smoothedSurface = smoothedSurfaceY(heightWindow, x, z, Math.max(2, riverWidenRadius + 2)).orElse(originalSurfaceY);
-        int target = reachSurface.orElse(Math.round((originalSurfaceY * 0.45f) + (smoothedSurface * 0.55f))) - 1;
-        int minAllowedY = Math.min(target, riverBedY + 1);
-        int maxAllowedY = Math.max(originalSurfaceY, minAllowedY);
+        int smoothedSurface = smoothedSurfaceY(heightWindow, x, z, Math.max(3, Math.max(riverWidenRadius, waterRadius))).orElse(originalSurfaceY);
+        // Prefer the reach average (flat pool along the channel). Fall back to smoothed land-1.
+        int target = reachSurface.orElse(smoothedSurface) - 1;
+        // Keep freeboard below surrounding land, but never above the local land surface.
+        target = Math.min(target, originalSurfaceY - 1);
+        int minAllowedY = Math.max(riverBedY + 1, originalSurfaceY - 4);
+        int maxAllowedY = Math.max(minAllowedY, originalSurfaceY - 1);
         return safeClampY(target, minAllowedY, maxAllowedY);
     }
 
@@ -621,8 +626,10 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
             return OptionalInt.empty();
         }
         int average = Math.round((float) total / count);
-        int clamped = safeClampY(average, min + MAX_RIVER_SURFACE_STEP, max - MAX_RIVER_SURFACE_STEP);
-        return OptionalInt.of(safeClampY(clamped, fallbackSurfaceY - 3, fallbackSurfaceY + 3));
+        // Bias toward the lower third of the reach so water does not climb local terrain humps.
+        int lowBias = Math.round((average * 2.0f + min) / 3.0f);
+        int clamped = safeClampY(lowBias, min + MAX_RIVER_SURFACE_STEP, max - MAX_RIVER_SURFACE_STEP);
+        return OptionalInt.of(safeClampY(clamped, fallbackSurfaceY - 2, fallbackSurfaceY + 1));
     }
 
     private static int safeClampY(int value, int minY, int maxY) {
@@ -651,15 +658,17 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         if (!distance.found()) {
             return RiverShape.none(originalSurfaceY);
         }
-        int waterRadius = Math.max(riverWidenRadius, distance.halfWidth()) + RIVER_SHELF_REMOVAL_EXTRA_WIDTH;
-        int bankRadius = waterRadius;
+        // Channel width from half-width data / widen radius. Do NOT require 3 mask neighbours —
+        // single-cell centerlines would otherwise stay 1 block wide.
+        int channelRadius = Math.max(MIN_RIVER_CHANNEL_HALF_WIDTH, Math.max(riverWidenRadius, distance.halfWidth()));
+        int waterRadius = channelRadius;
+        int bankRadius = channelRadius + Math.max(1, RIVER_SHELF_REMOVAL_EXTRA_WIDTH);
         if (distance.blocks() > bankRadius) {
             return RiverShape.none(originalSurfaceY);
         }
         int vegetationClass = vegetationClassAt(data, x, z, cache);
         double slope = localSurfaceSlope(heightWindow, x, z, originalSurfaceY, cache);
-        boolean riverWater = distance.blocks() <= waterRadius
-            && (riverLayerValue(data, x, z, cache) > 0 || supportedRiverWater(data, x, z, cache));
+        boolean riverWater = distance.blocks() <= waterRadius;
         return computeRiverShape(data, heightWindow, x, z, originalSurfaceY, minBuildY, cache, riverWater, distance, waterRadius, bankRadius, vegetationClass, slope);
     }
 
@@ -727,10 +736,12 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
             }
         } else if (isRiverArtifactFreshwater(data, x, z, cache)) {
             RiverDistance distance = nearestRiver(data, x, z, riverSearchRadius(data) + 2, cache);
-            int waterRadius = Math.max(riverWidenRadius, distance.halfWidth()) + RIVER_SHELF_REMOVAL_EXTRA_WIDTH;
+            int channelRadius = Math.max(MIN_RIVER_CHANNEL_HALF_WIDTH, Math.max(riverWidenRadius, distance.halfWidth()));
+            int waterRadius = channelRadius;
+            int bankRadius = channelRadius + Math.max(1, RIVER_SHELF_REMOVAL_EXTRA_WIDTH);
             int vegetation = vegetationClassAt(data, x, z, cache);
             double slope = localSurfaceSlope(heightWindow, x, z, originalSurfaceY, cache);
-            shape = computeRiverShape(data, heightWindow, x, z, originalSurfaceY, minBuildY, cache, true, distance, waterRadius, waterRadius, vegetation, slope);
+            shape = computeRiverShape(data, heightWindow, x, z, originalSurfaceY, minBuildY, cache, true, distance, waterRadius, bankRadius, vegetation, slope);
         } else {
             int waterSurface = lakeWaterSurfaceY(data, heightWindow, x, z, originalSurfaceY, cache);
             double edgeDistance = nearestLakeEdge(data, x, z, LAKE_EDGE_SEARCH_RADIUS, cache);
@@ -2066,8 +2077,9 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     private int riverBankDrop(double distance, int waterRadius, int bankRadius) {
         double bankWidth = Math.max(1.0, bankRadius - waterRadius);
         double bankProgress = Math.clamp((distance - waterRadius) / bankWidth, 0.0, 1.0);
-        int maxBankDrop = Math.min(2, Math.max(1, riverCarveDepth - 1));
-        return (int) Math.round(maxBankDrop * (1.0 - smoothstep(bankProgress)));
+        // One-block bank step only — avoids the "land, up, then down into water" shelf.
+        int maxBankDrop = 1;
+        return bankProgress >= 1.0 ? 0 : maxBankDrop;
     }
 
     private BlockState surfaceGeologyBlock(int x, int z, int y) {

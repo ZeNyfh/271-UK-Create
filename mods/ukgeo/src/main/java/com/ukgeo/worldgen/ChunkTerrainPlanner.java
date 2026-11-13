@@ -496,26 +496,34 @@ final class ChunkTerrainPlanner {
             for (int localX = 0; localX < CHUNK_SIZE; localX++) {
                 ColumnPlan column = plan.columns[localZ * CHUNK_SIZE + localX];
                 int ownSurface = plannedWaterSurfaceY(column, plan.seaLevelY());
-                boolean foundWater = ownSurface != Integer.MIN_VALUE;
-                int waterSurfaceY = foundWater ? ownSurface : Integer.MIN_VALUE;
-                int floorY = foundWater ? column.terrainTop() : Integer.MIN_VALUE;
-                for (int dz = -1; dz <= 1; dz++) {
-                    for (int dx = -1; dx <= 1; dx++) {
-                        int nx = localX + dx;
-                        int nz = localZ + dz;
-                        if (nx < 0 || nz < 0 || nx >= CHUNK_SIZE || nz >= CHUNK_SIZE) {
-                            continue;
+                boolean ownWater = ownSurface != Integer.MIN_VALUE;
+                int waterSurfaceY = ownSurface;
+                int floorY = ownWater ? column.terrainTop() : Integer.MIN_VALUE;
+                // Do not raise a column's water to a taller neighbour (that created mid-stream humps).
+                // Only borrow neighbour water level for dry bank columns that need bed protection.
+                if (!ownWater) {
+                    for (int dz = -1; dz <= 1; dz++) {
+                        for (int dx = -1; dx <= 1; dx++) {
+                            int nx = localX + dx;
+                            int nz = localZ + dz;
+                            if (nx < 0 || nz < 0 || nx >= CHUNK_SIZE || nz >= CHUNK_SIZE || (dx == 0 && dz == 0)) {
+                                continue;
+                            }
+                            ColumnPlan neighbor = plan.columns[nz * CHUNK_SIZE + nx];
+                            int neighborSurface = plannedWaterSurfaceY(neighbor, plan.seaLevelY());
+                            if (neighborSurface == Integer.MIN_VALUE) {
+                                continue;
+                            }
+                            waterSurfaceY = waterSurfaceY == Integer.MIN_VALUE
+                                ? neighborSurface
+                                : Math.min(waterSurfaceY, neighborSurface);
+                            floorY = floorY == Integer.MIN_VALUE
+                                ? neighbor.terrainTop()
+                                : Math.min(floorY, neighbor.terrainTop());
                         }
-                        ColumnPlan neighbor = plan.columns[nz * CHUNK_SIZE + nx];
-                        int neighborSurface = plannedWaterSurfaceY(neighbor, plan.seaLevelY());
-                        if (neighborSurface == Integer.MIN_VALUE) {
-                            continue;
-                        }
-                        foundWater = true;
-                        waterSurfaceY = Math.max(waterSurfaceY, neighborSurface);
-                        floorY = Math.max(floorY, neighbor.terrainTop());
                     }
                 }
+                boolean foundWater = waterSurfaceY != Integer.MIN_VALUE;
                 protections[localZ * CHUNK_SIZE + localX] = foundWater ? new WaterProtection(true, waterSurfaceY, floorY) : WaterProtection.none();
             }
         }
