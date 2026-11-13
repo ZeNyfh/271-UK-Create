@@ -4692,29 +4692,27 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
 
     private static final class BoundedCache<K, V> {
         private final int maxEntries;
-        private final LinkedHashMap<K, V> values;
+        private final ConcurrentHashMap<K, V> values;
 
         private BoundedCache(int maxEntries) {
             this.maxEntries = Math.max(16, maxEntries);
-            this.values = new LinkedHashMap<>(16, 0.75f, true) {
-                @Override
-                protected boolean removeEldestEntry(Map.Entry<K, V> eldest) {
-                    return size() > BoundedCache.this.maxEntries;
-                }
-            };
+            this.values = new ConcurrentHashMap<>(16);
         }
 
-        synchronized V get(K key) {
+        V get(K key) {
             return values.get(key);
         }
 
-        synchronized V putIfAbsent(K key, V value) {
-            V existing = values.get(key);
-            if (existing != null) {
-                return existing;
+        V putIfAbsent(K key, V value) {
+            V existing = values.putIfAbsent(key, value);
+            if (existing == null && values.size() > maxEntries) {
+                int excess = values.size() - maxEntries;
+                for (K k : values.keySet()) {
+                    if (excess-- <= 0) break;
+                    values.remove(k);
+                }
             }
-            values.put(key, value);
-            return null;
+            return existing;
         }
     }
 

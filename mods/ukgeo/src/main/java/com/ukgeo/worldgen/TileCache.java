@@ -1,43 +1,36 @@
 package com.ukgeo.worldgen;
 
 import java.io.IOException;
+import java.util.Iterator;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
-import java.util.LinkedHashMap;
-import java.util.Map;
+import java.util.concurrent.atomic.LongAdder;
 
 public final class TileCache<K, V> {
     private static final boolean DEBUG_TILE_CACHE = Boolean.getBoolean("ukgeo.debugTileCache");
     private static final long SLOW_TILE_LOAD_WARN_MS = Long.getLong("ukgeo.slowTileLoadWarnMs", 100L);
     private static final long TILE_CACHE_LOG_INTERVAL = Long.getLong("ukgeo.tileCacheLogInterval", 4096L);
     private final int maxEntries;
-    private final LinkedHashMap<K, V> cache;
+    private final ConcurrentHashMap<K, V> cache;
     private final ConcurrentHashMap<K, CompletableFuture<V>> inFlightLoads = new ConcurrentHashMap<>();
-    private long hits;
-    private long misses;
+    private final LongAdder hits = new LongAdder();
+    private final LongAdder misses = new LongAdder();
 
     public TileCache(int maxEntries) {
         this.maxEntries = maxEntries;
-        this.cache = new LinkedHashMap<>(16, 0.75f, true) {
-            @Override
-            protected boolean removeEldestEntry(Map.Entry<K, V> eldest) {
-                return size() > TileCache.this.maxEntries;
-            }
-        };
+        this.cache = new ConcurrentHashMap<>(16);
     }
 
     public V get(K key, ThrowingLoader<K, V> loader) throws IOException {
-        synchronized (this) {
-            V value = cache.get(key);
-            if (value != null) {
-                hits++;
-                maybeLogStats();
-                return value;
-            }
-            misses++;
+        V value = cache.get(key);
+        if (value != null) {
+            hits.increment();
             maybeLogStats();
+            return value;
         }
+        misses.increment();
+        maybeLogStats();
 
         CompletableFuture<V> loadFuture = new CompletableFuture<>();
         CompletableFuture<V> existingFuture = inFlightLoads.putIfAbsent(key, loadFuture);
@@ -52,21 +45,32 @@ public final class TileCache<K, V> {
             if (DEBUG_TILE_CACHE && elapsedMs >= SLOW_TILE_LOAD_WARN_MS) {
                 UkGeoMod.LOGGER.warn("UKGeo tile cache slow load key={} elapsed={}ms threshold={}ms", key, elapsedMs, SLOW_TILE_LOAD_WARN_MS);
             }
-            synchronized (this) {
-                V existing = cache.get(key);
-                if (existing != null) {
-                    loadFuture.complete(existing);
-                    return existing;
-                }
-                cache.put(key, loaded);
-                loadFuture.complete(loaded);
-                return loaded;
+            V existing = cache.putIfAbsent(key, loaded);
+            if (existing != null) {
+                loadFuture.complete(existing);
+                return existing;
             }
+            maybeEvict();
+            loadFuture.complete(loaded);
+            return loaded;
         } catch (IOException | RuntimeException ex) {
             loadFuture.completeExceptionally(ex);
             throw ex;
         } finally {
             inFlightLoads.remove(key, loadFuture);
+        }
+    }
+
+    private void maybeEvict() {
+        int excess = cache.size() - maxEntries;
+        if (excess <= 0) {
+            return;
+        }
+        Iterator<K> keys = cache.keySet().iterator();
+        while (excess > 0 && keys.hasNext()) {
+            keys.next();
+            keys.remove();
+            excess--;
         }
     }
 
@@ -88,15 +92,15 @@ public final class TileCache<K, V> {
         }
     }
 
-    public synchronized String stats() {
-        return "entries=%d hits=%d misses=%d".formatted(cache.size(), hits, misses);
+    public String stats() {
+        return "entries=%d hits=%d misses=%d".formatted(cache.size(), hits.sum(), misses.sum());
     }
 
-    private synchronized void maybeLogStats() {
+    private void maybeLogStats() {
         if (!DEBUG_TILE_CACHE) {
             return;
         }
-        long total = hits + misses;
+        long total = hits.sum() + misses.sum();
         if (total > 0 && total % TILE_CACHE_LOG_INTERVAL == 0) {
             UkGeoMod.LOGGER.info("UKGeo tile cache {}", stats());
         }
