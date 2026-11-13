@@ -1,6 +1,19 @@
-# Previous local instance path:
-# instance_dir: "/media/zenyfh/GoodHDD/Games/Minecraft/Instances/UK Create (1)"
-# mod_dir: "/media/zenyfh/GoodHDD/Games/Minecraft/Instances/UK Create (1)/mods"
+# Local CurseForge / launcher client instance (modpack SoT for third-party jars).
+instance_dir: "/mnt/f9e25c87-6bec-4284-bbee-92babc61d5c7/Games/Minecraft/Instances/UK Create (1)"
+mod_dir: "/mnt/f9e25c87-6bec-4284-bbee-92babc61d5c7/Games/Minecraft/Instances/UK Create (1)/mods"
 
-instance_dir: "/home/zenyfh/Documents/curseforge/minecraft/Instances/UK Create"
-mod_dir: "/home/zenyfh/Documents/curseforge/minecraft/Instances/UK Create/mods"
+# Optional local JDK override for builds (empty = auto temurin-21).
+java_dir: "/home/zenyfh/.jdks/temurin-21.0.11"
+
+# Dedicated server on zenvibelaptop (my local device) (created/managed by scripts/deploy-uk-create.sh).
+server:
+  ssh_host: "zenyfh@zenvibelaptop"
+  remote_dir: "/home/zenyfh/uk-create-server"
+  java_home: "/home/zenyfh/.jabba/jdk/temurin@21.0.10"
+  neoforge_version: "21.1.234"
+  minecraft_version: "1.21.1"
+  memory: "8G"
+  port: "25565"
+
+# Runtime world data: prefer the compiled repo dataset, else the client instance copy.
+world_data_dir: "tools/ukgeo-tools/uk_world_data_gb"
