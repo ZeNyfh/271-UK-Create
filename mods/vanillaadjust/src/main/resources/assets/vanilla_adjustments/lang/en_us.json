@@ -1,3 +1,22 @@
 {
-  "message.vanilla_adjustments.elytra_rocket_boost_disabled": "Elytra rocket boosting is disabled"
+  "message.vanilla_adjustments.elytra_rocket_boost_disabled": "Elytra rocket boosting is disabled",
+  "block.vanilla_adjustments.decorative_copper_block": "Decorative Copper Block",
+  "block.vanilla_adjustments.decorative_waxed_copper_block": "Decorative Waxed Copper Block",
+  "block.vanilla_adjustments.decorative_waxed_oxidized_copper": "Decorative Waxed Oxidized Copper",
+  "block.vanilla_adjustments.decorative_waxed_cut_copper": "Decorative Waxed Cut Copper",
+  "block.vanilla_adjustments.decorative_waxed_oxidized_cut_copper": "Decorative Waxed Oxidized Cut Copper",
+  "block.vanilla_adjustments.decorative_oxidized_cut_copper": "Decorative Oxidized Cut Copper",
+  "block.vanilla_adjustments.decorative_waxed_cut_copper_stairs": "Decorative Waxed Cut Copper Stairs",
+  "block.vanilla_adjustments.decorative_waxed_oxidized_cut_copper_stairs": "Decorative Waxed Oxidized Cut Copper Stairs",
+  "block.vanilla_adjustments.decorative_waxed_cut_copper_slab": "Decorative Waxed Cut Copper Slab",
+  "block.vanilla_adjustments.decorative_waxed_oxidized_cut_copper_slab": "Decorative Waxed Oxidized Cut Copper Slab",
+  "block.vanilla_adjustments.decorative_waxed_chiseled_copper": "Decorative Waxed Chiseled Copper",
+  "block.vanilla_adjustments.decorative_waxed_oxidized_chiseled_copper": "Decorative Waxed Oxidized Chiseled Copper",
+  "block.vanilla_adjustments.decorative_waxed_copper_grate": "Decorative Waxed Copper Grate",
+  "block.vanilla_adjustments.decorative_waxed_oxidized_copper_grate": "Decorative Waxed Oxidized Copper Grate",
+  "block.vanilla_adjustments.decorative_waxed_copper_bulb": "Decorative Waxed Copper Bulb",
+  "block.vanilla_adjustments.decorative_waxed_copper_door": "Decorative Waxed Copper Door",
+  "block.vanilla_adjustments.decorative_waxed_oxidized_copper_door": "Decorative Waxed Oxidized Copper Door",
+  "block.vanilla_adjustments.decorative_waxed_oxidized_copper_trapdoor": "Decorative Waxed Oxidized Copper Trapdoor",
+  "block.vanilla_adjustments.decorative_oxidized_copper_trapdoor": "Decorative Oxidized Copper Trapdoor"
 }
