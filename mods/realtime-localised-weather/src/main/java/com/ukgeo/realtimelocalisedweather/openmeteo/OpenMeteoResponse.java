@@ -22,7 +22,7 @@ public record OpenMeteoResponse(List<LocationWeather> locations) {
         float windGusts
     ) {
         public MeteorologicalPrecipitation meteorologicalPrecipitation() {
-            return OpenMeteoParser.mapWeatherCode(weatherCode);
+            return OpenMeteoParser.classify(weatherCode, precipitation, rain, showers, snowfall);
         }
     }
 

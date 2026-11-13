@@ -135,7 +135,7 @@ public final class ClientWeatherManager {
         ServerWeatherSnapshot east = snapshotOr(center, tiles.get(pack(tileX + 1, tileZ)), now);
         ServerWeatherSnapshot south = snapshotOr(center, tiles.get(pack(tileX, tileZ + 1)), now);
         ServerWeatherSnapshot southEast = snapshotOr(center, tiles.get(pack(tileX + 1, tileZ + 1)), now);
-        float rate = WeatherMath.bilinear(
+        float precipRate = WeatherMath.bilinear(
             centerSnapshot.precipitationRateMmPerHour(),
             east.precipitationRateMmPerHour(),
             south.precipitationRateMmPerHour(),
@@ -143,6 +143,16 @@ public final class ClientWeatherManager {
             offsetX,
             offsetZ
         );
+        float snowfallRate = WeatherMath.bilinear(
+            centerSnapshot.snowfallRateCmPerHour(),
+            east.snowfallRateCmPerHour(),
+            south.snowfallRateCmPerHour(),
+            southEast.snowfallRateCmPerHour(),
+            offsetX,
+            offsetZ
+        );
+        // Match WeatherSeverityMapper: snow is cm/h, treat as ~10× liquid mm/h for intensity.
+        float rate = Math.max(precipRate, snowfallRate * 10.0F);
         return Optional.of(new VisualWeatherSample(centerSnapshot, rate, referenceData.zoneSizeBlocks));
     }
 

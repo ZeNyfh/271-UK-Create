@@ -16,7 +16,10 @@ public final class WeatherInterpolator {
 
     public static float interpolateRate(ClientWeatherTile tile, long nowMillis) {
         float delta = temporalLerpFactor(tile.transitionStartedAtMillis(), nowMillis);
-        return WeatherMath.lerp(tile.previous().precipitationRateMmPerHour(), tile.current().precipitationRateMmPerHour(), delta);
+        float precip = WeatherMath.lerp(tile.previous().precipitationRateMmPerHour(), tile.current().precipitationRateMmPerHour(), delta);
+        float snowfall = WeatherMath.lerp(tile.previous().snowfallRateCmPerHour(), tile.current().snowfallRateCmPerHour(), delta);
+        // Match WeatherSeverityMapper / ClientWeatherManager visual intensity.
+        return Math.max(precip, snowfall * 10.0F);
     }
 
     public static ServerWeatherSnapshot interpolateSnapshot(ClientWeatherTile tile, long nowMillis) {

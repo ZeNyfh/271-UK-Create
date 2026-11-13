@@ -105,4 +105,66 @@ public final class OpenMeteoParser {
                 : MeteorologicalPrecipitation.NONE;
         };
     }
+
+    /**
+     * Classify precipitation using Open-Meteo rate fields when present, falling back to WMO
+     * {@code weather_code}. Snowfall is cm/h; rain/showers/precipitation are mm/h — treated as
+     * roughly comparable for dominance checks.
+     */
+    public static MeteorologicalPrecipitation classify(
+        int weatherCode,
+        float precipitation,
+        float rain,
+        float showers,
+        float snowfall
+    ) {
+        MeteorologicalPrecipitation fromCode = mapWeatherCode(weatherCode);
+
+        // Thunder/hail stay code-driven; Serene winter policy can turn THUNDERSTORM into THUNDER_SNOW.
+        if (weatherCode == 95 || weatherCode == 96 || weatherCode == 99) {
+            return fromCode;
+        }
+
+        float liquid = Math.max(0.0F, rain) + Math.max(0.0F, showers);
+        boolean snowSignificant = snowfall > 0.05F;
+        boolean liquidSignificant = liquid > 0.05F;
+
+        if (snowSignificant || liquidSignificant) {
+            if (snowSignificant && liquid <= snowfall) {
+                return snowLikeFromCode(fromCode);
+            }
+            // Liquid dominates (or snowfall is low while liquid is significant).
+            return liquidFromRates(liquid, rain, showers, fromCode);
+        }
+
+        // Aggregate precipitation without component rates — trust the WMO code.
+        if (precipitation > 0.05F) {
+            return fromCode;
+        }
+
+        // Zero rates: keep code mapping (clear stays NONE; coded precip stays coded).
+        return fromCode;
+    }
+
+    private static MeteorologicalPrecipitation snowLikeFromCode(MeteorologicalPrecipitation fromCode) {
+        if (fromCode == MeteorologicalPrecipitation.SNOW_SHOWERS || fromCode == MeteorologicalPrecipitation.SHOWERS) {
+            return MeteorologicalPrecipitation.SNOW_SHOWERS;
+        }
+        return MeteorologicalPrecipitation.SNOW;
+    }
+
+    private static MeteorologicalPrecipitation liquidFromRates(
+        float liquid,
+        float rain,
+        float showers,
+        MeteorologicalPrecipitation fromCode
+    ) {
+        if (liquid < 0.5F) {
+            return MeteorologicalPrecipitation.DRIZZLE;
+        }
+        if (showers > rain || fromCode == MeteorologicalPrecipitation.SHOWERS) {
+            return MeteorologicalPrecipitation.SHOWERS;
+        }
+        return MeteorologicalPrecipitation.RAIN;
+    }
 }
