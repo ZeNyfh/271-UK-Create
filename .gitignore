@@ -86,3 +86,19 @@ _site/
 /.graphify-runs
 /.graphify-staging
 data/uk_world_data_gb.zip
+
+# Agent config: Cursor rules/agents stay local; shared skills are trackable.
+/.cursor
+/.agents/*
+!/.agents/skills/
+!/.agents/skills/**
+/.claude/*
+!/.claude/skills/
+!/.claude/skills/**
+# Local preserve dir used during history sync
+/.local-keep-before-origin-sync/
+/.claude
+/.air
+/.agents
+AGENTS.md
+CLAUDE.md
