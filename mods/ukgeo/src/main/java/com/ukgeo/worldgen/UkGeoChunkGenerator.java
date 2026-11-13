@@ -161,12 +161,20 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     private static final double OCEAN_FLOOR_SLOPE_CURVE = Double.parseDouble(System.getProperty("ukgeo.oceanFloorSlopeCurve", "1.0"));
     private static final double BACKGROUND_ORE_ATTEMPT_MULTIPLIER = 0.1;
     private static final double ORE_AREA_ATTEMPT_MULTIPLIER = 3.0;
+    // Cross-chunk worm veins (vanilla-like ellipsoid slices). Tuned for look first; step/length keep cost bounded.
+    private static final int MAX_ORE_VEIN_ATTEMPTS_PER_CHUNK = Integer.getInteger("ukgeo.maxOreVeinAttemptsPerChunk", 6);
     private static final int MAX_MINERAL_VEIN_ATTEMPTS_PER_CHUNK = Integer.getInteger("ukgeo.maxMineralVeinAttemptsPerChunk", 8);
-    private static final double MINERAL_VEIN_SIZE_MULTIPLIER = Double.parseDouble(System.getProperty("ukgeo.mineralVeinSizeMultiplier", "12.0"));
-    private static final double MINERAL_VEIN_LENGTH_MULTIPLIER = Double.parseDouble(System.getProperty("ukgeo.mineralVeinLengthMultiplier", "4.0"));
-    private static final double MINERAL_VEIN_RADIUS_MULTIPLIER = Double.parseDouble(System.getProperty("ukgeo.mineralVeinRadiusMultiplier", "1.85"));
-    private static final int MINERAL_VEIN_MIN_BLOCKS = Integer.getInteger("ukgeo.mineralVeinMinBlocks", 128);
-    private static final int MINERAL_VEIN_MAX_BLOCKS = Integer.getInteger("ukgeo.mineralVeinMaxBlocks", 768);
+    private static final int ORE_VEIN_ORIGIN_RADIUS = Math.max(1, Integer.getInteger("ukgeo.oreVeinOriginRadius", 3));
+    private static final int MINERAL_VEIN_ORIGIN_RADIUS = Math.max(1, Integer.getInteger("ukgeo.mineralVeinOriginRadius", 8));
+    private static final double MINERAL_VEIN_SIZE_MULTIPLIER = Double.parseDouble(System.getProperty("ukgeo.mineralVeinSizeMultiplier", "8.0"));
+    private static final double MINERAL_VEIN_LENGTH_MULTIPLIER = Double.parseDouble(System.getProperty("ukgeo.mineralVeinLengthMultiplier", "3.4"));
+    private static final double MINERAL_VEIN_RADIUS_MULTIPLIER = Double.parseDouble(System.getProperty("ukgeo.mineralVeinRadiusMultiplier", "1.05"));
+    private static final int MINERAL_VEIN_MIN_BLOCKS = Integer.getInteger("ukgeo.mineralVeinMinBlocks", 96);
+    private static final int MINERAL_VEIN_MAX_BLOCKS = Integer.getInteger("ukgeo.mineralVeinMaxBlocks", 420);
+    private static final int MAX_ORE_VEIN_LENGTH = 40;
+    private static final int MAX_MINERAL_VEIN_LENGTH = 72;
+    private static final double ORE_VEIN_STEP = 0.95;
+    private static final double MINERAL_VEIN_STEP = 1.55;
     private static final int SNOW_ICE_MIN_Y = 501;
     private static final int VANILLA_MIN_Y = -64;
     private static final int VANILLA_MAX_Y = 320;
@@ -1610,9 +1618,7 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
 
     ChunkTerrainPlanner.OrePlacement[] buildOrePlacements(RuntimeData data, ChunkAccess chunk, ChunkTerrainPlanner.ColumnPlan[] columns) {
         ChunkPos pos = chunk.getPos();
-        long seed = (((long) pos.x) << 32) ^ (pos.z & 0xffffffffL) ^ 0x554b47454f4cL;
-        java.util.Random random = new java.util.Random(seed);
-        List<ChunkTerrainPlanner.OrePlacement> placements = new ArrayList<>();
+        List<ChunkTerrainPlanner.OrePlacement> placements = new ArrayList<>(256);
         for (OreDefinition ore : data.ores) {
             U8OreTileLayer scoreLayer = ore.hasScoreLayer() ? data.oreLayers.get(ore.scoreLayer()) : null;
             Optional<BlockStatePair> states = resolveOreBlocks(ore);
@@ -1625,55 +1631,56 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
                 case UNIFORM, DEEP_BIASED -> Integer.MIN_VALUE;
                 case TRIANGLE, TWO_PEAKS -> scaledVanillaY(ore.vanillaPeakY(), chunk);
             };
+            boolean mineralVeinOre = isMineralVeinOre(ore);
+            int reach = mineralVeinOre ? MINERAL_VEIN_ORIGIN_RADIUS : ORE_VEIN_ORIGIN_RADIUS;
+            int maxTravelBlocks = mineralVeinOre
+                ? (int) Math.ceil(MAX_MINERAL_VEIN_LENGTH * MINERAL_VEIN_STEP + MAX_MINERAL_VEIN_LENGTH * 0.45 + 8.0)
+                : (int) Math.ceil(MAX_ORE_VEIN_LENGTH * ORE_VEIN_STEP + 6.0);
             int score = scoreLayer == null ? 0 : scoreLayer.sampleOrDefault(pos.getMinBlockX() + 8, pos.getMinBlockZ() + 8, 0);
             double normalAttempts = normalOreAttempts(ore, score);
-            int attempts = scaledOreAttempts(normalAttempts, score > 0, random);
-            boolean mineralVeinOre = isMineralVeinOre(ore);
-            if (mineralVeinOre) {
-                attempts = Math.min(attempts, MAX_MINERAL_VEIN_ATTEMPTS_PER_CHUNK);
-            }
             logOreHeightProfile(ore, chunk, normalAttempts, score > 0);
-            int skippedBandMisses = 0;
             int acceptedCenters = 0;
             int plannedPlacements = 0;
             int minTerrainTop = Integer.MAX_VALUE;
             int maxTerrainTop = Integer.MIN_VALUE;
-            for (int attempt = 0; attempt < attempts; attempt++) {
-                int localX = random.nextInt(16);
-                int localZ = random.nextInt(16);
-                ChunkTerrainPlanner.ColumnPlan column = columns[localZ * 16 + localX];
+            for (ChunkTerrainPlanner.ColumnPlan column : columns) {
                 int top = column.terrainTop();
                 minTerrainTop = Math.min(minTerrainTop, top);
                 maxTerrainTop = Math.max(maxTerrainTop, top);
-                int min = Math.max(chunk.getMinBuildHeight() + 1, bandMin);
-                int max = Math.min(top - 1, bandMax);
-                if (min > max) {
-                    skippedBandMisses++;
-                    continue;
-                }
-                int y = min + random.nextInt(max - min + 1);
-                if (!acceptOreHeight(ore, y, bandMin, bandMax, chunk, random)) {
-                    continue;
-                }
-                acceptedCenters++;
-                if (mineralVeinOre) {
-                    plannedPlacements += addMineralVeinPlacements(placements, ore, states.get(), chunk, columns, random, localX, y, localZ, bandMin, bandMax);
-                } else {
-                    for (int i = 0; i < ore.veinSize(); i++) {
-                        int px = Math.clamp(localX + random.nextInt(5) - 2, 0, 15);
-                        int pz = Math.clamp(localZ + random.nextInt(5) - 2, 0, 15);
-                        int py = Math.clamp(y + random.nextInt(5) - 2, chunk.getMinBuildHeight() + 1, chunk.getMaxBuildHeight() - 1);
-                        ChunkTerrainPlanner.ColumnPlan placementColumn = columns[pz * 16 + px];
-                        if (py >= placementColumn.terrainTop() || oreHeightWeight(ore, py, bandMin, bandMax, chunk) <= 0.0) {
-                            continue;
-                        }
-                        BlockState oreState = py < 0 ? states.get().deepslate : states.get().normal;
-                        placements.add(new ChunkTerrainPlanner.OrePlacement(px, py, pz, oreState));
-                        plannedPlacements++;
+            }
+            // One seen-set per ore: veins from neighbouring origins share the chunk and must not double-place.
+            java.util.HashSet<Long> seen = new java.util.HashSet<>(512);
+            BlockStatePair oreStates = states.get();
+            int placementsBefore = placements.size();
+            for (int dz = -reach; dz <= reach; dz++) {
+                for (int dx = -reach; dx <= reach; dx++) {
+                    int originChunkX = pos.x + dx;
+                    int originChunkZ = pos.z + dz;
+                    if (!originCanReachChunk(chunk, originChunkX, originChunkZ, maxTravelBlocks)) {
+                        continue;
                     }
+                    int accepted = placeOreVeinsFromOrigin(
+                        placements,
+                        ore,
+                        oreStates,
+                        scoreLayer,
+                        chunk,
+                        columns,
+                        seen,
+                        originChunkX,
+                        originChunkZ,
+                        bandMin,
+                        bandMax,
+                        mineralVeinOre
+                    );
+                    acceptedCenters += accepted;
                 }
             }
-            logOrePlacementDebug(ore, chunk, score, normalAttempts, attempts, bandMin, bandMax, scaledPeakY, skippedBandMisses, acceptedCenters, plannedPlacements, minTerrainTop, maxTerrainTop);
+            plannedPlacements = placements.size() - placementsBefore;
+            int attempts = mineralVeinOre
+                ? Math.min(MAX_MINERAL_VEIN_ATTEMPTS_PER_CHUNK, (int) Math.ceil(normalAttempts * (score > 0 ? ORE_AREA_ATTEMPT_MULTIPLIER : BACKGROUND_ORE_ATTEMPT_MULTIPLIER)))
+                : Math.min(MAX_ORE_VEIN_ATTEMPTS_PER_CHUNK, (int) Math.ceil(normalAttempts * (score > 0 ? ORE_AREA_ATTEMPT_MULTIPLIER : BACKGROUND_ORE_ATTEMPT_MULTIPLIER)));
+            logOrePlacementDebug(ore, chunk, score, normalAttempts, attempts, bandMin, bandMax, scaledPeakY, 0, acceptedCenters, plannedPlacements, minTerrainTop, maxTerrainTop);
         }
         return placements.toArray(ChunkTerrainPlanner.OrePlacement[]::new);
     }
@@ -1696,101 +1703,288 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         };
     }
 
-    private static int addMineralVeinPlacements(
+    /**
+     * Replays every vein that starts in {@code originChunkX/Z}. Neighbouring chunks use the same
+     * seed, so a vein continues through chunk borders instead of clipping into a blob.
+     *
+     * @return accepted vein starts from this origin that survived height checks
+     */
+    private static int placeOreVeinsFromOrigin(
         List<ChunkTerrainPlanner.OrePlacement> placements,
         OreDefinition ore,
         BlockStatePair states,
+        U8OreTileLayer scoreLayer,
         ChunkAccess chunk,
         ChunkTerrainPlanner.ColumnPlan[] columns,
-        java.util.Random random,
-        int centerLocalX,
-        int centerY,
-        int centerLocalZ,
+        java.util.HashSet<Long> seen,
+        int originChunkX,
+        int originChunkZ,
         int bandMin,
-        int bandMax
+        int bandMax,
+        boolean mineralVein
     ) {
-        int placed = 0;
-        int minY = chunk.getMinBuildHeight() + 1;
-        int maxY = chunk.getMaxBuildHeight() - 1;
-        double angle = random.nextDouble() * Math.PI * 2.0;
-        double pitch = (random.nextDouble() - 0.5) * 0.38;
-        double x = centerLocalX + 0.5;
-        double y = centerY + 0.5;
-        double z = centerLocalZ + 0.5;
-        int length = Math.max(48, (int) Math.round(ore.veinSize() * MINERAL_VEIN_LENGTH_MULTIPLIER + random.nextInt(Math.max(1, ore.veinSize() * 2))));
-        int targetBlocks = Math.clamp((int) Math.round(ore.veinSize() * MINERAL_VEIN_SIZE_MULTIPLIER), MINERAL_VEIN_MIN_BLOCKS, MINERAL_VEIN_MAX_BLOCKS);
-        java.util.HashSet<Long> seen = new java.util.HashSet<>();
-        for (int step = 0; step < length && placed < targetBlocks; step++) {
-            double progress = (double) step / Math.max(1, length - 1);
-            double width = (0.95 + Math.sin(Math.PI * progress) * (1.15 + random.nextDouble() * 0.75)) * MINERAL_VEIN_RADIUS_MULTIPLIER;
-            placed += addMineralVeinBlob(placements, ore, states, chunk, columns, random, seen, x, y, z, width, bandMin, bandMax, minY, maxY, targetBlocks - placed);
-            angle += (random.nextDouble() - 0.5) * 0.32;
-            pitch = pitch * 0.72 + (random.nextDouble() - 0.5) * 0.14;
-            pitch = clamp(pitch, -0.42, 0.42);
-            x += Math.cos(angle) * Math.cos(pitch) * (0.65 + random.nextDouble() * 0.55);
-            z += Math.sin(angle) * Math.cos(pitch) * (0.65 + random.nextDouble() * 0.55);
-            y += Math.sin(pitch) * 0.85 + (random.nextDouble() - 0.5) * 0.45;
-            if (x < -2.0 || x > 17.0 || z < -2.0 || z > 17.0) {
-                break;
-            }
-            y = clamp(y, minY, maxY);
+        int originX = originChunkX * 16 + 8;
+        int originZ = originChunkZ * 16 + 8;
+        int score = scoreLayer == null ? 0 : scoreLayer.sampleOrDefault(originX, originZ, 0);
+        java.util.Random random = new java.util.Random(oreVeinOriginSeed(originChunkX, originChunkZ, ore.name()));
+        int attempts = scaledOreAttempts(normalOreAttempts(ore, score), score > 0, random);
+        attempts = Math.min(attempts, mineralVein ? MAX_MINERAL_VEIN_ATTEMPTS_PER_CHUNK : MAX_ORE_VEIN_ATTEMPTS_PER_CHUNK);
+        if (attempts <= 0) {
+            return 0;
         }
-        return placed;
+        int accepted = 0;
+        int minY = Math.max(chunk.getMinBuildHeight() + 1, bandMin);
+        int maxY = Math.min(chunk.getMaxBuildHeight() - 1, bandMax);
+        if (minY > maxY) {
+            return 0;
+        }
+        for (int attempt = 0; attempt < attempts; attempt++) {
+            double startX = originChunkX * 16.0 + random.nextDouble() * 16.0;
+            double startZ = originChunkZ * 16.0 + random.nextDouble() * 16.0;
+            int startY = minY + random.nextInt(maxY - minY + 1);
+            if (!acceptOreHeight(ore, startY, bandMin, bandMax, chunk, random)) {
+                continue;
+            }
+            accepted++;
+            double angle = random.nextDouble() * Math.PI * 2.0;
+            double pitch = (random.nextDouble() - 0.5) * (mineralVein ? 0.28 : 0.62);
+            double phase = random.nextDouble() * Math.PI * 2.0;
+            int length = veinLength(ore, mineralVein, random);
+            double radiusScale = veinRadiusScale(ore, mineralVein, length);
+            boolean branch = mineralVein && random.nextDouble() < 0.42;
+            int branchAt = branch ? length / 5 + random.nextInt(Math.max(1, length / 2)) : -1;
+            double branchAngle = angle + (random.nextDouble() - 0.5) * 1.6;
+            double branchPitch = clamp(pitch * 0.4 + (random.nextDouble() - 0.5) * 0.2, -0.35, 0.35);
+            int branchLength = branch ? Math.max(8, length / 3) : 0;
+            walkOreVein(
+                placements, ore, states, chunk, columns, seen, startX, startY + 0.5, startZ,
+                angle, pitch, phase, length, radiusScale, mineralVein, bandMin, bandMax, branchAt, branchAngle, branchPitch, branchLength
+            );
+        }
+        return accepted;
     }
 
-    private static int addMineralVeinBlob(
+    private static boolean originCanReachChunk(ChunkAccess chunk, int originChunkX, int originChunkZ, int maxTravelBlocks) {
+        int chunkMinX = chunk.getPos().getMinBlockX();
+        int chunkMinZ = chunk.getPos().getMinBlockZ();
+        int chunkMaxX = chunkMinX + 15;
+        int chunkMaxZ = chunkMinZ + 15;
+        int originMinX = originChunkX << 4;
+        int originMinZ = originChunkZ << 4;
+        int originMaxX = originMinX + 15;
+        int originMaxZ = originMinZ + 15;
+        int dx = 0;
+        if (chunkMaxX < originMinX) {
+            dx = originMinX - chunkMaxX;
+        } else if (originMaxX < chunkMinX) {
+            dx = chunkMinX - originMaxX;
+        }
+        int dz = 0;
+        if (chunkMaxZ < originMinZ) {
+            dz = originMinZ - chunkMaxZ;
+        } else if (originMaxZ < chunkMinZ) {
+            dz = chunkMinZ - originMaxZ;
+        }
+        int limit = maxTravelBlocks + 16;
+        return (long) dx * dx + (long) dz * dz <= (long) limit * limit;
+    }
+
+    private static int veinLength(OreDefinition ore, boolean mineralVein, java.util.Random random) {
+        if (mineralVein) {
+            int length = (int) Math.round(ore.veinSize() * MINERAL_VEIN_LENGTH_MULTIPLIER + random.nextInt(Math.max(1, ore.veinSize())));
+            return Math.clamp(Math.max(32, length), 32, MAX_MINERAL_VEIN_LENGTH);
+        }
+        int length = ore.veinSize() + 8 + random.nextInt(Math.max(1, ore.veinSize() / 2 + 1));
+        return Math.clamp(length, 12, MAX_ORE_VEIN_LENGTH);
+    }
+
+    private static double veinRadiusScale(OreDefinition ore, boolean mineralVein, int length) {
+        double target = mineralVein
+            ? Math.clamp(ore.veinSize() * MINERAL_VEIN_SIZE_MULTIPLIER, MINERAL_VEIN_MIN_BLOCKS, MINERAL_VEIN_MAX_BLOCKS)
+            : Math.max(ore.veinSize(), ore.veinSize() * 1.8);
+        double baseRadius = mineralVein ? 1.15 * MINERAL_VEIN_RADIUS_MULTIPLIER : 0.72 + ore.veinSize() / 48.0;
+        double estimated = length * Math.PI * baseRadius * baseRadius * (mineralVein ? 0.62 : 0.78);
+        double scale = Math.sqrt(Math.clamp(target / Math.max(1.0, estimated), 0.65, 1.45));
+        return baseRadius * scale;
+    }
+
+    private static void walkOreVein(
         List<ChunkTerrainPlanner.OrePlacement> placements,
         OreDefinition ore,
         BlockStatePair states,
         ChunkAccess chunk,
         ChunkTerrainPlanner.ColumnPlan[] columns,
-        java.util.Random random,
+        java.util.HashSet<Long> seen,
+        double startX,
+        double startY,
+        double startZ,
+        double angle,
+        double pitch,
+        double phase,
+        int length,
+        double radiusScale,
+        boolean mineralVein,
+        int bandMin,
+        int bandMax,
+        int branchAt,
+        double branchAngle,
+        double branchPitch,
+        int branchLength
+    ) {
+        int minY = chunk.getMinBuildHeight() + 1;
+        int maxY = chunk.getMaxBuildHeight() - 1;
+        double x = startX;
+        double y = startY;
+        double z = startZ;
+        double branchX = x;
+        double branchY = y;
+        double branchZ = z;
+        long salt = oreVeinOriginSeed((int) Math.floor(startX) >> 4, (int) Math.floor(startZ) >> 4, ore.name());
+        double stepDistance = mineralVein ? MINERAL_VEIN_STEP : ORE_VEIN_STEP;
+        boolean uniformHeight = ore.heightProfile() == OreDefinition.OreHeightProfile.UNIFORM;
+        for (int step = 0; step < length; step++) {
+            double progress = (double) step / Math.max(1, length - 1);
+            double taper = Math.sin(Math.PI * progress);
+            double bulge = 0.62 + 0.38 * Math.sin(progress * Math.PI * (mineralVein ? 2.5 : 3.5) + phase);
+            double heading = angle + Math.sin(step * 0.17 + phase) * (mineralVein ? 0.22 : 0.36);
+            double slope = clamp(pitch + Math.sin(step * 0.11 + phase * 1.7) * (mineralVein ? 0.06 : 0.12), mineralVein ? -0.28 : -0.5, mineralVein ? 0.28 : 0.5);
+            double horizontalRadius = Math.max(0.55, radiusScale * (0.45 + taper * bulge));
+            double verticalRadius = Math.max(0.45, horizontalRadius * (mineralVein ? 0.58 : 0.82));
+            if (step == branchAt) {
+                branchX = x;
+                branchY = y;
+                branchZ = z;
+            }
+            if (veinSliceMayHitChunk(chunk, x, z, horizontalRadius)) {
+                addOreVeinSlice(placements, ore, states, chunk, columns, seen, x, y, z, horizontalRadius, verticalRadius, salt, bandMin, bandMax, minY, maxY, uniformHeight);
+            }
+            double cosSlope = Math.cos(slope);
+            x += Math.cos(heading) * cosSlope * stepDistance;
+            z += Math.sin(heading) * cosSlope * stepDistance;
+            y += Math.sin(slope) * (mineralVein ? 0.55 : 0.7);
+            if (y < minY + 1 || y > maxY - 1) {
+                y = clamp(y, minY + 1, maxY - 1);
+            }
+        }
+        if (branchLength > 0) {
+            double x2 = branchX;
+            double y2 = branchY;
+            double z2 = branchZ;
+            for (int step = 0; step < branchLength; step++) {
+                double progress = (double) step / Math.max(1, branchLength - 1);
+                double taper = Math.sin(Math.PI * progress);
+                double heading = branchAngle + Math.sin(step * 0.23 + phase) * 0.28;
+                double slope = clamp(branchPitch + Math.sin(step * 0.13 + phase) * 0.05, -0.3, 0.3);
+                double horizontalRadius = Math.max(0.45, radiusScale * 0.72 * (0.4 + taper));
+                double verticalRadius = Math.max(0.4, horizontalRadius * 0.56);
+                if (veinSliceMayHitChunk(chunk, x2, z2, horizontalRadius)) {
+                    addOreVeinSlice(placements, ore, states, chunk, columns, seen, x2, y2, z2, horizontalRadius, verticalRadius, salt ^ 0xBEEFL, bandMin, bandMax, minY, maxY, uniformHeight);
+                }
+                double cosSlope = Math.cos(slope);
+                x2 += Math.cos(heading) * cosSlope * 1.25;
+                z2 += Math.sin(heading) * cosSlope * 1.25;
+                y2 = clamp(y2 + Math.sin(slope) * 0.45, minY + 1, maxY - 1);
+            }
+        }
+    }
+
+    private static boolean veinSliceMayHitChunk(ChunkAccess chunk, double centerX, double centerZ, double horizontalRadius) {
+        int chunkMinX = chunk.getPos().getMinBlockX();
+        int chunkMinZ = chunk.getPos().getMinBlockZ();
+        double margin = horizontalRadius + 1.0;
+        return centerX >= chunkMinX - margin && centerX <= chunkMinX + 16.0 + margin
+            && centerZ >= chunkMinZ - margin && centerZ <= chunkMinZ + 16.0 + margin;
+    }
+
+    private static void addOreVeinSlice(
+        List<ChunkTerrainPlanner.OrePlacement> placements,
+        OreDefinition ore,
+        BlockStatePair states,
+        ChunkAccess chunk,
+        ChunkTerrainPlanner.ColumnPlan[] columns,
         java.util.HashSet<Long> seen,
         double centerX,
         double centerY,
         double centerZ,
-        double radius,
+        double horizontalRadius,
+        double verticalRadius,
+        long salt,
         int bandMin,
         int bandMax,
         int minY,
         int maxY,
-        int remaining
+        boolean uniformHeight
     ) {
-        int placed = 0;
-        int minX = Math.max(0, (int) Math.floor(centerX - radius));
-        int maxX = Math.min(15, (int) Math.ceil(centerX + radius));
-        int minZ = Math.max(0, (int) Math.floor(centerZ - radius));
-        int maxZ = Math.min(15, (int) Math.ceil(centerZ + radius));
-        int minBlobY = Math.max(minY, (int) Math.floor(centerY - radius));
-        int maxBlobY = Math.min(maxY, (int) Math.ceil(centerY + radius));
-        double inv = 1.0 / Math.max(0.001, radius);
-        for (int px = minX; px <= maxX && placed < remaining; px++) {
-            double dx = (px + 0.5 - centerX) * inv;
-            for (int pz = minZ; pz <= maxZ && placed < remaining; pz++) {
-                double dz = (pz + 0.5 - centerZ) * inv;
-                ChunkTerrainPlanner.ColumnPlan column = columns[pz * 16 + px];
-                for (int py = minBlobY; py <= maxBlobY && placed < remaining; py++) {
-                    if (py >= column.terrainTop()) {
+        ChunkPos chunkPos = chunk.getPos();
+        int chunkMinX = chunkPos.getMinBlockX();
+        int chunkMinZ = chunkPos.getMinBlockZ();
+        int minWorldX = Math.max(chunkMinX, (int) Math.floor(centerX - horizontalRadius));
+        int maxWorldX = Math.min(chunkMinX + 15, (int) Math.ceil(centerX + horizontalRadius));
+        int minWorldZ = Math.max(chunkMinZ, (int) Math.floor(centerZ - horizontalRadius));
+        int maxWorldZ = Math.min(chunkMinZ + 15, (int) Math.ceil(centerZ + horizontalRadius));
+        int minBlobY = Math.max(minY, (int) Math.floor(centerY - verticalRadius));
+        int maxBlobY = Math.min(maxY, (int) Math.ceil(centerY + verticalRadius));
+        if (minWorldX > maxWorldX || minWorldZ > maxWorldZ || minBlobY > maxBlobY) {
+            return;
+        }
+        double invH = 1.0 / Math.max(0.001, horizontalRadius);
+        double invV = 1.0 / Math.max(0.001, verticalRadius);
+        for (int worldX = minWorldX; worldX <= maxWorldX; worldX++) {
+            double dx = (worldX + 0.5 - centerX) * invH;
+            double dx2 = dx * dx;
+            if (dx2 > 1.0) {
+                continue;
+            }
+            int localX = worldX - chunkMinX;
+            for (int worldZ = minWorldZ; worldZ <= maxWorldZ; worldZ++) {
+                double dz = (worldZ + 0.5 - centerZ) * invH;
+                double horiz = dx2 + dz * dz;
+                if (horiz > 1.0) {
+                    continue;
+                }
+                int localZ = worldZ - chunkMinZ;
+                ChunkTerrainPlanner.ColumnPlan column = columns[localZ * 16 + localX];
+                int terrainTop = column.terrainTop();
+                for (int py = minBlobY; py <= maxBlobY; py++) {
+                    if (py >= terrainTop) {
                         continue;
                     }
-                    double dy = (py + 0.5 - centerY) * inv;
-                    double density = dx * dx + dz * dz + dy * dy * 1.15;
-                    if (density > 1.0 || random.nextDouble() < density * 0.18) {
+                    double dy = (py + 0.5 - centerY) * invV;
+                    double density = horiz + dy * dy;
+                    if (density > 1.0) {
                         continue;
                     }
-                    if (oreHeightWeight(ore, py, bandMin, bandMax, chunk) <= 0.0) {
+                    // Deterministic edge discard (vanilla OreFeature-style), no Random in the hot voxel loop.
+                    if (oreVeinHash(worldX, py, worldZ, salt) < density * 0.22) {
                         continue;
                     }
-                    long key = (((long) py & 0xffffL) << 32) | ((long) px << 16) | (long) pz;
+                    if (uniformHeight) {
+                        if (py < bandMin || py > bandMax) {
+                            continue;
+                        }
+                    } else if (oreHeightWeight(ore, py, bandMin, bandMax, chunk) <= 0.0) {
+                        continue;
+                    }
+                    long key = (((long) py & 0xffffL) << 32) | ((long) localX << 16) | (long) localZ;
                     if (!seen.add(key)) {
                         continue;
                     }
-                    placements.add(new ChunkTerrainPlanner.OrePlacement(px, py, pz, py < 0 ? states.deepslate : states.normal));
-                    placed++;
+                    placements.add(new ChunkTerrainPlanner.OrePlacement(localX, py, localZ, py < 0 ? states.deepslate : states.normal));
                 }
             }
         }
-        return placed;
+    }
+
+    private static long oreVeinOriginSeed(int chunkX, int chunkZ, String oreName) {
+        return deepCaveSeed((oreName.hashCode() * 0x9E3779B97F4A7C15L) ^ 0x4f52455645494e4cL, chunkX, chunkZ);
+    }
+
+    private static double oreVeinHash(int x, int y, int z, long salt) {
+        long hash = salt ^ (x * 0x9E3779B97F4A7C15L) ^ (y * 0xC2B2AE3D27D4EB4FL) ^ (z * 0x165667B19E3779F9L);
+        hash ^= hash >>> 33;
+        hash *= 0xff51afd7ed558ccdL;
+        hash ^= hash >>> 33;
+        return (hash & 0xffffffL) / (double) 0x1000000L;
     }
 
     private RiverDistance nearestRiver(RuntimeData data, int x, int z, int radius) {
