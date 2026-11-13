@@ -27,6 +27,7 @@ public final class VanillaAdjustConfig {
     public static final ModConfigSpec.IntValue DEATH_TIMER_TEXT_COLOR;
     public static final ModConfigSpec.BooleanValue BENEFICIAL_EFFECT_HUNGER_DRAIN_ENABLED;
     public static final ModConfigSpec.DoubleValue BENEFICIAL_EFFECT_HUNGER_EXHAUSTION_PER_SECOND_PER_STRENGTH;
+    public static final ModConfigSpec.BooleanValue REPLACE_STRUCTURE_COPPER_WITH_DECORATIVE;
 
     static {
         ModConfigSpec.Builder builder = new ModConfigSpec.Builder();
@@ -115,6 +116,12 @@ public final class VanillaAdjustConfig {
         BENEFICIAL_EFFECT_HUNGER_EXHAUSTION_PER_SECOND_PER_STRENGTH = builder
                 .comment("Extra exhaustion added each second for each point of beneficial effect strength. Effect strength is the sum of amplifier + 1 across all active beneficial effects.")
                 .defineInRange("beneficialEffectHungerExhaustionPerSecondPerStrength", 0.05D, 0.0D, 4.0D);
+        builder.pop();
+
+        builder.push("decorativeCopper");
+        REPLACE_STRUCTURE_COPPER_WITH_DECORATIVE = builder
+                .comment("When true, structure-placed craftable copper blocks (e.g. trial chambers) are remapped to decorative copper that looks the same but cannot be used as copper crafting ingredients. copper_dispenser is never remapped.")
+                .define("replaceStructureCopperWithDecorative", true);
         builder.pop();
         SERVER_SPEC = builder.build();
     }

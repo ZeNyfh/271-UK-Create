@@ -4,6 +4,7 @@ import net.minecraft.tags.ItemTags;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
+import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.ModContainer;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.config.ModConfig;
@@ -21,6 +22,8 @@ public class Vanilla_adjustments {
     public static final Logger LOGGER = LoggerFactory.getLogger(MODID);
 
     public Vanilla_adjustments(ModContainer modContainer) {
+        IEventBus modEventBus = modContainer.getEventBus();
+        DecorativeCopperBlocks.register(modEventBus);
         modContainer.registerConfig(ModConfig.Type.SERVER, VanillaAdjustConfig.SERVER_SPEC);
         NeoForge.EVENT_BUS.register(this);
         NeoForge.EVENT_BUS.register(new EnderPearlRadiusLimiter());

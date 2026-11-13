@@ -5,14 +5,15 @@
   "compatibilityLevel": "JAVA_21",
   "mixins": [
     "BucketItemMixin",
+    "FireworkRocketItemMixin",
     "FlowingFluidMixin",
     "IceBlockMixin",
-    "FireworkRocketItemMixin",
     "LevelChunkMixin",
     "LevelMixin",
     "PointedDripstoneBlockMixin",
     "ServerGamePacketListenerImplMixin",
     "ServerLevelMixin",
+    "StructureTemplateMixin",
     "WaterFluidMixin",
     "WolfMixin"
   ],
