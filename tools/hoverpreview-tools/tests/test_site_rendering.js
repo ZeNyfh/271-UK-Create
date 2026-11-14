@@ -140,13 +140,16 @@ test("live weather controls work with older manifests and fetch Open-Meteo", () 
   assert.match(appJs, /forecast_api_fallback:\s*config\?\.forecast_api_fallback !== false/);
   assert.match(appJs, /const DEFAULT_VISIBLE_OVERLAYS = new Set\(\);/);
   assert.match(appJs, /const LIVE_WEATHER_GRID_COLUMNS = 256;/);
+  assert.match(appJs, /const LIVE_WEATHER_FORECAST_GRID_COLUMNS = 48;/);
+  assert.match(appJs, /function forecastApiWeatherGrid\(config\)/);
+  assert.match(appJs, /LIVE_WEATHER_RATE_LIMIT_COOLDOWN_MS/);
   assert.match(appJs, /const LIVE_WEATHER_SAMPLE_BATCH_POINTS = 512;/);
   assert.match(appJs, /function bestLiveWeatherGrid\(manifest, configuredGrid\)/);
   assert.match(appJs, /grid: bestLiveWeatherGrid\(manifest, configured\.grid\)/);
   assert.match(appJs, /function livePrecipitationColor\(value\)/);
-  assert.match(appJs, /const LIVE_WEATHER_BATCH_POINTS = 128;/);
-  assert.match(appJs, /const LIVE_WEATHER_BATCH_DELAY_MS = 350;/);
-  assert.match(appJs, /const LIVE_WEATHER_MAX_RETRIES = 4;/);
+  assert.match(appJs, /const LIVE_WEATHER_BATCH_POINTS = 12;/);
+  assert.match(appJs, /const LIVE_WEATHER_BATCH_DELAY_MS = 900;/);
+  assert.match(appJs, /const LIVE_WEATHER_MAX_RETRIES = 5;/);
   assert.doesNotMatch(appJs, /fetchLiveWeather\(manifest, \{ prefetch: true \}\)/);
   assert.match(appJs, /url\.searchParams\.set\("current", "precipitation"\)/);
   assert.doesNotMatch(appJs, /url\.searchParams\.set\("hourly", "precipitation_probability"\)/);
@@ -154,6 +157,8 @@ test("live weather controls work with older manifests and fetch Open-Meteo", () 
   assert.match(appJs, /response\.status !== 429/);
   assert.match(appJs, /function openMeteoRetryDelay\(response, attempt\)/);
   assert.match(appJs, /function liveWeatherPlaceholder\(latitude, longitude\)/);
+  assert.match(appJs, /!Number\.isFinite\(event\.clientX\)/);
+  assert.match(appJs, /requestAnimationFrame\(\(\) => refreshStatus\(\)\)/);
   assert.match(appJs, /label: "Rain \/ precipitation"/);
   assert.doesNotMatch(appJs, /label: "Cloud coverage"/);
   assert.match(appJs, /input\.checked && layer\.kind === "weather-live"/);
@@ -191,9 +196,11 @@ test("layer checkbox selections persist only selected layer names in a cookie", 
   assert.match(appJs, /JSON\.stringify\(\[\.\.\.selectedLayers\]\.sort\(\)\)/);
   assert.match(appJs, /document\.cookie = `\$\{SELECTED_LAYERS_COOKIE\}=\$\{value\}; Max-Age=\$\{SELECTED_LAYERS_COOKIE_MAX_AGE_SECONDS\}; Path=\/; SameSite=Lax\$\{secure\}`;/);
   assert.doesNotMatch(appJs, /localStorage\.(setItem|removeItem|clear)/);
-  assert.doesNotMatch(appJs, /sessionStorage/);
-  assert.match(rootIndexHtml, /app\.js\?v=20261113-2/);
-  assert.match(siteIndexHtml, /app\.js\?v=20261113-2/);
+  // Layer selection stays cookie-only; weather forecast may use sessionStorage as a rate-limit cache.
+  assert.doesNotMatch(appJs, /sessionStorage\.(setItem|getItem|removeItem).*SELECTED_LAYERS/);
+  assert.match(appJs, /hoverpreview:om-forecast/);
+  assert.match(rootIndexHtml, /app\.js\?v=20261114-1/);
+  assert.match(siteIndexHtml, /app\.js\?v=20261114-1/);
 });
 
 test("hoverpreview defaults use larger tiles to reduce request count", () => {
@@ -201,7 +208,7 @@ test("hoverpreview defaults use larger tiles to reduce request count", () => {
   const hoverPreviewsPy = fs.readFileSync(path.join(__dirname, "../src/hoverpreview_tools/hover_previews.py"), "utf8");
 
   assert.match(configYml, /HOVERPREVIEW_TILE_SIZE:\s*512/);
-  assert.match(configYml, /HOVERPREVIEW_WEATHER_BATCH_POINTS:\s*128/);
+  assert.match(configYml, /HOVERPREVIEW_WEATHER_BATCH_POINTS:\s*12/);
   assert.match(hoverPreviewsPy, /DEFAULT_TILE_SIZE = 512/);
 });
 

@@ -43,14 +43,18 @@ const DEFAULT_RENDERER_PREFERENCE = "auto";
 const FIT_VIEW_PADDING_PX = 72;
 const LIVE_WEATHER_REFRESH_MS = 15 * 60 * 1000;
 const LIVE_WEATHER_PREFETCH_DELAY_MS = 750;
+// Dense grid is fine for OM map-tile sampling; forecast API uses the coarser column count.
 const LIVE_WEATHER_GRID_COLUMNS = 256;
+const LIVE_WEATHER_FORECAST_GRID_COLUMNS = 48;
 // Keep live weather work below a frame's budget so the map remains responsive while loading.
 const LIVE_WEATHER_SAMPLE_BATCH_POINTS = 512;
 const LIVE_WEATHER_RASTER_BATCH_POINTS = 4096;
-const LIVE_WEATHER_BATCH_POINTS = 128;
-const LIVE_WEATHER_BATCH_DELAY_MS = 350;
-const LIVE_WEATHER_MAX_RETRIES = 4;
-const LIVE_WEATHER_RETRY_BASE_DELAY_MS = 2000;
+// Free Open-Meteo 429s hard on 128-location URLs; keep batches small + paced.
+const LIVE_WEATHER_BATCH_POINTS = 12;
+const LIVE_WEATHER_BATCH_DELAY_MS = 900;
+const LIVE_WEATHER_MAX_RETRIES = 5;
+const LIVE_WEATHER_RETRY_BASE_DELAY_MS = 4000;
+const LIVE_WEATHER_RATE_LIMIT_COOLDOWN_MS = 20_000;
 const LIVE_WEATHER_PRECIPITATION_MAX_MM = 30;
 const LIVE_WEATHER_OPEN_METEO_LAYER_SCRIPT_URL = "https://unpkg.com/@openmeteo/weather-map-layer@0.0.19/dist/index.js";
 const LIVE_WEATHER_OPEN_METEO_MAP_TILES_BASE_URL = "https://map-tiles.open-meteo.com/data_spatial";
@@ -1821,6 +1825,18 @@ function statusPointFromImage(imageX, imageY) {
 }
 
 function updateStatus(event) {
+  if (!event || !Number.isFinite(event.clientX) || !Number.isFinite(event.clientY)) {
+    if (state.lastStatusPoint
+      && Number.isFinite(state.lastStatusPoint.clientX)
+      && Number.isFinite(state.lastStatusPoint.clientY)) {
+      event = {
+        clientX: state.lastStatusPoint.clientX,
+        clientY: state.lastStatusPoint.clientY,
+      };
+    } else {
+      return;
+    }
+  }
   state.lastStatusPoint = { clientX: event.clientX, clientY: event.clientY };
   const sample = sampleFromEvent(event);
   const heightText = minecraftHeightText(sample);
@@ -2193,7 +2209,13 @@ async function fetchLiveWeather(manifest, { prefetch = false } = {}) {
         return decodeLiveWeatherMetrics(config, payloads);
       });
     }
-    state.liveWeather.downfall_coverage = await createLiveWeatherMetric("downfall_coverage", metrics.downfall_coverage, grid.columns, grid.rows);
+    const metricGrid = config.grid || grid;
+    state.liveWeather.downfall_coverage = await createLiveWeatherMetric(
+      "downfall_coverage",
+      metrics.downfall_coverage,
+      metricGrid.columns,
+      metricGrid.rows
+    );
     scheduleRender();
     refreshStatus();
   } finally {
@@ -2313,14 +2335,21 @@ function liveWeatherPlaceholder(latitude, longitude) {
 async function fetchOpenMeteoWeather(config) {
   const baseUrl = String(config.api_base_url || "https://api.open-meteo.com/v1/forecast");
   const model = String(config.weather_model || "auto").trim();
-  const batchPoints = Math.max(1, Number(config.batch_points) || LIVE_WEATHER_BATCH_POINTS);
-  const latitudes = Array.from(config.grid.latitudes || [], (value) => Number(value));
-  const longitudes = Array.from(config.grid.longitudes || [], (value) => Number(value));
+  let batchPoints = Math.min(
+    LIVE_WEATHER_BATCH_POINTS,
+    Math.max(1, Number(config.batch_points) || LIVE_WEATHER_BATCH_POINTS)
+  );
+  const { latitudes, longitudes } = forecastApiWeatherGrid(config);
+  applyForecastGridToConfig(config, latitudes, longitudes);
+  const cached = readLiveWeatherForecastCache(config, latitudes.length);
+  if (cached) return cached;
   const results = [];
   const failures = [];
-  for (let start = 0; start < latitudes.length; start += batchPoints) {
-    const batchLatitudes = latitudes.slice(start, start + batchPoints);
-    const batchLongitudes = longitudes.slice(start, start + batchPoints);
+  let rateLimited = false;
+  for (let start = 0; start < latitudes.length; ) {
+    const end = Math.min(latitudes.length, start + batchPoints);
+    const batchLatitudes = latitudes.slice(start, end);
+    const batchLongitudes = longitudes.slice(start, end);
     const url = new URL(baseUrl, location.href);
     url.searchParams.set("latitude", batchLatitudes.map((value) => value.toFixed(6)).join(","));
     url.searchParams.set("longitude", batchLongitudes.map((value) => value.toFixed(6)).join(","));
@@ -2334,19 +2363,119 @@ async function fetchOpenMeteoWeather(config) {
     try {
       const payload = await fetchOpenMeteoBatch(url);
       results.push(...payload);
+      start = end;
     } catch (error) {
       failures.push(error);
+      const is429 = /\b429\b/.test(String(error?.message || error));
+      if (is429) {
+        rateLimited = true;
+        batchPoints = Math.max(1, Math.floor(batchPoints / 2));
+        console.warn(`[hoverpreview] Open-Meteo 429 — cooldown ${LIVE_WEATHER_RATE_LIMIT_COOLDOWN_MS}ms, batch_points=${batchPoints}`, error);
+        await delay(LIVE_WEATHER_RATE_LIMIT_COOLDOWN_MS);
+        // Retry same window once at the reduced batch size before placeholder-filling.
+        try {
+          const retryUrl = new URL(baseUrl, location.href);
+          const retryLats = latitudes.slice(start, Math.min(latitudes.length, start + batchPoints));
+          const retryLons = longitudes.slice(start, Math.min(longitudes.length, start + batchPoints));
+          retryUrl.searchParams.set("latitude", retryLats.map((value) => value.toFixed(6)).join(","));
+          retryUrl.searchParams.set("longitude", retryLons.map((value) => value.toFixed(6)).join(","));
+          retryUrl.searchParams.set("current", "precipitation");
+          retryUrl.searchParams.set("forecast_hours", "1");
+          retryUrl.searchParams.set("timezone", "GMT");
+          retryUrl.searchParams.set("timeformat", "unixtime");
+          if (model && model.toLowerCase() !== "auto") {
+            retryUrl.searchParams.set("models", model);
+          }
+          const payload = await fetchOpenMeteoBatch(retryUrl);
+          results.push(...payload);
+          start += retryLats.length;
+          continue;
+        } catch (retryError) {
+          failures.push(retryError);
+        }
+      }
       console.warn("[hoverpreview] Open-Meteo weather batch failed; rendering remaining successful batches", error);
       for (let index = 0; index < batchLatitudes.length; index += 1) {
         results.push(liveWeatherPlaceholder(batchLatitudes[index], batchLongitudes[index]));
       }
+      start = end;
     }
-    if (start + batchPoints < latitudes.length) await delay(LIVE_WEATHER_BATCH_DELAY_MS);
+    if (start < latitudes.length) {
+      const pace = rateLimited ? LIVE_WEATHER_RATE_LIMIT_COOLDOWN_MS / 4 : LIVE_WEATHER_BATCH_DELAY_MS;
+      await delay(pace);
+    }
   }
   if (failures.length) {
     console.warn(`[hoverpreview] Open-Meteo weather overlay used ${failures.length} placeholder batch(es) after rate-limit or network failures`);
+  } else {
+    writeLiveWeatherForecastCache(config, results);
   }
   return results;
+}
+
+function applyForecastGridToConfig(config, latitudes, longitudes) {
+  config.grid = {
+    ...config.grid,
+    latitudes,
+    longitudes,
+    columns: Number(config._forecastColumns || config.grid.columns),
+    rows: Number(config._forecastRows || config.grid.rows),
+  };
+}
+
+function forecastApiWeatherGrid(config) {
+  const sourceLats = Array.from(config.grid.latitudes || [], (value) => Number(value));
+  const sourceLons = Array.from(config.grid.longitudes || [], (value) => Number(value));
+  const sourceColumns = Math.max(1, Number(config.grid.columns) || 1);
+  const sourceRows = Math.max(1, Number(config.grid.rows) || Math.floor(sourceLats.length / sourceColumns) || 1);
+  const targetColumns = Math.min(sourceColumns, LIVE_WEATHER_FORECAST_GRID_COLUMNS);
+  if (targetColumns >= sourceColumns || sourceLats.length !== sourceColumns * sourceRows) {
+    config._forecastColumns = sourceColumns;
+    config._forecastRows = sourceRows;
+    return { latitudes: sourceLats, longitudes: sourceLons };
+  }
+  const targetRows = Math.max(2, Math.round(targetColumns * sourceRows / sourceColumns));
+  const latitudes = [];
+  const longitudes = [];
+  for (let row = 0; row < targetRows; row += 1) {
+    const sourceRow = Math.min(sourceRows - 1, Math.round(row * (sourceRows - 1) / Math.max(1, targetRows - 1)));
+    for (let col = 0; col < targetColumns; col += 1) {
+      const sourceCol = Math.min(sourceColumns - 1, Math.round(col * (sourceColumns - 1) / Math.max(1, targetColumns - 1)));
+      const index = sourceRow * sourceColumns + sourceCol;
+      latitudes.push(sourceLats[index]);
+      longitudes.push(sourceLons[index]);
+    }
+  }
+  config._forecastColumns = targetColumns;
+  config._forecastRows = targetRows;
+  return { latitudes, longitudes };
+}
+
+function liveWeatherForecastCacheKey(config, pointCount) {
+  const hourBucket = Math.floor(Date.now() / LIVE_WEATHER_REFRESH_MS);
+  const columns = config._forecastColumns || config.grid?.columns || 0;
+  const rows = config._forecastRows || config.grid?.rows || 0;
+  return `hoverpreview:om-forecast:v1:${hourBucket}:${columns}x${rows}:${pointCount}`;
+}
+
+function readLiveWeatherForecastCache(config, pointCount) {
+  try {
+    const raw = sessionStorage.getItem(liveWeatherForecastCacheKey(config, pointCount));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed) || parsed.length !== pointCount) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writeLiveWeatherForecastCache(config, results) {
+  try {
+    sessionStorage.setItem(liveWeatherForecastCacheKey(config, results.length), JSON.stringify(results));
+  } catch {
+    // Ignore quota / private-mode failures.
+  }
 }
 
 async function fetchOpenMeteoBatch(url) {
@@ -2834,7 +2963,7 @@ async function loadSample(layer, imageX = null, imageY = null) {
       originY: crop.top,
       encoding: sampleEncodingFor(layer),
     });
-    if (state.lastStatusPoint) requestAnimationFrame(() => updateStatus(state.lastStatusPoint));
+    if (state.lastStatusPoint) requestAnimationFrame(() => refreshStatus());
   })().finally(() => state.sampleLoads.delete(key));
   state.sampleLoads.set(key, load);
   return load;
@@ -2890,7 +3019,7 @@ async function loadSampleTile(layer, imageX, imageY) {
       lastUsed: performance.now(),
     });
     pruneSampleTileCache();
-    if (state.lastStatusPoint) requestAnimationFrame(() => updateStatus(state.lastStatusPoint));
+    if (state.lastStatusPoint) requestAnimationFrame(() => refreshStatus());
   })().finally(() => state.sampleTileLoads.delete(key));
 
   state.sampleTileLoads.set(key, load);
