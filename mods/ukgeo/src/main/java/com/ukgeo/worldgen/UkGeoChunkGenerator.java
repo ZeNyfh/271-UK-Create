@@ -1489,8 +1489,12 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
             default -> 8;
         };
         widthDepth = Math.min(widthDepth, orderDepth);
-        if (slope > 1.2 && edgeDistance > 4.0) {
-            widthDepth = Math.min(widthDepth + 1, orderDepth);
+        // Steep / mountain rivers: shallower, never deeper. Flat valleys keep width/order depth.
+        if (slope >= 2.0) {
+            widthDepth = Math.min(widthDepth, 2);
+        } else if (slope >= 1.0) {
+            int floor = edgeDistance <= 1.0 ? 1 : 2;
+            widthDepth = Math.max(floor, widthDepth - 2);
         }
         return widthDepth;
     }

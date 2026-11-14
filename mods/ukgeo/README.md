@@ -69,6 +69,8 @@ If the Minecraft UI does not expose custom presets in your pack, create the worl
 
 Channel half-widths follow OpenRiverNetwork Strahler order 1–7 ([openrivers.net](https://openrivers.net/)). At axis scale 1.0 the baked survival table is 1→1, 2→1, 3→2, 4→3, 5→5, 6→7, 7→10 (roughly ×2 at axis scale 2.0). The `uk_geological_create` preset sets `river_widen_radius` to `0` so runtime uses data-driven widths; `MIN_RIVER_CHANNEL_HALF_WIDTH` defaults to `1` so order-1 brooks can stay a single-block half-width.
 
+Steep / mountain reaches are shallower (`slope ≥ 1` reduces max depth; `slope ≥ 2` caps at 2). Cascading downhill components use elevation-banded water planes (span > 2) plus cascade-lip bank cut-in so steps do not spill sideways.
+
 ## Commands
 
 ```text

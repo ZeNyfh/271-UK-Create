@@ -89,6 +89,7 @@ final class ChunkTerrainPlanner {
         logTiming("ChunkTerrainPlanner.waterPlanning", chunk, waterStartNanos);
         flattenRiverWaterSurfaces(columns, minBuildY, maxBuildY);
         fitWaterToBanks(columns, minBuildY, maxBuildY);
+        cutCascadeLips(columns, minBuildY, maxBuildY);
         // Beds may have moved with component-wide water lowers; keep neighbour steps tight.
         smoothRiverBedsInComponents(columns, minBuildY, maxBuildY);
         long oreStartNanos = System.nanoTime();
@@ -308,26 +309,26 @@ final class ChunkTerrainPlanner {
     }
 
     /**
-     * One shared waterSurfaceY per 4-connected hasWater component (bank-to-bank flat plane).
-     * Plane Y = low-biased bank median; falls back to median of current water surfaces.
+     * Shared waterSurfaceY per elevation band within each 4-connected hasWater component.
+     * Flat valleys (bank/water span ≤ 2): one plane per component.
+     * Cascading slopes (span > 2): one plane per water-surface elevation band so downhill
+     * reaches step block-by-block instead of flooding from a single high plane.
      */
     private static void flattenRiverWaterSurfaces(ColumnPlan[] columns, int minBuildY, int maxBuildY) {
         int[] componentOf = labelWaterComponents(columns);
-        int maxComponent = -1;
-        for (int id : componentOf) {
-            maxComponent = Math.max(maxComponent, id);
-        }
-        if (maxComponent < 0) {
+        int[] bandOf = labelElevationBands(columns, componentOf);
+        int maxBand = maxLabel(bandOf);
+        if (maxBand < 0) {
             return;
         }
-        int componentCount = maxComponent + 1;
+        int bandCount = maxBand + 1;
         int[] bankScratch = new int[CHUNK_SIZE * CHUNK_SIZE * 4];
         int[] waterScratch = new int[CHUNK_SIZE * CHUNK_SIZE];
-        for (int component = 0; component < componentCount; component++) {
+        for (int band = 0; band < bandCount; band++) {
             int bankCount = 0;
             int waterCount = 0;
             for (int index = 0; index < columns.length; index++) {
-                if (componentOf[index] != component) {
+                if (bandOf[index] != band) {
                     continue;
                 }
                 ColumnPlan column = columns[index];
@@ -358,35 +359,35 @@ final class ChunkTerrainPlanner {
                 continue;
             }
             planeY = Math.clamp(planeY, minBuildY + 1, maxBuildY);
-            applySharedWaterPlane(columns, componentOf, component, planeY, minBuildY, maxBuildY);
+            applySharedWaterPlane(columns, bandOf, band, planeY, minBuildY, maxBuildY);
         }
+        // Keep bed smoothing on connectivity components so cascade beds can step by 1.
         smoothRiverBedsInComponents(columns, componentOf, minBuildY, maxBuildY);
     }
 
     /**
      * Fit river water to banks without re-introducing per-column steps: if any column in a
-     * component must lower for overflow, the whole component lowers to that shared Y.
+     * elevation band must lower for overflow, that band lowers to the shared Y (not the whole
+     * downhill component — preserves cascade steps).
      */
     private static void fitWaterToBanks(ColumnPlan[] columns, int minBuildY, int maxBuildY) {
         final int bankRadius = 3;
         int[] componentOf = labelWaterComponents(columns);
-        int maxComponent = -1;
-        for (int id : componentOf) {
-            maxComponent = Math.max(maxComponent, id);
-        }
+        int[] bandOf = labelElevationBands(columns, componentOf);
+        int maxBand = maxLabel(bandOf);
         int[] bankRaises = new int[columns.length];
         java.util.Arrays.fill(bankRaises, Integer.MIN_VALUE);
-        if (maxComponent < 0) {
+        if (maxBand < 0) {
             return;
         }
-        int componentCount = maxComponent + 1;
-        int[] componentPlane = new int[componentCount];
-        java.util.Arrays.fill(componentPlane, Integer.MIN_VALUE);
+        int bandCount = maxBand + 1;
+        int[] bandPlane = new int[bandCount];
+        java.util.Arrays.fill(bandPlane, Integer.MIN_VALUE);
 
         for (int index = 0; index < columns.length; index++) {
             ColumnPlan column = columns[index];
-            int component = componentOf[index];
-            if (component < 0 || !column.river().hasWater()) {
+            int band = bandOf[index];
+            if (band < 0 || !column.river().hasWater()) {
                 continue;
             }
             int localZ = index / CHUNK_SIZE;
@@ -413,10 +414,10 @@ final class ChunkTerrainPlanner {
             }
             int fitted = RiverBankFit.resolveWaterSurface(waterSurface, minBank);
             fitted = Math.clamp(fitted, minBuildY + 1, maxBuildY);
-            // Never raise water — only keep or lower; component takes the lowest fitted Y.
+            // Never raise water — only keep or lower; band takes the lowest fitted Y.
             int lowered = Math.min(waterSurface, fitted);
-            int prev = componentPlane[component];
-            componentPlane[component] = prev == Integer.MIN_VALUE ? lowered : Math.min(prev, lowered);
+            int prev = bandPlane[band];
+            bandPlane[band] = prev == Integer.MIN_VALUE ? lowered : Math.min(prev, lowered);
 
             if (minBank != Integer.MAX_VALUE && waterSurface - minBank > 0 && waterSurface - minBank <= RiverBankFit.MAX_BANK_RAISE) {
                 for (int dz = -bankRadius; dz <= bankRadius; dz++) {
@@ -445,12 +446,12 @@ final class ChunkTerrainPlanner {
             }
         }
 
-        for (int component = 0; component < componentCount; component++) {
-            int planeY = componentPlane[component];
+        for (int band = 0; band < bandCount; band++) {
+            int planeY = bandPlane[band];
             if (planeY == Integer.MIN_VALUE) {
                 continue;
             }
-            applySharedWaterPlane(columns, componentOf, component, planeY, minBuildY, maxBuildY);
+            applySharedWaterPlane(columns, bandOf, band, planeY, minBuildY, maxBuildY);
         }
 
         for (int index = 0; index < columns.length; index++) {
@@ -484,6 +485,215 @@ final class ChunkTerrainPlanner {
                 column.hasHeightData()
             );
         }
+    }
+
+    /**
+     * Just upstream of a cascade/step, cut into adjacent dry banks so water does not spill
+     * sideways onto land. Prefer a notch (terrainTop → waterSurface) or shallow channel carve.
+     */
+    private static void cutCascadeLips(ColumnPlan[] columns, int minBuildY, int maxBuildY) {
+        boolean[] isLip = new boolean[columns.length];
+        for (int index = 0; index < columns.length; index++) {
+            ColumnPlan column = columns[index];
+            if (!column.river().hasWater()) {
+                continue;
+            }
+            int waterY = column.river().waterSurfaceY();
+            int localZ = index / CHUNK_SIZE;
+            int localX = index - localZ * CHUNK_SIZE;
+            for (int[] offset : CARDINAL_OFFSETS) {
+                int nx = localX + offset[0];
+                int nz = localZ + offset[1];
+                if (nx < 0 || nz < 0 || nx >= CHUNK_SIZE || nz >= CHUNK_SIZE) {
+                    continue;
+                }
+                ColumnPlan neighbor = columns[nz * CHUNK_SIZE + nx];
+                if (neighbor.river().hasWater() && neighbor.river().waterSurfaceY() <= waterY - 1) {
+                    isLip[index] = true;
+                    break;
+                }
+            }
+        }
+
+        final int lipCarveRadius = 2;
+        final int shallowDepth = 2;
+        for (int index = 0; index < columns.length; index++) {
+            if (!isLip[index]) {
+                continue;
+            }
+            int waterY = columns[index].river().waterSurfaceY();
+            int localZ = index / CHUNK_SIZE;
+            int localX = index - localZ * CHUNK_SIZE;
+            for (int dz = -lipCarveRadius; dz <= lipCarveRadius; dz++) {
+                for (int dx = -lipCarveRadius; dx <= lipCarveRadius; dx++) {
+                    if (dx == 0 && dz == 0) {
+                        continue;
+                    }
+                    if (Math.abs(dx) + Math.abs(dz) > lipCarveRadius) {
+                        continue;
+                    }
+                    int nx = localX + dx;
+                    int nz = localZ + dz;
+                    if (nx < 0 || nz < 0 || nx >= CHUNK_SIZE || nz >= CHUNK_SIZE) {
+                        continue;
+                    }
+                    int nIndex = nz * CHUNK_SIZE + nx;
+                    ColumnPlan neighbor = columns[nIndex];
+                    if (neighbor.river().hasWater()) {
+                        continue;
+                    }
+                    int bankTop = Math.min(neighbor.terrainTop(), neighbor.originalSurfaceY());
+                    boolean riverStrip = neighbor.river().influenced();
+                    boolean spillShelf = bankTop <= waterY + 1;
+                    if (!riverStrip && !spillShelf) {
+                        continue;
+                    }
+                    // Prefer notch into the bank (terrainTop → water plane). Only true
+                    // overflow shelves (bank at/below water) become shallow channel water.
+                    if (bankTop <= waterY) {
+                        int bed = RiverBankFit.bedForWater(waterY, shallowDepth, minBuildY);
+                        bed = Math.min(bed, waterY - 1);
+                        UkGeoChunkGenerator.RiverShape carved = new UkGeoChunkGenerator.RiverShape(
+                            true,
+                            true,
+                            bed,
+                            waterY,
+                            neighbor.river().floorMaterial()
+                        );
+                        int columnTop = Math.clamp(Math.max(neighbor.columnTop(), waterY), minBuildY, maxBuildY);
+                        columns[nIndex] = new ColumnPlan(
+                            neighbor.originalSurfaceY(),
+                            bed,
+                            columnTop,
+                            neighbor.steep(),
+                            neighbor.coastalBeach(),
+                            carved,
+                            neighbor.vegetationClass(),
+                            neighbor.surfaceRock(),
+                            neighbor.exposedSurfaceRock(),
+                            neighbor.hasHeightData()
+                        );
+                    } else {
+                        int notchedTop = Math.clamp(waterY, minBuildY + 1, maxBuildY);
+                        if (notchedTop >= neighbor.terrainTop()) {
+                            continue;
+                        }
+                        UkGeoChunkGenerator.RiverShape river = neighbor.river();
+                        UkGeoChunkGenerator.RiverShape notched = new UkGeoChunkGenerator.RiverShape(
+                            false,
+                            true,
+                            notchedTop,
+                            waterY,
+                            river.floorMaterial()
+                        );
+                        int columnTop = Math.clamp(Math.max(neighbor.columnTop(), notchedTop), minBuildY, maxBuildY);
+                        columns[nIndex] = new ColumnPlan(
+                            neighbor.originalSurfaceY(),
+                            notchedTop,
+                            columnTop,
+                            neighbor.steep(),
+                            neighbor.coastalBeach(),
+                            notched,
+                            neighbor.vegetationClass(),
+                            neighbor.surfaceRock(),
+                            neighbor.exposedSurfaceRock(),
+                            neighbor.hasHeightData()
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Within each water component: if bank tops or water surfaces span more than 2 blocks,
+     * split into elevation bands keyed by waterSurfaceY (one plane per step). Otherwise one band.
+     */
+    private static int[] labelElevationBands(ColumnPlan[] columns, int[] componentOf) {
+        int[] bandOf = new int[columns.length];
+        java.util.Arrays.fill(bandOf, -1);
+        int maxComponent = maxLabel(componentOf);
+        if (maxComponent < 0) {
+            return bandOf;
+        }
+        int componentCount = maxComponent + 1;
+        int[] minElev = new int[componentCount];
+        int[] maxElev = new int[componentCount];
+        java.util.Arrays.fill(minElev, Integer.MAX_VALUE);
+        java.util.Arrays.fill(maxElev, Integer.MIN_VALUE);
+
+        for (int index = 0; index < columns.length; index++) {
+            int component = componentOf[index];
+            if (component < 0) {
+                continue;
+            }
+            ColumnPlan column = columns[index];
+            if (!column.river().hasWater()) {
+                continue;
+            }
+            int waterY = column.river().waterSurfaceY();
+            minElev[component] = Math.min(minElev[component], waterY);
+            maxElev[component] = Math.max(maxElev[component], waterY);
+            int localZ = index / CHUNK_SIZE;
+            int localX = index - localZ * CHUNK_SIZE;
+            for (int[] offset : CARDINAL_OFFSETS) {
+                int nx = localX + offset[0];
+                int nz = localZ + offset[1];
+                if (nx < 0 || nz < 0 || nx >= CHUNK_SIZE || nz >= CHUNK_SIZE) {
+                    continue;
+                }
+                ColumnPlan neighbor = columns[nz * CHUNK_SIZE + nx];
+                if (neighbor.river().hasWater()) {
+                    continue;
+                }
+                int bankTop = Math.min(neighbor.terrainTop(), neighbor.originalSurfaceY());
+                minElev[component] = Math.min(minElev[component], bankTop);
+                maxElev[component] = Math.max(maxElev[component], bankTop);
+            }
+        }
+
+        // First pass: flat components get one band id each; cascading get per-waterY bands.
+        java.util.HashMap<Long, Integer> cascadingKeys = new java.util.HashMap<>();
+        int nextBand = 0;
+        int[] flatBand = new int[componentCount];
+        java.util.Arrays.fill(flatBand, -1);
+        for (int component = 0; component < componentCount; component++) {
+            if (minElev[component] == Integer.MAX_VALUE) {
+                continue;
+            }
+            int span = maxElev[component] - minElev[component];
+            if (span <= 2) {
+                flatBand[component] = nextBand++;
+            }
+        }
+
+        for (int index = 0; index < columns.length; index++) {
+            int component = componentOf[index];
+            if (component < 0 || !columns[index].river().hasWater()) {
+                continue;
+            }
+            if (flatBand[component] >= 0) {
+                bandOf[index] = flatBand[component];
+                continue;
+            }
+            int waterY = columns[index].river().waterSurfaceY();
+            long key = (((long) component) << 32) ^ (waterY & 0xffffffffL);
+            Integer existing = cascadingKeys.get(key);
+            if (existing == null) {
+                existing = nextBand++;
+                cascadingKeys.put(key, existing);
+            }
+            bandOf[index] = existing;
+        }
+        return bandOf;
+    }
+
+    private static int maxLabel(int[] labels) {
+        int max = -1;
+        for (int id : labels) {
+            max = Math.max(max, id);
+        }
+        return max;
     }
 
     private static final int[][] CARDINAL_OFFSETS = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
