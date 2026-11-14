@@ -135,14 +135,14 @@ def test_extract_lines_treats_nan_topology_fields_as_missing():
     assert lines[0].source_flow_direction is None
 
 
-def test_dataset_half_width_only_thins_irish_datasets():
-    assert _dataset_half_width(10, "epa_river_network_routes_ie") == 7
-    assert _dataset_half_width(10, "ni_river_segment") == 7
+def test_dataset_half_width_treats_irish_same_as_gb():
+    assert _dataset_half_width(10, "epa_river_network_routes_ie") == 10
+    assert _dataset_half_width(10, "ni_river_segment") == 10
     assert _dataset_half_width(10, "os_open_rivers_gb") == 10
     assert _dataset_half_width(1, "ni_river_segment") == 1
 
 
-def test_thin_top_order_half_widths_scales_top_four_order_levels_for_irish_datasets_only():
+def test_thin_top_order_half_widths_noop_when_thinner_datasets_empty():
     edges = [
         _Edge(LineString([(0, 0), (1, 1)]), 8, 20, "epa_river_network_routes_ie"),
         _Edge(LineString([(0, 0), (1, 1)]), 7, 18, "epa_river_network_routes_ie"),
@@ -154,8 +154,8 @@ def test_thin_top_order_half_widths_scales_top_four_order_levels_for_irish_datas
 
     _thin_top_order_half_widths(edges)
 
-    assert [edge.half_width for edge in edges[:5]] == [10, 12, 13, 12, 12]
-    assert edges[5].half_width == 20
+    # IE/NI no longer in THINNER_RIVER_DATASETS — widths unchanged for all sources.
+    assert [edge.half_width for edge in edges] == [20, 18, 16, 14, 12, 20]
 
 
 def test_apply_gb_width_adjustments_keeps_low_orders_and_mildly_boosts_order_six_plus():
@@ -199,14 +199,16 @@ def test_irish_preview_radius_suppresses_order_one_minor_streams():
     assert _irish_preview_radius_for_order(7) == 5
 
 
-def test_preview_radius_for_edge_uses_gb_order_but_keeps_ni_half_width_mode():
+def test_preview_radius_for_edge_same_rules_for_gb_ie_ni():
     gb = _Edge(LineString([(0, 0), (1, 1)]), 5, 2, "os_open_rivers_gb", False)
     ni = _Edge(LineString([(0, 0), (1, 1)]), 5, 9, "ni_river_segment", True)
     roi = _Edge(LineString([(0, 0), (1, 1)]), 1, 1, "epa_river_network_routes_ie", True)
+    roi_no_order = _Edge(LineString([(0, 0), (1, 1)]), 1, 1, "epa_river_network_routes_ie", False)
 
     assert _preview_radius_for_edge(gb) == 5
     assert _preview_radius_for_edge(ni) == _preview_radius_for_half_width(9)
-    assert _preview_radius_for_edge(roi) == 0
+    assert _preview_radius_for_edge(roi) == _preview_radius_for_half_width(1)
+    assert _preview_radius_for_edge(roi_no_order) == _preview_radius_for_order(1)
 
 
 def _test_manifest(**axis_scale: float) -> dict:

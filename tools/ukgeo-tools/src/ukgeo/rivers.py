@@ -45,8 +45,9 @@ SOURCE_DATASET_FIELDS = ("source_dataset", "SOURCE_DATASET")
 SOURCE_START_NODE_FIELDS = ("start_node", "START_NODE", "source_start_node", "FROM_NODE", "from_node")
 SOURCE_END_NODE_FIELDS = ("end_node", "END_NODE", "source_end_node", "TO_NODE", "to_node")
 SOURCE_FLOW_DIRECTION_FIELDS = ("flow_direction", "FLOW_DIRECTION", "direction")
-THINNER_RIVER_DATASETS = {"epa_river_network_routes_ie", "ni_river_segment"}
-THINNER_RIVER_WIDTH_FACTOR = 0.7
+# IE/NI use the same Strahler→half-width pipeline as GB (no regional thinning).
+THINNER_RIVER_DATASETS: set[str] = set()
+THINNER_RIVER_WIDTH_FACTOR = 1.0
 GB_RIVER_DATASETS = {"os_open_rivers_gb"}
 # Kept at 0 so ORN order 2–3 stay thin brooks/streams (was +2 fattening).
 GB_SMALL_STREAM_HALF_WIDTH_BONUS = 0
@@ -903,7 +904,8 @@ def _normalize_computed_order_to_source_scale(order: int, computed_max_order: in
 
 
 def _dataset_half_width(half_width: int, source_dataset: str | None) -> int:
-    if source_dataset not in THINNER_RIVER_DATASETS:
+    # Kept for API/tests; thinning set is empty so IE/NI match GB mainland widths.
+    if not THINNER_RIVER_DATASETS or source_dataset not in THINNER_RIVER_DATASETS:
         return half_width
     return max(1, int(math.floor(half_width * THINNER_RIVER_WIDTH_FACTOR)))
 
@@ -943,10 +945,8 @@ def _irish_preview_radius_for_order(order: int) -> int:
 
 
 def _preview_radius_for_edge(edge: _Edge) -> int:
-    if edge.source_dataset == "epa_river_network_routes_ie":
-        return _irish_preview_radius_for_order(edge.order)
-    if edge.source_dataset == "ni_river_segment":
-        return _preview_radius_for_half_width(edge.half_width)
+    # Same preview rules for GB / IE / NI — order ladder when source order missing,
+    # otherwise half-width scaled preview.
     if not edge.source_order_provided:
         return _preview_radius_for_order(edge.order)
     return _preview_radius_for_half_width(edge.half_width)
