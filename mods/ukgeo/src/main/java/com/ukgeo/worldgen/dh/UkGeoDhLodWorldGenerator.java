@@ -133,7 +133,7 @@ public final class UkGeoDhLodWorldGenerator implements IDhApiWorldGenerator {
             }
         } else if (sample.riverWater()) {
             int bed = Math.clamp(sample.terrainFloorY(), minY + 1, maxY - 1);
-            int waterSurface = Math.clamp(sample.waterSurfaceY(), bed, maxY - 1);
+            int waterSurface = Math.clamp(sample.waterSurfaceY(), bed + 1, maxY - 1);
             IDhApiBlockStateWrapper floor = wrap(sample.floorMaterial());
             int geologyBottom = Math.max(minY, bed - SURFACE_ROCK_DEPTH + 1);
             appendDeepslateThenStone(segments, minY, geologyBottom);
@@ -144,19 +144,21 @@ public final class UkGeoDhLodWorldGenerator implements IDhApiWorldGenerator {
             if (bed + 1 <= waterSurface) {
                 segments.add(new Segment(bed + 1, waterSurface + 1, waterWrapper));
             }
-            int airBottom = waterSurface + 1;
+            int airBottom = Math.max(bed + 1, waterSurface + 1);
             if (airBottom < maxY) {
                 segments.add(new Segment(airBottom, maxY, airWrapper));
             }
         } else if (sample.steep()) {
             // Match real gen: no dirt/grass — geology up to surface, exposed rock on top.
-            int geologyBottom = Math.max(minY, surface - SURFACE_ROCK_DEPTH + 1);
+            // Clamp so steep DEM spikes never produce empty segments (LOD "holes").
+            int solidTop = Math.max(minY + 1, surface);
+            int geologyBottom = Math.max(minY, solidTop - SURFACE_ROCK_DEPTH + 1);
             appendDeepslateThenStone(segments, minY, geologyBottom);
-            if (geologyBottom < surface) {
-                segments.add(new Segment(geologyBottom, surface, surfaceRock));
+            if (geologyBottom < solidTop) {
+                segments.add(new Segment(geologyBottom, solidTop, surfaceRock));
             }
-            segments.add(new Segment(surface, surface + 1, landTopBlock(sample, surfaceRock)));
-            int aboveSurface = surface + 1;
+            segments.add(new Segment(solidTop, solidTop + 1, landTopBlock(sample, surfaceRock)));
+            int aboveSurface = solidTop + 1;
             if (aboveSurface < maxY) {
                 segments.add(new Segment(aboveSurface, maxY, airWrapper));
             }
