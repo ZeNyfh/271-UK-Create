@@ -540,7 +540,7 @@ final class ChunkTerrainPlanner {
                 continue;
             }
             int water = column.river().waterSurfaceY();
-            int fitted = Math.min(water, minBank - 1);
+            int fitted = Math.min(water, minBank);
             if (fitted >= water) {
                 continue;
             }

@@ -6,23 +6,23 @@ import org.junit.jupiter.api.Test;
 
 class RiverBankFitTest {
     @Test
-    void flushWaterDropsOneBelowBank() {
-        assertEquals(99, RiverBankFit.resolveWaterSurface(100, 100));
+    void flushWaterStaysAtBank() {
+        assertEquals(100, RiverBankFit.resolveWaterSurface(100, 100));
     }
 
     @Test
-    void smallOverflowRaisesBankPathThenWaterAtOrBelowRaisedMinusOne() {
-        // d=1: raise bank toward 101 → raisedMin=101 → water stays 100
+    void smallOverflowRaisesBankPathThenWaterAtOrBelowRaised() {
+        // d=1: raisedMinBank=min(99+2,100)=100 → water=100
         assertEquals(100, RiverBankFit.resolveWaterSurface(100, 99));
-        // d=2: raise by 2 → raisedMin=min(100,101)=100 → water=99
-        assertEquals(99, RiverBankFit.resolveWaterSurface(100, 98));
+        // d=2: raisedMinBank=min(98+2,100)=100 → water=100
+        assertEquals(100, RiverBankFit.resolveWaterSurface(100, 98));
     }
 
     @Test
     void largeOverflowLowersWaterWithoutRaisingBanksMoreThanTwo() {
-        // d=3 → water = minBank - 1
-        assertEquals(96, RiverBankFit.resolveWaterSurface(100, 97));
-        assertEquals(90, RiverBankFit.resolveWaterSurface(100, 91));
+        // d=3 → water = minBank
+        assertEquals(97, RiverBankFit.resolveWaterSurface(100, 97));
+        assertEquals(91, RiverBankFit.resolveWaterSurface(100, 91));
     }
 
     @Test
@@ -36,10 +36,10 @@ class RiverBankFitTest {
     }
 
     @Test
-    void raiseBankCapsAtTwoAndTargetsWaterPlusOne() {
-        assertEquals(101, RiverBankFit.raiseBankToward(99, 100));
+    void raiseBankCapsAtTwoAndTargetsWaterFlush() {
+        assertEquals(100, RiverBankFit.raiseBankToward(99, 100));
         assertEquals(100, RiverBankFit.raiseBankToward(98, 100));
-        assertEquals(101, RiverBankFit.raiseBankToward(101, 100));
+        assertEquals(100, RiverBankFit.raiseBankToward(100, 100));
         assertEquals(102, RiverBankFit.raiseBankToward(102, 100));
     }
 

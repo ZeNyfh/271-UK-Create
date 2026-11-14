@@ -2,7 +2,7 @@ package com.ukgeo.worldgen;
 
 /**
  * Pure bank/water-surface fit math for rivers.
- * Keeps banks above water when possible, with a max bank raise of {@link #MAX_BANK_RAISE}.
+ * Keeps water flush with dry bank tops when possible, with a max bank raise of {@link #MAX_BANK_RAISE}.
  */
 final class RiverBankFit {
     static final int MAX_BANK_RAISE = 2;
@@ -13,9 +13,9 @@ final class RiverBankFit {
     /**
      * Resolve a water surface against the lowest adjacent dry bank top.
      * <ul>
-     *   <li>If water is at/below bank: keep water at most {@code minBank - 1}.</li>
-     *   <li>If water exceeds bank by ≤ {@link #MAX_BANK_RAISE}: raise banks (caller), then water ≤ raisedBank - 1.</li>
-     *   <li>If water exceeds bank by more: lower water to {@code minBank - 1} (do not raise banks &gt; 2).</li>
+     *   <li>If water is at/below bank: keep water at most {@code minBank} (flush).</li>
+     *   <li>If water exceeds bank by ≤ {@link #MAX_BANK_RAISE}: raise banks (caller), then water ≤ raisedMinBank.</li>
+     *   <li>If water exceeds bank by more: lower water to {@code minBank} (do not raise banks &gt; 2).</li>
      * </ul>
      *
      * @param waterSurface current planned water Y
@@ -28,21 +28,21 @@ final class RiverBankFit {
         }
         int d = waterSurface - minBank;
         if (d > MAX_BANK_RAISE) {
-            return minBank - 1;
+            return minBank;
         }
         if (d > 0) {
-            int raisedMinBank = Math.min(minBank + MAX_BANK_RAISE, waterSurface + 1);
-            return Math.min(waterSurface, raisedMinBank - 1);
+            int raisedMinBank = Math.min(minBank + MAX_BANK_RAISE, waterSurface);
+            return Math.min(waterSurface, raisedMinBank);
         }
-        // Flush or already below: banks should sit above water.
-        return Math.min(waterSurface, minBank - 1);
+        // Flush or already below: water at most minBank.
+        return Math.min(waterSurface, minBank);
     }
 
     /**
-     * Raise a dry bank top toward {@code waterSurface + 1} by at most {@link #MAX_BANK_RAISE}.
+     * Raise a dry bank top toward {@code waterSurface} (flush) by at most {@link #MAX_BANK_RAISE}.
      */
     static int raiseBankToward(int bankTop, int waterSurface) {
-        int desired = waterSurface + 1;
+        int desired = waterSurface;
         if (bankTop >= desired) {
             return bankTop;
         }

@@ -655,8 +655,8 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         OptionalInt bankTop = riverReachBankSurfaceY(data, heightWindow, x, z, waterRadius, cache);
         int plane;
         if (bankTop.isPresent()) {
-            // Banks sit one block above the water plane.
-            plane = bankTop.getAsInt() - 1;
+            // Water is flush with dry bank tops.
+            plane = bankTop.getAsInt();
         } else {
             // Never use under-river wet DEM (originalSurfaceY) — it tracks bathymetry dips.
             plane = riverBedY + 1;
