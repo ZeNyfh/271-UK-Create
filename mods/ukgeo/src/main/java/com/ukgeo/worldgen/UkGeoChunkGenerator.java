@@ -169,8 +169,6 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     private static final int MIN_RIVER_CHANNEL_HALF_WIDTH = Integer.getInteger("ukgeo.minRiverChannelHalfWidth", 1);
     private static final int MAX_RIVER_SURFACE_STEP = 1;
     private static final int RIVER_REACH_SMOOTHING_RADIUS = 8;
-    /** Coarse cell size for shared river water-surface planes (blocks = 1 << shift). */
-    private static final int RIVER_WATER_PLANE_SHIFT = 3;
     private static final int RIVER_BANK_STRIP_EXTRA = 3;
     private static final int RIVER_BANK_WIDE_EXTRA = 12;
     private static final double ALLOW_STEEP_RAPIDS_ONLY_ABOVE_SLOPE = 1.8;
@@ -645,9 +643,9 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     }
 
     private int riverWaterSurfaceY(RuntimeData data, HeightTileWindow heightWindow, int x, int z, int originalSurfaceY, int riverBedY, int waterRadius, double slope, WaterShapeCache cache) {
-        long planeKey = riverWaterPlaneKey(x, z);
+        long key = cacheKey(x, z);
         if (cache != null) {
-            Integer cached = cache.riverWaterPlanes.get(planeKey);
+            Integer cached = cache.riverWaterPlanes.get(key);
             if (cached != null) {
                 return Math.max(riverBedY + 1, cached);
             }
@@ -655,26 +653,17 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         OptionalInt bankTop = riverReachBankSurfaceY(data, heightWindow, x, z, waterRadius, cache);
         int plane;
         if (bankTop.isPresent()) {
-            // Water is flush with dry bank tops.
+            // Water is flush with dry bank tops — per column, never quantized to an X/Z cell.
             plane = bankTop.getAsInt();
         } else {
             // Never use under-river wet DEM (originalSurfaceY) — it tracks bathymetry dips.
             plane = riverBedY + 1;
         }
-        int minAllowedY = riverBedY + 1;
-        int result = Math.max(minAllowedY, plane);
+        int result = Math.max(riverBedY + 1, plane);
         if (cache != null) {
-            cache.riverWaterPlanes.putIfAbsent(planeKey, result);
-            Integer shared = cache.riverWaterPlanes.get(planeKey);
-            if (shared != null) {
-                result = Math.max(minAllowedY, shared);
-            }
+            cache.riverWaterPlanes.put(key, result);
         }
         return result;
-    }
-
-    private static long riverWaterPlaneKey(int x, int z) {
-        return (((long) (x >> RIVER_WATER_PLANE_SHIFT)) << 32) ^ ((z >> RIVER_WATER_PLANE_SHIFT) & 0xffffffffL);
     }
 
     /**
@@ -1655,7 +1644,7 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         private final Map<Long, RiverShape> shapes = new HashMap<>();
         private final Map<Long, Integer> lakeDepths = new HashMap<>();
         private final Map<Long, Integer> lakeWaterSurfaces = new HashMap<>();
-        /** Shared flat water-surface Y per coarse cell (x>>3, z>>3). Dry-bank derived only. */
+        /** Per-column river water-surface Y (exact cacheKey(x,z) only — never quantized X/Z). */
         private final Map<Long, Integer> riverWaterPlanes = new HashMap<>();
         private final Map<Long, Integer> riverDepths = new HashMap<>();
         private final Map<Long, Integer> vegetationValues = new HashMap<>();
