@@ -39,8 +39,8 @@
 # UKGeo Phase 3: region origin index for ore SliceBags (default on; safer than voxel bags)
 # Sticky empty-origin set soft cap (default 262144; stop remembering rather than thrash)
 # Vein/slice caches sized to avoid thrash (was 4096 → ~7% hit rate)
--Dukgeo.maxOreVeinPlanCache=65536
--Dukgeo.maxOreSliceBagCache=65536
+-Dukgeo.maxOreVeinPlanCache=131072
+-Dukgeo.maxOreSliceBagCache=131072
 -Dukgeo.maxOreRegionIndexEntries=16384
 # -Dukgeo.disableOreRegionIndex=true
 # -Dukgeo.oreRegionChunkSize=8
