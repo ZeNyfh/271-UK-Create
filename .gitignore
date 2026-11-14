@@ -102,3 +102,6 @@ data/uk_world_data_gb.zip
 /.agents
 AGENTS.md
 CLAUDE.md
+docs/RIVER_WATER_QA_STATUS.md
+docs/RIVER_WATER_QA_HANDOFF_PROMPT.md
+docs/MAPCREATOR_AIR_AGENT_PRESET.md
