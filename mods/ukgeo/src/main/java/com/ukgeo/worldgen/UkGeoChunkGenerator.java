@@ -200,13 +200,13 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     private static final double ORE_VEIN_STEP = 0.95;
     private static final double MINERAL_VEIN_STEP = 1.55;
     private static final double ORE_VEIN_BRANCH_STEP = 1.25;
-    private static final int MAX_ORE_VEIN_PLAN_CACHE = Integer.getInteger("ukgeo.maxOreVeinPlanCache", 4096);
-    private static final int MAX_ORE_SLICE_BAG_CACHE = Integer.getInteger("ukgeo.maxOreSliceBagCache", 4096);
+    private static final int MAX_ORE_VEIN_PLAN_CACHE = Integer.getInteger("ukgeo.maxOreVeinPlanCache", 65536);
+    private static final int MAX_ORE_SLICE_BAG_CACHE = Integer.getInteger("ukgeo.maxOreSliceBagCache", 65536);
     /** 8×8-chunk regions map ore → origins whose SliceBag AABB overlaps the region (safer than dense voxel bags). */
     private static final boolean ENABLE_ORE_REGION_INDEX = !Boolean.getBoolean("ukgeo.disableOreRegionIndex");
     private static final int ORE_REGION_CHUNK_SIZE = Math.max(2, Integer.getInteger("ukgeo.oreRegionChunkSize", 8));
     private static final int MAX_ORE_EMPTY_ORIGIN_CACHE = Integer.getInteger("ukgeo.maxOreEmptyOriginCache", 262144);
-    private static final int MAX_ORE_REGION_INDEX_ENTRIES = Integer.getInteger("ukgeo.maxOreRegionIndexEntries", 4096);
+    private static final int MAX_ORE_REGION_INDEX_ENTRIES = Integer.getInteger("ukgeo.maxOreRegionIndexEntries", 16384);
     private static final VeinPlan[] NO_ORE_VEIN_PLANS = new VeinPlan[0];
     private static final OreSliceBag EMPTY_ORE_SLICE_BAG = new OreSliceBag(
         new double[0], new double[0], new double[0],
@@ -857,22 +857,32 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
             if (!shape.influenced()) {
                 shape = computeLakeBankShape(data, heightWindow, x, z, originalSurfaceY, minBuildY, vegetationClass, cache);
             }
-        } else if (isRiverArtifactFreshwater(data, x, z, cache)) {
+        } else {
+            // Freshwater veg: if inside a river channel (or river-artifact lake), always river-shape.
+            // Never use DEM lakeWaterSurfaceY here — that steps mid-channel (Thames-scale overlap).
             RiverDistance distance = nearestRiver(data, x, z, riverSearchRadius(data) + 2, cache);
             int channelRadius = Math.max(MIN_RIVER_CHANNEL_HALF_WIDTH, Math.max(riverWidenRadius, distance.halfWidth()));
             int waterRadius = channelRadius;
-            int bankRadius = channelRadius + Math.max(1, RIVER_SHELF_REMOVAL_EXTRA_WIDTH);
-            int vegetation = vegetationClassAt(data, x, z, cache);
-            double slope = localSurfaceSlope(heightWindow, x, z, originalSurfaceY, cache);
-            shape = computeRiverShape(data, heightWindow, x, z, originalSurfaceY, minBuildY, cache, true, distance, waterRadius, bankRadius, vegetation, slope);
-        } else {
-            int waterSurface = lakeWaterSurfaceY(data, heightWindow, x, z, originalSurfaceY, cache);
-            double edgeDistance = nearestLakeEdge(data, x, z, LAKE_EDGE_SEARCH_RADIUS, cache);
-            int depth = lakeDepth(data, heightWindow, x, z, cache);
-            int bed = Math.max(minBuildY + 1, waterSurface - depth);
-            double slope = localSurfaceSlope(heightWindow, x, z, originalSurfaceY, cache);
-            BlockState floor = stillWaterFloorMaterial(depth);
-            shape = new RiverShape(true, true, bed, waterSurface, floor);
+            boolean nearRiverChannel = distance.found() && distance.blocks() <= waterRadius;
+            if (nearRiverChannel || isRiverArtifactFreshwater(data, x, z, cache)) {
+                if (!distance.found()) {
+                    distance = nearestRiver(data, x, z, riverSearchRadius(data) + 2, cache);
+                    channelRadius = Math.max(MIN_RIVER_CHANNEL_HALF_WIDTH, Math.max(riverWidenRadius, distance.halfWidth()));
+                    waterRadius = channelRadius;
+                }
+                int bankRadius = channelRadius + Math.max(1, RIVER_SHELF_REMOVAL_EXTRA_WIDTH);
+                int vegetation = vegetationClassAt(data, x, z, cache);
+                double slope = localSurfaceSlope(heightWindow, x, z, originalSurfaceY, cache);
+                shape = computeRiverShape(data, heightWindow, x, z, originalSurfaceY, minBuildY, cache, true, distance, waterRadius, bankRadius, vegetation, slope);
+            } else {
+                int waterSurface = lakeWaterSurfaceY(data, heightWindow, x, z, originalSurfaceY, cache);
+                double edgeDistance = nearestLakeEdge(data, x, z, LAKE_EDGE_SEARCH_RADIUS, cache);
+                int depth = lakeDepth(data, heightWindow, x, z, cache);
+                int bed = Math.max(minBuildY + 1, waterSurface - depth);
+                double slope = localSurfaceSlope(heightWindow, x, z, originalSurfaceY, cache);
+                BlockState floor = stillWaterFloorMaterial(depth);
+                shape = new RiverShape(true, true, bed, waterSurface, floor);
+            }
         }
         if (cache != null) {
             cache.shapes.put(key, shape);
@@ -1050,6 +1060,13 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
             }
             return false;
         }
+        // Thames-scale: freshwater sitting inside a wide river channel is always river water.
+        if (seedHalfWidth >= 6 && seedRiver.blocks() <= seedHalfWidth + 1.0) {
+            if (cache != null) {
+                cache.riverArtifactFreshwater.put(key, true);
+            }
+            return true;
+        }
 
         int maxCells = LAKE_ARTIFACT_MAX_COMPONENT;
         int diameter = LAKE_ARTIFACT_SCAN_RADIUS * 2 + 1;
@@ -1142,7 +1159,9 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         boolean mostlyRiverCorridor = corridorOverlap > 0
             && outsideRatio < 0.35
             && componentCrossWidth <= localRiverFullWidth * 1.75;
-        boolean substantialConnectedLake = area >= Math.max(192, localRiverFullWidth * localRiverFullWidth * 3)
+        // Large rivers (Thames): do not treat overlapping freshwater floodplain strips as lakes.
+        boolean substantialConnectedLake = maxHalfWidth < 6
+            && area >= Math.max(192, localRiverFullWidth * localRiverFullWidth * 3)
             && componentCrossWidth >= Math.max(6, localRiverFullWidth);
         boolean realLake = substantialConnectedLake || (
             !embeddedInRiver
@@ -1450,8 +1469,11 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         int maxDepth = riverMaxDepth(edgeDistance, slope, order);
         double radius = Math.max(1.5, halfWidth + 0.5);
         double u = Math.clamp((edgeDistance - 0.5) / radius, 0.0, 1.0);
-        double curved = 1.0 - Math.pow(1.0 - smoothstep(u), 1.25);
-        int minDepth = edgeDistance >= Math.max(1.5, halfWidth * 0.35) ? Math.min(2, maxDepth) : 1;
+        // Wide rivers (order>=4): gentler U-curve so integer depths do not terrace mid-channel.
+        double curvePower = order >= 4 ? 1.05 : 1.25;
+        double curved = 1.0 - Math.pow(1.0 - smoothstep(u), curvePower);
+        double minEdge = order >= 4 ? Math.max(2.0, halfWidth * 0.45) : Math.max(1.5, halfWidth * 0.35);
+        int minDepth = edgeDistance >= minEdge ? Math.min(2, maxDepth) : 1;
         int depth = minDepth + (int) Math.round(curved * (maxDepth - minDepth));
         return Math.clamp(depth, minDepth, maxDepth);
     }

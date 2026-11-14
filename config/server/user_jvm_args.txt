@@ -38,10 +38,13 @@
 
 # UKGeo Phase 3: region origin index for ore SliceBags (default on; safer than voxel bags)
 # Sticky empty-origin set soft cap (default 262144; stop remembering rather than thrash)
+# Vein/slice caches sized to avoid thrash (was 4096 → ~7% hit rate)
+-Dukgeo.maxOreVeinPlanCache=65536
+-Dukgeo.maxOreSliceBagCache=65536
+-Dukgeo.maxOreRegionIndexEntries=16384
 # -Dukgeo.disableOreRegionIndex=true
 # -Dukgeo.oreRegionChunkSize=8
 # -Dukgeo.maxOreEmptyOriginCache=262144
-# -Dukgeo.maxOreRegionIndexEntries=4096
 # Section writes still on unless: -Dukgeo.disableFastSectionWrites=true
 
 # UKGeo Phase 4: velocity-aware travel prefetch corridor (temporary TicketType tickets)
