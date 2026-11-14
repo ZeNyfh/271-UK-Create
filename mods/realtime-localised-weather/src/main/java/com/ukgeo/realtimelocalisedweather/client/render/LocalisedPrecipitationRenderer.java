@@ -28,7 +28,8 @@ public final class LocalisedPrecipitationRenderer {
 
         int renderDistance = ClientWeatherConfig.PRECIPITATION_RENDER_DISTANCE_BLOCKS.get();
         Matrix4f modelView = RenderSystem.getModelViewMatrix();
-        float weatherTime = minecraft.level.getGameTime() + partialTick;
+        // Keep animation in float-safe range — large getGameTime() values freeze UV scroll.
+        float weatherTime = (minecraft.level.getGameTime() & 0xFFFF) + partialTick;
         RenderSystem.enableBlend();
         RenderSystem.disableCull();
         try {
