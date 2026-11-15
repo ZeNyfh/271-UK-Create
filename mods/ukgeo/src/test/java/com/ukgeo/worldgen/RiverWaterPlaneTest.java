@@ -20,6 +20,27 @@ class RiverWaterPlaneTest {
     }
 
     @Test
+    void robustLowestAsymmetricBanksTakesLower() {
+        // Mental model: left bank 100, right bank 110 → plane at min (lower bank).
+        assertEquals(100, RiverWaterPlane.robustLowest(new int[] {100, 110}, 2));
+        assertEquals(100, RiverWaterPlane.robustLowest(new int[] {100, 100, 110, 110, 110}, 5));
+    }
+
+    @Test
+    void stationPlaneNotRaisedByHighProvisionalBed() {
+        // Invariant: Y_water = W(s) station plane. Old bug Math.max(provisionalBed+1, plane)
+        // raised water when local DEM bed was high; bed must be derived from plane only.
+        int plane = 100;
+        int highProvisionalBed = 108;
+        assertTrue(highProvisionalBed + 1 > plane, "setup: provisional would wrongly raise water");
+        int bed = RiverWaterPlane.bedUnderPlane(plane, 5, -64);
+        assertEquals(95, bed);
+        assertTrue(bed < plane);
+        // Depth clamp at minBuildY+1 — still does not raise plane.
+        assertEquals(-63, RiverWaterPlane.bedUnderPlane(plane, 200, -64));
+    }
+
+    @Test
     void bankSampleOffsetsTwoRingsAroundWater() {
         int waterRadius = 5;
         int[] dx = new int[32];
@@ -97,5 +118,40 @@ class RiverWaterPlaneTest {
         assertEquals(98, RiverWaterPlane.stabilizeWithNeighbors(100, new int[] {99, 98, 101}, 3));
         assertEquals(100, RiverWaterPlane.stabilizeWithNeighbors(100, new int[] {}, 0));
         assertEquals(100, RiverWaterPlane.stabilizeWithNeighbors(100, new int[] {100, 102}, 2));
+    }
+
+    @Test
+    void midlineWindowRadiusAtLeastTwo() {
+        assertEquals(2, RiverWaterPlane.midlineWindowRadius(0));
+        assertEquals(2, RiverWaterPlane.midlineWindowRadius(1));
+        assertEquals(5, RiverWaterPlane.midlineWindowRadius(5));
+        assertEquals(12, RiverWaterPlane.midlineWindowRadius(12));
+    }
+
+    @Test
+    void quantizeEvenSnapsForSharedStationKey() {
+        assertEquals(10, RiverWaterPlane.quantizeEven(10));
+        assertEquals(10, RiverWaterPlane.quantizeEven(11));
+        assertEquals(0, RiverWaterPlane.quantizeEven(1));
+        assertEquals(0, RiverWaterPlane.quantizeEven(-1)); // Java trunc toward 0: (-1)/2*2
+    }
+
+    @Test
+    void weightedCentroidIsMidlineNotEdgeMaskCell() {
+        // Filled channel from x=-3..3 at z=0: uniform weights → midline x=0, not left/right edge.
+        int[] xs = {-3, -2, -1, 0, 1, 2, 3};
+        int[] zs = {0, 0, 0, 0, 0, 0, 0};
+        int[] uniform = {1, 1, 1, 1, 1, 1, 1};
+        int[] mid = RiverWaterPlane.weightedCentroid(xs, zs, uniform, xs.length);
+        assertEquals(0, mid[0]);
+        assertEquals(0, mid[1]);
+        // Plane station is keyed by quantized midline, not nearest edge mask cell.
+        assertEquals(0, RiverWaterPlane.quantizeEven(mid[0]));
+        // Interior weighting pulls away from thin edge stubs.
+        int[] xs2 = {-4, -3, -2, -1, 0, 1, 2};
+        int[] zs2 = {0, 0, 0, 0, 0, 0, 0};
+        int[] w2 = {1, 1, 3, 4, 4, 3, 1}; // higher toward channel interior
+        int[] mid2 = RiverWaterPlane.weightedCentroid(xs2, zs2, w2, xs2.length);
+        assertTrue(mid2[0] >= -1 && mid2[0] <= 0, "interior-weighted centroid near midline, was " + mid2[0]);
     }
 }

@@ -40,6 +40,14 @@ final class RiverWaterPlane {
     }
 
     /**
+     * Bed Y under a fixed station water plane. DEM / provisional bed must never raise
+     * {@code waterPlane}; if the bowl would go below {@code minBuildY + 1}, depth is clamped.
+     */
+    static int bedUnderPlane(int waterPlane, int depth, int minBuildY) {
+        return Math.max(minBuildY + 1, waterPlane - Math.max(1, depth));
+    }
+
+    /**
      * Stabilize a centerline plane against neighbor stations: take the min so left/right
      * halves of a wide channel that latch onto adjacent mask cells still share one level.
      */
@@ -49,6 +57,46 @@ final class RiverWaterPlane {
             result = Math.min(result, neighborPlanes[i]);
         }
         return result;
+    }
+
+    /**
+     * Window radius around a query column to gather filled-mask cells for a midline centroid.
+     * At least 2 so a thin corridor still yields a stable station.
+     */
+    static int midlineWindowRadius(int halfWidth) {
+        return Math.max(2, Math.max(0, halfWidth));
+    }
+
+    /**
+     * Snap a coordinate to even for cache stability so nearby columns share one station key.
+     */
+    static int quantizeEven(int coord) {
+        return (coord / 2) * 2;
+    }
+
+    /**
+     * Weighted integer centroid of mask cells. Weights ≥ 1 (interior 4-neighbour boost).
+     * Returns {@code {mx, mz}}; empty input → {@code {0, 0}}.
+     */
+    static int[] weightedCentroid(int[] xs, int[] zs, int[] weights, int count) {
+        if (count <= 0) {
+            return new int[] {0, 0};
+        }
+        long sumX = 0L;
+        long sumZ = 0L;
+        long sumW = 0L;
+        for (int i = 0; i < count; i++) {
+            int w = weights == null ? 1 : Math.max(1, weights[i]);
+            sumX += (long) xs[i] * w;
+            sumZ += (long) zs[i] * w;
+            sumW += w;
+        }
+        if (sumW <= 0L) {
+            return new int[] {0, 0};
+        }
+        int mx = (int) Math.round((double) sumX / (double) sumW);
+        int mz = (int) Math.round((double) sumZ / (double) sumW);
+        return new int[] {mx, mz};
     }
 
     /**

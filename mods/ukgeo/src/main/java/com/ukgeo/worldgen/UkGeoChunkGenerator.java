@@ -165,7 +165,13 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     private static final int LAKE_ARTIFACT_PREFILTER_RADIUS = Math.max(0, Integer.getInteger("ukgeo.lakeArtifactPrefilterRadius", 4));
     private static final int WATERBED_PROTECTION_DEPTH = 6;
     private static final boolean ENABLE_RIVER_SEARCH_INDEX = Boolean.getBoolean("ukgeo.enableRiverSearchIndex");
-    private static final int RIVER_SHELF_REMOVAL_EXTRA_WIDTH = Integer.getInteger("ukgeo.riverShelfRemovalExtraWidth", 2);
+    /** Extra blocks beyond channel for dry-bank conform; must match {@link RiverBankFit#BANK_CARVE_REACH}. */
+    private static final int RIVER_SHELF_REMOVAL_EXTRA_WIDTH = Integer.getInteger(
+        "ukgeo.riverShelfRemovalExtraWidth",
+        (int) Math.round(RiverBankFit.BANK_CARVE_REACH)
+    );
+    /** Station-stable water Y when bank rings yield no samples: centerline DEM minus this depth. */
+    private static final int STATION_PLANE_FALLBACK_DEPTH = 2;
     /** Minimum half-width (blocks from centerline). Order-1 brooks may be 1 block half-width. */
     private static final int MIN_RIVER_CHANNEL_HALF_WIDTH = Integer.getInteger("ukgeo.minRiverChannelHalfWidth", 1);
     private static final int MAX_RIVER_SURFACE_STEP = 1;
@@ -641,19 +647,97 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     }
 
     /**
-     * Shared water-surface Y for all columns whose nearest river-mask cell is {@code distance}'s
-     * centerline. Bank rings are sampled around that centerline only (never per water column).
+     * Water plane for column (x,z): gather filled river-mask cells in a window of radius
+     * {@code hw}, take the interior-weighted centroid, quantize to even (qx,qz), then
+     * {@link #sampleDryBankSurfaces} with {@code sampleRadius = hw} so rings hit both banks
+     * from the medial station. Cached by (qx,qz) — not by nearest edge mask cell.
      */
-    private int riverWaterSurfaceY(
+    private OptionalInt midlineBankPlane(
         RuntimeData data,
         HeightTileWindow heightWindow,
+        int x,
+        int z,
         RiverDistance distance,
-        int riverBedY,
         WaterShapeCache cache
     ) {
-        OptionalInt bankTop = centerlineBankPlane(data, heightWindow, distance, cache);
-        int plane = bankTop.isPresent() ? bankTop.getAsInt() : riverBedY + 1;
-        return Math.max(riverBedY + 1, plane);
+        if (!distance.found()) {
+            return OptionalInt.empty();
+        }
+        int hw = Math.max(
+            MIN_RIVER_CHANNEL_HALF_WIDTH,
+            Math.max(riverWidenRadius, distance.halfWidth())
+        );
+        int window = RiverWaterPlane.midlineWindowRadius(hw);
+        int windowSq = window * window;
+        long sumX = 0L;
+        long sumZ = 0L;
+        long sumW = 0L;
+        for (int dz = -window; dz <= window; dz++) {
+            for (int dx = -window; dx <= window; dx++) {
+                if (dx * dx + dz * dz > windowSq) {
+                    continue;
+                }
+                int nx = x + dx;
+                int nz = z + dz;
+                if (riverLayerValue(data, nx, nz, cache) <= 0) {
+                    continue;
+                }
+                // Prefer interior cells so filled-mask edges do not pull the station.
+                int weight = 1;
+                if (riverLayerValue(data, nx + 1, nz, cache) > 0) {
+                    weight++;
+                }
+                if (riverLayerValue(data, nx - 1, nz, cache) > 0) {
+                    weight++;
+                }
+                if (riverLayerValue(data, nx, nz + 1, cache) > 0) {
+                    weight++;
+                }
+                if (riverLayerValue(data, nx, nz - 1, cache) > 0) {
+                    weight++;
+                }
+                sumX += (long) nx * weight;
+                sumZ += (long) nz * weight;
+                sumW += weight;
+            }
+        }
+        if (sumW <= 0L) {
+            return centerlineBankPlane(data, heightWindow, distance, cache);
+        }
+        int mx = (int) Math.round((double) sumX / (double) sumW);
+        int mz = (int) Math.round((double) sumZ / (double) sumW);
+        int qx = RiverWaterPlane.quantizeEven(mx);
+        int qz = RiverWaterPlane.quantizeEven(mz);
+        long key = cacheKey(qx, qz);
+        if (cache != null) {
+            Integer cached = cache.riverCrossSectionPlanes.get(key);
+            if (cached != null) {
+                return OptionalInt.of(cached);
+            }
+        }
+        // Rings around midline with channel half-width → both banks, not edge-only.
+        OptionalInt plane = sampleDryBankSurfaces(data, heightWindow, qx, qz, hw, cache);
+        if (plane.isEmpty()) {
+            plane = centerlineBankPlane(data, heightWindow, distance, cache);
+        }
+        if (plane.isPresent() && cache != null) {
+            cache.riverCrossSectionPlanes.put(key, plane.getAsInt());
+        }
+        return plane;
+    }
+
+    /** Centerline DEM minus default depth — same for every column sharing this station. */
+    private int centerlineDemFallbackWaterY(HeightTileWindow heightWindow, RiverDistance distance) {
+        if (!distance.found()) {
+            return seaLevelY;
+        }
+        int cx = distance.nearestX();
+        int cz = distance.nearestZ();
+        int sample = sampleDecimetresOrNodata(heightWindow, cx, cz);
+        if (sample == R16HeightTileLayer.NODATA) {
+            return seaLevelY;
+        }
+        return rawSurfaceY(heightWindow, cx, cz, sample) - STATION_PLANE_FALLBACK_DEPTH;
     }
 
     /**
@@ -806,8 +890,10 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         if (data.riverLayer == null) {
             return RiverShape.none(originalSurfaceY);
         }
-        int searchRadius = riverSearchRadius(data);
-        RiverDistance distance = nearestRiver(data, x, z, searchRadius + 2, cache);
+        int bankExtra = Math.max(1, RIVER_SHELF_REMOVAL_EXTRA_WIDTH);
+        // Search must cover bankRadius (= channel + BANK_CARVE_REACH), not only the water channel.
+        int searchRadius = riverSearchRadius(data) + bankExtra;
+        RiverDistance distance = nearestRiver(data, x, z, searchRadius, cache);
         if (!distance.found()) {
             return RiverShape.none(originalSurfaceY);
         }
@@ -816,7 +902,7 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         int riverOrder = riverOrderValue(data, x, z, cache);
         int channelRadius = riverChannelRadius(distance, slope, riverOrder);
         int waterRadius = channelRadius;
-        int bankRadius = channelRadius + Math.max(1, RIVER_SHELF_REMOVAL_EXTRA_WIDTH);
+        int bankRadius = channelRadius + bankExtra;
         if (distance.blocks() > bankRadius) {
             return RiverShape.none(originalSurfaceY);
         }
@@ -848,18 +934,17 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
             int depth = riverDepth(data, heightWindow, x, z, edgeDistance, slope, waterRadius, riverOrder, cache);
             double flowStrength = Math.clamp(edgeDistance / Math.max(1.0, waterRadius + 0.5), 0.0, 1.0);
             BlockState floor = waterFloorMaterial(x, z, vegetationClass, slope, true, flowStrength, depth, edgeDistance);
-            int provisionalBed = riverBedY(originalSurfaceY, minBuildY, depth);
-            int waterSurface = riverWaterSurfaceY(data, heightWindow, distance, provisionalBed, cache);
-            int bed = Math.max(minBuildY + 1, waterSurface - depth);
-            waterSurface = Math.max(waterSurface, bed + 1);
-            // Do not recompute waterSurface from bed — that re-dips the surface toward deeper channel.
+            // Y_water = midline-centroid bank plane; DEM affects bed via depth bowl, never raises water.
+            int waterSurface = riverWaterSurfaceY(data, heightWindow, x, z, distance, cache);
+            int bed = RiverWaterPlane.bedUnderPlane(waterSurface, depth, minBuildY);
+            // If bed would be invalid, depth is clamped by bedUnderPlane — do NOT raise waterSurface.
             return new RiverShape(true, true, bed, waterSurface, floor);
         }
         double dOut = distance.blocks() - waterRadius;
         if (dOut <= 0.0 || distance.blocks() > bankRadius) {
             return RiverShape.none(originalSurfaceY);
         }
-        OptionalInt bankPlane = centerlineBankPlane(data, heightWindow, distance, cache);
+        OptionalInt bankPlane = midlineBankPlane(data, heightWindow, x, z, distance, cache);
         int terrainSurfaceY;
         if (bankPlane.isPresent()) {
             terrainSurfaceY = RiverWaterPlane.conformBankTop(
@@ -905,15 +990,18 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
             // Do NOT force river for every near-river freshwater cell — that destroys
             // large lakes (Lough Neagh) into spearhead river-carve patterns.
             if (isRiverArtifactFreshwater(data, x, z, cache)) {
-                RiverDistance distance = nearestRiver(data, x, z, riverSearchRadius(data) + 2, cache);
+                int bankExtra = Math.max(1, RIVER_SHELF_REMOVAL_EXTRA_WIDTH);
+                RiverDistance distance = nearestRiver(data, x, z, riverSearchRadius(data) + bankExtra, cache);
                 int vegetation = vegetationClassAt(data, x, z, cache);
                 double slope = localSurfaceSlope(heightWindow, x, z, originalSurfaceY, cache);
                 int riverOrder = riverOrderValue(data, x, z, cache);
                 int channelRadius = riverChannelRadius(distance, slope, riverOrder);
                 int waterRadius = channelRadius;
-                int bankRadius = channelRadius + Math.max(1, RIVER_SHELF_REMOVAL_EXTRA_WIDTH);
+                int bankRadius = channelRadius + bankExtra;
+                // Respect occupancy: dry bank columns in artifact corridors get conformBankTop.
+                boolean riverWater = distance.found() && distance.blocks() <= waterRadius;
                 // Never use DEM lakeWaterSurfaceY on artifact corridors — steps mid-channel.
-                shape = computeRiverShape(data, heightWindow, x, z, originalSurfaceY, minBuildY, cache, true, distance, waterRadius, bankRadius, vegetation, slope);
+                shape = computeRiverShape(data, heightWindow, x, z, originalSurfaceY, minBuildY, cache, riverWater, distance, waterRadius, bankRadius, vegetation, slope);
             } else {
                 int waterSurface = lakeWaterSurfaceY(data, heightWindow, x, z, originalSurfaceY, cache);
                 int depth = lakeDepth(data, heightWindow, x, z, cache);
@@ -1515,13 +1603,8 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
 
 
     private int riverChannelRadius(RiverDistance distance, double slope, int order) {
-        // Prefer centerline halfWidth so left/right edges agree — no per-column widen.
-        int halfWidth = Math.max(MIN_RIVER_CHANNEL_HALF_WIDTH, Math.max(riverWidenRadius, distance.halfWidth()));
-        // Mild shrink on steep only; mountain shallowing stays in riverMaxDepth.
-        if (slope >= 2.0) {
-            return Math.max(MIN_RIVER_CHANNEL_HALF_WIDTH, halfWidth - 1);
-        }
-        return halfWidth;
+        // Station property: centerline halfWidth only (+ MIN). Slope may still affect depth via riverMaxDepth.
+        return Math.max(MIN_RIVER_CHANNEL_HALF_WIDTH, Math.max(riverWidenRadius, distance.halfWidth()));
     }
 
     private int riverDepth(RuntimeData data, HeightTileWindow heightWindow, int x, int z, double edgeDistance, double slope, int halfWidth, int order, WaterShapeCache cache) {
@@ -1728,6 +1811,8 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         private final Map<Long, Integer> riverWaterPlanes = new HashMap<>();
         /** Stabilized (Chebyshev-2 min) plane Y keyed by centerline cacheKey. */
         private final Map<Long, Integer> riverStabilizedPlanes = new HashMap<>();
+        /** Midline-centroid bank plane Y keyed by quantized station cacheKey(qx, qz). */
+        private final Map<Long, Integer> riverCrossSectionPlanes = new HashMap<>();
         private final Map<Long, Integer> riverDepths = new HashMap<>();
         private final Map<Long, Integer> vegetationValues = new HashMap<>();
         private final Map<Long, Integer> riverValues = new HashMap<>();
@@ -2556,11 +2641,9 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         }
         if (data.riverDistanceLayer != null && data.riverNearestHalfWidthLayer != null) {
             int code = data.riverDistanceLayer.sampleOrDefault(x, z, 255);
-            RiverDistance result;
-            if (code >= 255) {
-                result = RiverDistance.none();
-            } else {
+            if (code < 255) {
                 double blocks = code * 0.5;
+                RiverDistance result;
                 if (blocks > radius) {
                     result = RiverDistance.none();
                 } else {
@@ -2568,11 +2651,12 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
                     int[] nearest = nearestRiverMaskCell(data, x, z, blocks, cache);
                     result = new RiverDistance(blocks, 255, nearestHw, nearest[0], nearest[1]);
                 }
+                if (cache != null) {
+                    cache.nearestRivers.put(key, result);
+                }
+                return result;
             }
-            if (cache != null) {
-                cache.nearestRivers.put(key, result);
-            }
-            return result;
+            // code >= 255 / out-of-range: fall through to mask scan so outer bank columns still conform.
         }
         int bestDistanceSquared = Integer.MAX_VALUE;
         int bestScore = 0;
@@ -2775,9 +2859,9 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
                 if (narrowCorridor) {
                     riverWater = true;
                     int depth = Math.clamp((int) Math.round(channel + 0.5 - d.blocks()) + 1, 1, 3);
-                    // Same centerline plane as full gen (null cache / null height window ok).
-                    waterSurfaceY = riverWaterSurfaceY(runtime, null, d, surface - depth, null);
-                    terrainFloorY = Math.max(minY + 1, waterSurfaceY - depth);
+                    // Same midline plane as full gen (null cache / null height window ok).
+                    waterSurfaceY = riverWaterSurfaceY(runtime, null, x, z, d, null);
+                    terrainFloorY = RiverWaterPlane.bedUnderPlane(waterSurfaceY, depth, minY);
                     floorMaterial = Blocks.GRAVEL.defaultBlockState();
                 } else {
                     riverWater = true;
@@ -2796,8 +2880,9 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
                     double slopeApprox = Math.max(Math.abs(n0 - surface), Math.abs(n1 - surface)) / 4.0;
                     int maxDepth = slopeApprox >= 2.0 ? 2 : 4;
                     int depth = Math.clamp((int) Math.round(channel + 0.5 - d.blocks()) + 1, 1, maxDepth);
-                    waterSurfaceY = riverWaterSurfaceY(runtime, null, d, surface - depth, null);
-                    terrainFloorY = Math.max(minY + 1, waterSurfaceY - depth);
+                    // Midline plane only — local DEM must not invent / raise water Y.
+                    waterSurfaceY = riverWaterSurfaceY(runtime, null, x, z, d, null);
+                    terrainFloorY = RiverWaterPlane.bedUnderPlane(waterSurfaceY, depth, minY);
                     floorMaterial = Blocks.GRAVEL.defaultBlockState();
                 }
             }

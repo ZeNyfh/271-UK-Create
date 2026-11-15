@@ -93,8 +93,7 @@ final class ChunkTerrainPlanner {
         smoothFreshwaterLakeBeds(columns, minBuildY, maxBuildY);
         // One light bed smooth only (neighbor Δ clamp):
         smoothRiverBedsInComponents(columns, minBuildY, maxBuildY);
-        // Kill residual ±1 flowing facets along grade (Δ≤1 toward 3×3 median). Lakes ok.
-        smoothRiverWaterSurfacesLocally(columns, minBuildY, maxBuildY);
+        // Do not rewrite water Y (smoothRiverWaterSurfacesLocally) — station plane is authoritative.
         long oreStartNanos = System.nanoTime();
         Plan plan = new Plan(columns, generator.buildOrePlacements(data, chunk, columns), generator.seaLevel());
         long oreElapsedNanos = System.nanoTime() - oreStartNanos;
