@@ -642,8 +642,26 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
 
     private static final int BORDER_MARGIN_EXTRA = 4;
 
-    private int riverBedY(int surfaceY, int minBuildY, int depth) {
-        return Math.max(minBuildY + 1, surfaceY - depth);
+    /**
+     * Shared water-surface Y for every column in a physical river cross-section.
+     * Uses {@link #midlineBankPlane}: filled masks are edge-biased for nearest-cell planes,
+     * so we sample dry banks from a quantized midline centroid instead — never raised by
+     * per-column DEM / bed.
+     */
+    private int riverWaterSurfaceY(
+        RuntimeData data,
+        HeightTileWindow heightWindow,
+        int x,
+        int z,
+        RiverDistance distance,
+        WaterShapeCache cache
+    ) {
+        OptionalInt bankTop = midlineBankPlane(data, heightWindow, x, z, distance, cache);
+        if (bankTop.isPresent()) {
+            return bankTop.getAsInt();
+        }
+        // Station-stable fallback: raw DEM at centerline (nearestX,nearestZ), not the query column.
+        return centerlineDemFallbackWaterY(heightWindow, distance);
     }
 
     /**
