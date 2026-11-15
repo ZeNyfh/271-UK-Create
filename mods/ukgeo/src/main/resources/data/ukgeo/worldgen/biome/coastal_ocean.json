@@ -115,7 +115,13 @@
         "type": "minecraft:cod",
         "maxCount": 6,
         "minCount": 3,
-        "weight": 10
+        "weight": 25
+      },
+      {
+        "type": "minecraft:salmon",
+        "maxCount": 5,
+        "minCount": 1,
+        "weight": 15
       }
     ],
     "water_creature": [
