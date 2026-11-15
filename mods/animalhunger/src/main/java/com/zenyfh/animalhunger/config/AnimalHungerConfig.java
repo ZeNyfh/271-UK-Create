@@ -8,6 +8,9 @@ public final class AnimalHungerConfig {
     public static final ModConfigSpec.BooleanValue HUNGER_ENABLED;
     public static final ModConfigSpec.IntValue MAX_HUNGER;
     public static final ModConfigSpec.DoubleValue STARVATION_DAYS;
+    public static final ModConfigSpec.BooleanValue DRAIN_WHILE_UNLOADED;
+    public static final ModConfigSpec.BooleanValue UNLOAD_GRASS_SUSTAINS;
+    public static final ModConfigSpec.IntValue JOIN_GRACE_TICKS;
     public static final ModConfigSpec.IntValue TROUGH_SEARCH_RADIUS;
     public static final ModConfigSpec.IntValue GRASS_SEARCH_RADIUS;
     public static final ModConfigSpec.IntValue GRAZING_RESTORES;
@@ -24,6 +27,9 @@ public final class AnimalHungerConfig {
         HUNGER_ENABLED = builder.comment("When true, supported passive animals lose hunger over time and can starve.").define("hungerEnabled", true);
         MAX_HUNGER = builder.comment("Maximum hunger value for animals.").defineInRange("maxHunger", 20, 1, 100);
         STARVATION_DAYS = builder.comment("Minecraft days for a full animal to starve without food. One day is 24000 ticks, so 1.5 days is about 30 real minutes.").defineInRange("starvationDays", 1.5D, 0.1D, 100.0D);
+        DRAIN_WHILE_UNLOADED = builder.comment("false freezes hunger across unload/server-offline gaps.").define("drainWhileUnloaded", false);
+        UNLOAD_GRASS_SUSTAINS = builder.comment("If grass nearby on reload after unload gap, restore hunger so animal survives.").define("unloadGrassSustains", true);
+        JOIN_GRACE_TICKS = builder.comment("Brief post-join grace before lethal starve; also fallDistance reset / invulnerableTime.").defineInRange("joinGraceTicks", 100, 0, 1200);
         builder.pop();
 
         builder.push("feeding");

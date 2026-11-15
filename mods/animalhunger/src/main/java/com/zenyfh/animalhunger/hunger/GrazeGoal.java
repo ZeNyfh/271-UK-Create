@@ -4,6 +4,7 @@ import com.zenyfh.animalhunger.config.AnimalHungerConfig;
 import com.zenyfh.animalhunger.registry.ModTags;
 import java.util.EnumSet;
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.PathfinderMob;
 import net.minecraft.world.entity.ai.goal.Goal;
 import net.minecraft.world.level.Level;
@@ -53,7 +54,7 @@ public class GrazeGoal extends Goal {
     @Override
     public void start() {
         if (this.target != null) {
-            BlockPos standAt = standPosition(this.target);
+            BlockPos standAt = standPosition(this.mob.level(), this.target);
             this.mob.getNavigation().moveTo(standAt.getX() + 0.5D, standAt.getY(), standAt.getZ() + 0.5D, SPEED);
         }
     }
@@ -63,7 +64,7 @@ public class GrazeGoal extends Goal {
         if (this.target == null) {
             return;
         }
-        BlockPos standAt = standPosition(this.target);
+        BlockPos standAt = standPosition(this.mob.level(), this.target);
         if (this.mob.distanceToSqr(standAt.getX() + 0.5D, standAt.getY() + 0.5D, standAt.getZ() + 0.5D) <= EAT_DISTANCE_SQR) {
             if (eatGrazingBlock(this.target)) {
                 AnimalHungerEvents.restoreFromGrazing(this.mob);
@@ -79,6 +80,32 @@ public class GrazeGoal extends Goal {
     @Override
     public void stop() {
         this.target = null;
+    }
+
+    public static boolean hasNearbyGrazing(LivingEntity living) {
+        Level level = living.level();
+        BlockPos origin = living.blockPosition();
+        int radius = AnimalHungerConfig.GRASS_SEARCH_RADIUS.get();
+        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+        // Deterministic scan so unload/offline reloads do not miss grass to random sampling.
+        int step = Math.max(1, radius / 8);
+        for (int dx = -radius; dx <= radius; dx += step) {
+            for (int dz = -radius; dz <= radius; dz += step) {
+                if (dx * dx + dz * dz > radius * radius) {
+                    continue;
+                }
+                for (int dy = -2; dy <= 2; dy++) {
+                    cursor.set(origin.getX() + dx, origin.getY() + dy, origin.getZ() + dz);
+                    if (!level.hasChunkAt(cursor)) {
+                        continue;
+                    }
+                    if (isGrazingBlock(level.getBlockState(cursor))) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
     }
 
     private BlockPos findGrazingBlock() {
@@ -107,7 +134,7 @@ public class GrazeGoal extends Goal {
                 continue;
             }
             BlockPos pos = cursor.immutable();
-            BlockPos standAt = standPosition(pos);
+            BlockPos standAt = standPosition(level, pos);
             if (!level.getBlockState(standAt).isAir() && !standAt.equals(pos)) {
                 continue;
             }
@@ -125,12 +152,12 @@ public class GrazeGoal extends Goal {
         if (!isGrazingBlock(this.mob.level().getBlockState(pos))) {
             return false;
         }
-        BlockPos standAt = standPosition(pos);
+        BlockPos standAt = standPosition(this.mob.level(), pos);
         return this.mob.level().getBlockState(standAt).isAir() || standAt.equals(pos);
     }
 
-    private BlockPos standPosition(BlockPos grazingBlock) {
-        BlockState state = this.mob.level().getBlockState(grazingBlock);
+    static BlockPos standPosition(Level level, BlockPos grazingBlock) {
+        BlockState state = level.getBlockState(grazingBlock);
         return state.is(Blocks.GRASS_BLOCK) || state.is(Blocks.HAY_BLOCK) ? grazingBlock.above() : grazingBlock;
     }
 

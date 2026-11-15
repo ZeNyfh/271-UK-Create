@@ -71,16 +71,40 @@ public final class AnimalHungerData {
         long lastDrain = root.getLong(LAST_DRAIN);
         if (lastDrain <= 0L || gameTime < lastDrain) {
             root.putLong(LAST_DRAIN, gameTime);
+            entity.getPersistentData().put(ROOT, root);
             return;
         }
         long points = (gameTime - lastDrain) / interval;
         if (points <= 0L) {
             return;
         }
+        if (!AnimalHungerConfig.DRAIN_WHILE_UNLOADED.get() && points > 1L) {
+            root.putLong(LAST_DRAIN, gameTime);
+            entity.getPersistentData().put(ROOT, root);
+            return;
+        }
         int drained = (int) Math.min(points, hunger);
         root.putInt(HUNGER, hunger - drained);
         root.putLong(LAST_DRAIN, lastDrain + points * interval);
         entity.getPersistentData().put(ROOT, root);
+    }
+
+    public static boolean resumeAfterUnloadGap(LivingEntity entity, long gameTime) {
+        CompoundTag root = getOrCreate(entity, gameTime);
+        long interval = AnimalHungerConfig.hungerPointIntervalTicks();
+        long lastDrain = root.getLong(LAST_DRAIN);
+        if (lastDrain <= 0L || gameTime < lastDrain) {
+            root.putLong(LAST_DRAIN, gameTime);
+            entity.getPersistentData().put(ROOT, root);
+            return false;
+        }
+        long points = (gameTime - lastDrain) / interval;
+        if (!AnimalHungerConfig.DRAIN_WHILE_UNLOADED.get() && points > 1L) {
+            root.putLong(LAST_DRAIN, gameTime);
+            entity.getPersistentData().put(ROOT, root);
+            return true;
+        }
+        return false;
     }
 
     public static boolean cooldownReady(LivingEntity entity, String key, long gameTime) {

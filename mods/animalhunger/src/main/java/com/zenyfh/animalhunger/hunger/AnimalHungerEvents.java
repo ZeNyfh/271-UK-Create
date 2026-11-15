@@ -3,6 +3,7 @@ package com.zenyfh.animalhunger.hunger;
 import com.zenyfh.animalhunger.AnimalHunger;
 import com.zenyfh.animalhunger.config.AnimalHungerConfig;
 import java.util.Collections;
+import java.util.Map;
 import java.util.Set;
 import java.util.WeakHashMap;
 import net.minecraft.core.BlockPos;
@@ -27,6 +28,7 @@ import net.neoforged.neoforge.event.tick.EntityTickEvent;
 
 public final class AnimalHungerEvents {
     private static final Set<Entity> GOALS_ADDED = Collections.newSetFromMap(new WeakHashMap<>());
+    private static final Map<LivingEntity, Long> JOIN_GAME_TIME = new WeakHashMap<>();
     private static final int TROUGH_GOAL_PRIORITY = 2;
     private static final int GRAZE_GOAL_PRIORITY = 3;
 
@@ -36,7 +38,16 @@ public final class AnimalHungerEvents {
             return;
         }
         if (event.getEntity() instanceof LivingEntity living && isSupported(living)) {
-            AnimalHungerData.getOrCreate(living, event.getLevel().getGameTime());
+            long gameTime = event.getLevel().getGameTime();
+            AnimalHungerData.getOrCreate(living, gameTime);
+            living.fallDistance = 0.0F;
+            living.invulnerableTime = Math.max(living.invulnerableTime, AnimalHungerConfig.JOIN_GRACE_TICKS.get());
+            JOIN_GAME_TIME.put(living, gameTime);
+            if (AnimalHungerData.resumeAfterUnloadGap(living, gameTime)
+                    && AnimalHungerConfig.UNLOAD_GRASS_SUSTAINS.get()
+                    && GrazeGoal.hasNearbyGrazing(living)) {
+                AnimalHungerData.addHunger(living, AnimalHungerData.maxHunger(), gameTime);
+            }
             addGoals(living);
             AnimalHungerPerf.animalTracked();
             debug("tracking {} at {}", entityId(living), living.blockPosition());
@@ -63,6 +74,10 @@ public final class AnimalHungerEvents {
             debug("{} hunger {} -> {}", entityId(living), before, after);
         }
         if (after <= 0) {
+            Long joinTime = JOIN_GAME_TIME.get(living);
+            if (joinTime != null && gameTime - joinTime < AnimalHungerConfig.JOIN_GRACE_TICKS.get()) {
+                return;
+            }
             debug("{} starved at {}", entityId(living), living.blockPosition());
             living.hurt(living.damageSources().starve(), living.getMaxHealth() + 1000.0F);
         }
