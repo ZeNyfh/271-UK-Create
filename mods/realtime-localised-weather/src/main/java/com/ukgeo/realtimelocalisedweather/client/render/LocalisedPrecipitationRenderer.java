@@ -14,17 +14,16 @@ import net.minecraft.client.renderer.LevelRenderer;
 import net.minecraft.client.renderer.LightTexture;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.util.Mth;
 import net.minecraft.world.level.levelgen.Heightmap;
 
 /**
- * Renders vanilla rain/snow textures with local, continuously animated intensity.
- * Positions are camera-relative world anchors; UV scroll is driven by a float-safe
- * animation clock so streaks keep falling while the player stands still.
+ * Renders vanilla-matching rain/snow quads with localised intensity sampling.
+ * One camera-facing quad per block column; UV scroll is float-safe and intensity-independent.
  */
 public final class LocalisedPrecipitationRenderer {
     private static final ResourceLocation RAIN_TEXTURE = ResourceLocation.withDefaultNamespace("textures/environment/rain.png");
     private static final ResourceLocation SNOW_TEXTURE = ResourceLocation.withDefaultNamespace("textures/environment/snow.png");
-    private static final int COLUMN_SPACING = 4;
 
     private LocalisedPrecipitationRenderer() {
     }
@@ -33,8 +32,12 @@ public final class LocalisedPrecipitationRenderer {
         Minecraft minecraft = Minecraft.getInstance();
         if (minecraft.level == null || minecraft.player == null) return;
 
-        int renderDistance = ClientWeatherConfig.PRECIPITATION_RENDER_DISTANCE_BLOCKS.get();
-        float weatherTime = PrecipitationAnimation.weatherTime(minecraft.level.getGameTime(), partialTick);
+        // Cap to vanilla visual radius (config defaults were compensating for spacing-4 sparsity).
+        int radius = Math.min(
+            ClientWeatherConfig.PRECIPITATION_RENDER_DISTANCE_BLOCKS.get(),
+            Minecraft.useFancyGraphics() ? 10 : 5
+        );
+        long gameTime = minecraft.level.getGameTime();
 
         lightTexture.turnOnLightLayer();
         RenderSystem.enableBlend();
@@ -49,15 +52,16 @@ public final class LocalisedPrecipitationRenderer {
             boolean hasRain = false;
             boolean hasSnow = false;
 
-            for (int dz = -renderDistance; dz <= renderDistance; dz += COLUMN_SPACING) {
-                for (int dx = -renderDistance; dx <= renderDistance; dx += COLUMN_SPACING) {
-                    BlockPos position = new BlockPos(
-                        (int) Math.floor(cameraX + dx),
-                        (int) Math.floor(cameraY),
-                        (int) Math.floor(cameraZ + dz)
-                    );
-                    var sample = ClientWeatherManager.sample(position);
-                    if (sample.isEmpty() || !minecraft.level.canSeeSky(position.above())) continue;
+            int camBlockX = Mth.floor(cameraX);
+            int camBlockY = Mth.floor(cameraY);
+            int camBlockZ = Mth.floor(cameraZ);
+            BlockPos.MutableBlockPos mutable = new BlockPos.MutableBlockPos();
+
+            for (int z = camBlockZ - radius; z <= camBlockZ + radius; z++) {
+                for (int x = camBlockX - radius; x <= camBlockX + radius; x++) {
+                    mutable.set(x, camBlockY, z);
+                    var sample = ClientWeatherManager.sample(mutable);
+                    if (sample.isEmpty() || !minecraft.level.canSeeSky(mutable.above())) continue;
 
                     var weather = sample.get();
                     if (!weather.snapshot().hasPrecipitation() && weather.interpolatedRate() <= 0.001F) continue;
@@ -66,23 +70,36 @@ public final class LocalisedPrecipitationRenderer {
                         ? ClientWeatherConfig.SNOW_DENSITY_MULTIPLIER.get().floatValue()
                         : ClientWeatherConfig.PRECIPITATION_DENSITY_MULTIPLIER.get().floatValue();
                     float intensity = Math.min(1.0F, (float) Math.sqrt(Math.max(0.0F, weather.interpolatedRate())) / 3.0F) * multiplier;
-                    if (intensity < 0.03F || densityHash(position.getX(), position.getZ()) > intensity) continue;
+                    if (intensity < 0.03F || densityHash(x, z) > intensity) continue;
 
-                    int groundY = minecraft.level.getHeight(Heightmap.Types.MOTION_BLOCKING, position.getX(), position.getZ());
-                    float topWorldY = (float) Math.min(cameraY + 14.0D, groundY + 28);
-                    float bottomWorldY = Math.max(groundY, topWorldY - (snow ? 10.0F : 18.0F));
-                    float top = (float) (topWorldY - cameraY);
-                    float bottom = (float) (bottomWorldY - cameraY);
-                    float wind = ClientWeatherConfig.ENABLE_WIND_SLANT.get() ? weather.snapshot().windSpeedKmh() / 300.0F : 0.0F;
-                    float x = (float) (position.getX() + 0.5D - cameraX);
-                    float z = (float) (position.getZ() + 0.5D - cameraZ);
-                    float alpha = Math.min(0.9F, 0.20F + intensity * 0.70F);
-                    int light = LevelRenderer.getLightColor(minecraft.level, position.atY(Math.max(groundY, (int) Math.floor(cameraY))));
+                    int groundY = minecraft.level.getHeight(Heightmap.Types.MOTION_BLOCKING, x, z);
+                    // Vanilla: j2 = max(camY - radius, ground), k2 = max(camY + radius, ground)
+                    int yBottom = camBlockY - radius;
+                    if (yBottom < groundY) {
+                        yBottom = groundY;
+                    }
+                    int yTop = camBlockY + radius;
+                    if (yTop < groundY) {
+                        yTop = groundY;
+                    }
+                    if (yBottom == yTop) continue;
+
+                    double relX = x + 0.5D - cameraX;
+                    double relZ = z + 0.5D - cameraZ;
+                    float distNorm = (float) Math.sqrt(relX * relX + relZ * relZ) / (float) radius;
+                    float alpha = ((1.0F - distNorm * distNorm) * 0.5F + 0.5F)
+                        * Math.min(1.0F, 0.25F + intensity * 0.75F);
+                    if (alpha <= 0.01F) continue;
+
+                    float wind = ClientWeatherConfig.ENABLE_WIND_SLANT.get()
+                        ? weather.snapshot().windSpeedKmh() / 300.0F
+                        : 0.0F;
+                    int light = LevelRenderer.getLightColor(minecraft.level, mutable.set(x, Math.max(groundY, camBlockY), z));
 
                     var builder = snow ? snowBuilder : rainBuilder;
-                    addFallingColumn(
-                        builder, x, top, bottom, z, topWorldY, bottomWorldY, wind, snow, weatherTime,
-                        position.getX(), position.getZ(), alpha, light
+                    addColumnQuad(
+                        builder, relX, relZ, yBottom, yTop, cameraY, wind, snow,
+                        gameTime, partialTick, x, z, alpha, light
                     );
                     if (snow) hasSnow = true;
                     else hasRain = true;
@@ -107,42 +124,52 @@ public final class LocalisedPrecipitationRenderer {
     }
 
     /**
-     * Builds two crossed, camera-relative quads. Vertices are not pre-multiplied by
-     * the model-view matrix — the particle shader applies ModelViewMat once.
-     * Wind only shifts the bottom horizontally; vertical falling comes from UV scroll.
+     * Single camera-facing quad (vanilla rainSize orientation). Vertices are camera-relative
+     * and not pre-multiplied by ModelView — the particle shader applies it once.
+     * Wind only shifts bottom X/Z; falling comes from UV V scroll.
      */
-    private static void addFallingColumn(
+    private static void addColumnQuad(
         BufferBuilder builder,
-        float x,
-        float top,
-        float bottom,
-        float z,
-        float topWorldY,
-        float bottomWorldY,
+        double relX,
+        double relZ,
+        int bottomY,
+        int topY,
+        double cameraY,
         float wind,
         boolean snow,
-        float weatherTime,
+        long gameTime,
+        float partialTick,
         int worldX,
         int worldZ,
         float alpha,
         int light
     ) {
-        float width = snow ? 0.35F : 0.18F;
-        float scroll = PrecipitationAnimation.scrollPhase(weatherTime, worldX, worldZ, snow);
-        float vTop = PrecipitationAnimation.verticalUv(bottomWorldY, scroll);
-        float vBottom = PrecipitationAnimation.verticalUv(topWorldY, scroll);
-        float u0 = PrecipitationAnimation.textureU(worldX, worldZ);
-        float u1 = u0 + 0.0625F;
+        float[] ext = PrecipitationAnimation.quadHalfExtent(relX, relZ);
+        float d0 = ext[0];
+        float d1 = ext[1];
+        float top = (float) (topY - cameraY);
+        float bottom = (float) (bottomY - cameraY);
 
-        builder.addVertex(x - width, top, z).setUv(u0, vTop).setColor(1.0F, 1.0F, 1.0F, alpha).setLight(light);
-        builder.addVertex(x + width, top, z).setUv(u1, vTop).setColor(1.0F, 1.0F, 1.0F, alpha).setLight(light);
-        builder.addVertex(x + width + wind, bottom, z + wind).setUv(u1, vBottom).setColor(1.0F, 1.0F, 1.0F, alpha).setLight(light);
-        builder.addVertex(x - width + wind, bottom, z + wind).setUv(u0, vBottom).setColor(1.0F, 1.0F, 1.0F, alpha).setLight(light);
+        float scroll = snow
+            ? PrecipitationAnimation.snowScrollV(gameTime, partialTick)
+                + PrecipitationAnimation.snowScrollVJitter(worldX, worldZ)
+            : PrecipitationAnimation.rainScrollV(gameTime, partialTick, worldX, worldZ);
+        // Vanilla: top verts use bottom world Y; bottom verts use top world Y
+        float vTop = PrecipitationAnimation.verticalUv(bottomY, scroll);
+        float vBottom = PrecipitationAnimation.verticalUv(topY, scroll);
+        float u0 = snow ? PrecipitationAnimation.snowUOffset(worldX, worldZ) : 0.0F;
+        float u1 = u0 + 1.0F;
+        float bx = wind;
+        float bz = wind;
 
-        builder.addVertex(x, top, z - width).setUv(u0, vTop).setColor(1.0F, 1.0F, 1.0F, alpha).setLight(light);
-        builder.addVertex(x, top, z + width).setUv(u1, vTop).setColor(1.0F, 1.0F, 1.0F, alpha).setLight(light);
-        builder.addVertex(x + wind, bottom, z + width + wind).setUv(u1, vBottom).setColor(1.0F, 1.0F, 1.0F, alpha).setLight(light);
-        builder.addVertex(x + wind, bottom, z - width + wind).setUv(u0, vBottom).setColor(1.0F, 1.0F, 1.0F, alpha).setLight(light);
+        builder.addVertex((float) (relX - d0), top, (float) (relZ - d1))
+            .setUv(u0, vTop).setColor(1.0F, 1.0F, 1.0F, alpha).setLight(light);
+        builder.addVertex((float) (relX + d0), top, (float) (relZ + d1))
+            .setUv(u1, vTop).setColor(1.0F, 1.0F, 1.0F, alpha).setLight(light);
+        builder.addVertex((float) (relX + d0 + bx), bottom, (float) (relZ + d1 + bz))
+            .setUv(u1, vBottom).setColor(1.0F, 1.0F, 1.0F, alpha).setLight(light);
+        builder.addVertex((float) (relX - d0 + bx), bottom, (float) (relZ - d1 + bz))
+            .setUv(u0, vBottom).setColor(1.0F, 1.0F, 1.0F, alpha).setLight(light);
     }
 
     /** Exposed for density diagnostics / tests — same thresholding as the renderer. */
