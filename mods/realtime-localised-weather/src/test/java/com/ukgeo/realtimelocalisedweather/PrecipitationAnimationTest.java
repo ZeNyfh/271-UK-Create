@@ -160,13 +160,21 @@ class PrecipitationAnimationTest {
             counts[i] = count;
         }
         for (int i = 1; i < counts.length; i++) {
-            assertTrue(counts[i] > counts[i - 1],
-                "counts must strictly increase: " + counts[i - 1] + " -> " + counts[i]
+            assertTrue(counts[i] >= counts[i - 1],
+                "counts must be non-decreasing: " + counts[i - 1] + " -> " + counts[i]
                     + " at intensity " + intensities[i]);
         }
-        assertTrue(counts[0] > 0, "light drizzle (0.05) should be sparse but non-zero");
-        assertTrue(counts[0] < grid * grid / 4, "light drizzle should remain sparse");
-        assertTrue(counts[counts.length - 1] > grid * grid / 2, "max intensity (1.00) should be dense");
+        // Coverage floor (~30%+) means light drizzle is no longer "sparse islands".
+        assertTrue(counts[0] > grid * grid / 10, "light drizzle (0.05) should select a substantial share");
+        assertTrue(counts[counts.length - 1] > grid * grid * 9 / 10, "max intensity (1.00) should be dense");
+        assertTrue(
+            com.ukgeo.realtimelocalisedweather.client.render.PrecipitationCoverage.coverageFraction(0.01F)
+                < com.ukgeo.realtimelocalisedweather.client.render.PrecipitationCoverage.coverageFraction(0.5F),
+            "coverageFraction(0.01) < coverageFraction(0.5)");
+        assertTrue(
+            com.ukgeo.realtimelocalisedweather.client.render.PrecipitationCoverage.alphaFactor(0.01F)
+                < com.ukgeo.realtimelocalisedweather.client.render.PrecipitationCoverage.alphaFactor(0.5F),
+            "alphaFactor(0.01) < alphaFactor(0.5) — drizzle stays faint");
     }
 
     @Test

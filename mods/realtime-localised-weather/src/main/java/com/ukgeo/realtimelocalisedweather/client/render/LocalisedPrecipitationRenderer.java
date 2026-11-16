@@ -70,7 +70,7 @@ public final class LocalisedPrecipitationRenderer {
                         ? ClientWeatherConfig.SNOW_DENSITY_MULTIPLIER.get().floatValue()
                         : ClientWeatherConfig.PRECIPITATION_DENSITY_MULTIPLIER.get().floatValue();
                     float intensity = Math.min(1.0F, (float) Math.sqrt(Math.max(0.0F, weather.interpolatedRate())) / 3.0F) * multiplier;
-                    if (intensity < 0.03F || densityHash(x, z) > intensity) continue;
+                    if (!PrecipitationCoverage.shouldRenderColumn(x, z, intensity)) continue;
 
                     int groundY = minecraft.level.getHeight(Heightmap.Types.MOTION_BLOCKING, x, z);
                     // Vanilla: j2 = max(camY - radius, ground), k2 = max(camY + radius, ground)
@@ -88,7 +88,7 @@ public final class LocalisedPrecipitationRenderer {
                     double relZ = z + 0.5D - cameraZ;
                     float distNorm = (float) Math.sqrt(relX * relX + relZ * relZ) / (float) radius;
                     float alpha = ((1.0F - distNorm * distNorm) * 0.5F + 0.5F)
-                        * Math.min(1.0F, 0.25F + intensity * 0.75F);
+                        * PrecipitationCoverage.alphaFactor(intensity);
                     if (alpha <= 0.01F) continue;
 
                     float wind = ClientWeatherConfig.ENABLE_WIND_SLANT.get()
@@ -174,9 +174,10 @@ public final class LocalisedPrecipitationRenderer {
 
     /** Exposed for density diagnostics / tests — same thresholding as the renderer. */
     public static boolean passesDensityFilter(int worldX, int worldZ, float intensity) {
-        return intensity >= 0.03F && densityHash(worldX, worldZ) <= intensity;
+        return PrecipitationCoverage.shouldRenderColumn(worldX, worldZ, intensity);
     }
 
+    /** Legacy independent hash in [0,1); retained for test comparisons against old thinning. */
     public static float densityHash(int x, int z) {
         return (PrecipitationAnimation.hash(x, z) & 0x7fffffff) / (float) Integer.MAX_VALUE;
     }
