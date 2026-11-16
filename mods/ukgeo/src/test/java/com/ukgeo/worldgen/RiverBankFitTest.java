@@ -55,11 +55,12 @@ class RiverBankFitTest {
         assertEquals(-63, RiverBankFit.bedForWater(100, 200, -64));
     }
     @Test
-    void bankCarveTargetFlushNearWaterAndNeverRaises() {
+    void bankCarveTargetCapsIncisionAndNeverRaises() {
         int original = 105;
         int water = 100;
-        assertEquals(100, RiverBankFit.bankCarveTarget(original, water, 0.5, RiverBankFit.BANK_CARVE_REACH));
-        assertEquals(100, RiverBankFit.bankCarveTarget(original, water, 1.0, RiverBankFit.BANK_CARVE_REACH));
+        int near = RiverBankFit.bankCarveTarget(original, water, 0.5, RiverBankFit.BANK_CARVE_REACH);
+        assertTrue(near < original);
+        assertTrue(near >= original - RiverBankFit.MAX_BANK_INCISION_NEAR);
         int far = RiverBankFit.bankCarveTarget(original, water, RiverBankFit.BANK_CARVE_REACH, RiverBankFit.BANK_CARVE_REACH);
         assertTrue(far <= original && far >= water);
         assertEquals(98, RiverBankFit.bankCarveTarget(98, water, 1.0, RiverBankFit.BANK_CARVE_REACH));
@@ -73,11 +74,29 @@ class RiverBankFitTest {
     }
 
     @Test
-    void bankCarveTargetNearShelfFlushAndFarTalusRise() {
-        assertEquals(100, RiverBankFit.bankCarveTarget(110, 100, 1.0, 12));
-        assertEquals(100, RiverBankFit.bankCarveTarget(110, 100, 2.0, 12));
-        int far = RiverBankFit.bankCarveTarget(110, 100, 11.5, 12);
-        assertTrue(far > 100 && far <= 110);
+    void bankCarveTargetMountainStampDoesNotCanyon() {
+        int carved = RiverBankFit.bankCarveTarget(160, 100, 1.0, RiverBankFit.BANK_CARVE_REACH);
+        assertTrue(carved >= 160 - RiverBankFit.MAX_BANK_INCISION_NEAR, "carved=" + carved);
+        assertTrue(carved <= 160);
+    }
+
+    @Test
+    void cappedPlaneLiftsOnlyExtremeMountainStamp() {
+        assertEquals(100, RiverBankFit.cappedPlane(105, 100, RiverBankFit.MAX_CHANNEL_INCISION));
+        assertEquals(100, RiverBankFit.cappedPlane(140, 100, RiverBankFit.MAX_CHANNEL_INCISION));
+        assertEquals(152, RiverBankFit.cappedPlane(160, 100, RiverBankFit.MAX_CHANNEL_INCISION));
+        // Low DEM deep channels stay absolute.
+        assertEquals(-40, RiverBankFit.cappedPlane(10, -40, RiverBankFit.MAX_CHANNEL_INCISION));
+    }
+
+    @Test
+    void bankCarveTargetNearLowersModestlyFarIsHigher() {
+        int near = RiverBankFit.bankCarveTarget(110, 100, 1.0, RiverBankFit.BANK_CARVE_REACH);
+        int mid = RiverBankFit.bankCarveTarget(110, 100, 4.0, RiverBankFit.BANK_CARVE_REACH);
+        int far = RiverBankFit.bankCarveTarget(110, 100, 7.5, RiverBankFit.BANK_CARVE_REACH);
+        assertTrue(near < 110);
+        assertTrue(far >= mid);
+        assertTrue(far <= 110);
     }
 
     @Test

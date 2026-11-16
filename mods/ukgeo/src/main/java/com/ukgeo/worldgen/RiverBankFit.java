@@ -5,13 +5,47 @@ package com.ukgeo.worldgen;
  * Keeps water flush with dry bank tops when possible, with a max bank raise of {@link #MAX_BANK_RAISE}.
  * Near-water shelf flush then talus via {@link #bankCarveTarget}; level high→low then conform via
  * {@link #bankConformTarget}.
+ * Incision below the original DEM is capped so mountain stamps cannot open extreme canyons.
  */
 final class RiverBankFit {
     static final int MAX_BANK_RAISE = 2;
-    static final double BANK_CARVE_REACH = 12.0;
+    /** Inland bank influence; keep modest to limit triangular stamp facets. */
+    static final double BANK_CARVE_REACH = 8.0;
+    /** Max blocks an extreme mountain channel may notch below the DEM. */
+    static final int MAX_CHANNEL_INCISION = 8;
+    /**
+     * Only rewrite baked channel water when DEM is this far above it.
+     * Normal valley banks (tens of blocks) keep absolute station water Y.
+     */
+    static final int EXTREME_CHANNEL_DROP = 48;
+    /** Max bank drop near water; tapers toward 1 at {@link #BANK_CARVE_REACH}. */
+    static final int MAX_BANK_INCISION_NEAR = 6;
     private static final double BANK_CARVE_TALUS = 0.55;
 
     private RiverBankFit() {
+    }
+
+    /**
+     * Effective channel water plane. Valley stamps keep baked {@code waterPlane}.
+     * Only extreme mountain drops ({@link #EXTREME_CHANNEL_DROP}) are lifted into a shallow DEM notch.
+     */
+    static int cappedPlane(int originalTop, int waterPlane, int maxIncision) {
+        int drop = originalTop - waterPlane;
+        // Deep subsurface channels (low DEM, very low water) keep baked Y.
+        // Only high mountain columns with valley-floor stamps are notched.
+        if (drop <= EXTREME_CHANNEL_DROP || originalTop < 64) {
+            return waterPlane;
+        }
+        return originalTop - Math.max(1, maxIncision);
+    }
+
+    /** Allowed drop below original DEM at distance {@code dOut} from the wet edge. */
+    static int maxBankIncision(double dOut, double reach) {
+        double safeReach = Math.max(1.0, reach);
+        double t = Math.clamp(dOut / safeReach, 0.0, 1.0);
+        // smoothstep taper: near MAX_BANK_INCISION_NEAR, far ~1
+        double s = t * t * (3.0 - 2.0 * t);
+        return Math.max(1, (int) Math.round(MAX_BANK_INCISION_NEAR + (1.0 - MAX_BANK_INCISION_NEAR) * s));
     }
 
     /**
@@ -66,21 +100,32 @@ final class RiverBankFit {
     }
 
     /**
-     * Carve target for a dry bank column {@code dOut} blocks from water (near-water shelf flush at {@code waterSurface}).
-     * Never returns above {@code originalTop}.
+     * Carve target for a dry bank column {@code dOut} blocks from water.
+     * Never returns above {@code originalTop}, and never more than {@link #maxBankIncision} below it.
      */
     static int bankCarveTarget(int originalTop, int waterSurface, double dOut, double reach) {
         if (originalTop <= waterSurface) {
             return originalTop;
         }
-        if (dOut <= 2.5) {
-            return waterSurface;
+        int drop = originalTop - waterSurface;
+        boolean extreme = drop > EXTREME_CHANNEL_DROP && originalTop >= 64;
+        int plane = extreme
+            ? cappedPlane(originalTop, waterSurface, maxBankIncision(dOut, reach))
+            : waterSurface;
+        if (originalTop <= plane) {
+            return originalTop;
         }
         double safeReach = Math.max(2.0, reach);
-        double heightAbove = originalTop - waterSurface;
-        double rise = RiverChannelForm.bankRise(dOut - 1.0, heightAbove, safeReach - 1.0, BANK_CARVE_TALUS);
-        int target = waterSurface + (int) Math.round(Math.min(rise, heightAbove));
-        return Math.min(target, originalTop);
+        double heightAbove = originalTop - plane;
+        // Continuous talus from the wet edge (no hard flush shelf → fewer triangular facets).
+        double rise = RiverChannelForm.bankRise(Math.max(0.0, dOut), heightAbove, safeReach, BANK_CARVE_TALUS);
+        int target = plane + (int) Math.round(Math.min(rise, heightAbove));
+        target = Math.min(target, originalTop);
+        if (extreme) {
+            int floor = originalTop - maxBankIncision(dOut, reach);
+            target = Math.max(target, floor);
+        }
+        return target;
     }
 
     /** Target dry-column top for conforming terrain to a bank plane (carve high, light-raise low). */

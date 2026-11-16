@@ -27,10 +27,20 @@ final class RiverStationColumn {
     }
 
     /**
-     * Freshwater outside a baked corridor stays a lake.
-     * With stations off, river-artifact freshwater is not given a lake plane either.
+     * Freshwater lake ownership. Real lakes ({@code effectiveLake}) keep the lake plane
+     * even when a river-station corridor stamp crosses them. Corridor cells that are not
+     * effective lakes use baked stations. With stations off, river-artifact freshwater
+     * is not given a lake plane either.
      */
-    static boolean freshwaterUsesLake(boolean stationsEnabled, int reachId, boolean riverArtifact) {
+    static boolean freshwaterUsesLake(
+        boolean stationsEnabled,
+        int reachId,
+        boolean riverArtifact,
+        boolean effectiveLake
+    ) {
+        if (effectiveLake) {
+            return true;
+        }
         if (!stationsEnabled) {
             return !riverArtifact;
         }
@@ -58,10 +68,13 @@ final class RiverStationColumn {
         int water = baked.getAsInt();
         boolean inChannel = distanceFound && blocks <= waterRadius;
         if (inChannel) {
-            int bed = RiverWaterPlane.bedUnderPlane(water, depth, minBuildY);
-            return new Shape(true, true, bed, water);
+            // Extreme mountain stamps: shallow DEM notch. Otherwise baked water Y is absolute.
+            int plane = RiverBankFit.cappedPlane(originalSurfaceY, water, RiverBankFit.MAX_CHANNEL_INCISION);
+            int bed = RiverWaterPlane.bedUnderPlane(plane, depth, minBuildY);
+            return new Shape(true, true, bed, plane);
         }
         double dOut = distanceFound ? Math.max(0.5, blocks - waterRadius) : 1.0;
+        // Banks: carve is DEM-capped; reference water Y stays baked.
         int terrain = RiverWaterPlane.conformBankTop(originalSurfaceY, water, dOut, RiverBankFit.BANK_CARVE_REACH);
         terrain = Math.max(minBuildY + 1, terrain);
         return new Shape(false, true, terrain, water);

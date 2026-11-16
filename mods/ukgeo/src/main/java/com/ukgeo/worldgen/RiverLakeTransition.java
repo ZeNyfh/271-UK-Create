@@ -1,8 +1,8 @@
 package com.ukgeo.worldgen;
 
 /**
- * River corridor → lake mouth blends. Pure lake columns (reachId == 0) never
- * pass through these helpers; only station corridor cells near an effective lake.
+ * River corridor → lake mouth blends for approach cells only.
+ * Effective lake interiors use the lake path and never pass through these helpers.
  */
 final class RiverLakeTransition {
     private RiverLakeTransition() {

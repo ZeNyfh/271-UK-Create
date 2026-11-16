@@ -77,13 +77,35 @@ class RiverStationColumnTest {
         assertEquals(-32767, almost.waterY());
     }
 
+
+    @Test
+    void mountainChannelIncisionIsCapped() {
+        // DEM 160, baked water 100 → shallow notch, not a 60-block gorge.
+        RiverStationColumn.Shape shape = RiverStationColumn.resolve(true, 3, 100, true, 0, 3, 160, 3, -64);
+        assertTrue(shape.hasWater());
+        assertEquals(152, shape.waterY());
+        assertTrue(shape.terrainY() < shape.waterY(), "bed=" + shape.terrainY());
+        assertTrue(shape.terrainY() >= 152 - 4, "bed should stay near notched plane, bed=" + shape.terrainY());
+        assertTrue(160 - shape.waterY() <= RiverBankFit.MAX_CHANNEL_INCISION);
+        // Normal valley drop stays on baked water Y.
+        RiverStationColumn.Shape valley = RiverStationColumn.resolve(true, 3, 100, true, 0, 3, 120, 3, -64);
+        assertEquals(100, valley.waterY());
+    }
+
     @Test
     void freshwaterNonCorridorStaysLake() {
-        assertTrue(RiverStationColumn.freshwaterUsesLake(true, 0, true));
-        assertTrue(RiverStationColumn.freshwaterUsesLake(true, 0, false));
-        assertFalse(RiverStationColumn.freshwaterUsesLake(true, 5, false));
-        assertTrue(RiverStationColumn.freshwaterUsesLake(false, 0, false));
-        assertFalse(RiverStationColumn.freshwaterUsesLake(false, 0, true));
+        assertTrue(RiverStationColumn.freshwaterUsesLake(true, 0, true, false));
+        assertTrue(RiverStationColumn.freshwaterUsesLake(true, 0, false, false));
+        assertFalse(RiverStationColumn.freshwaterUsesLake(true, 5, false, false));
+        assertTrue(RiverStationColumn.freshwaterUsesLake(false, 0, false, false));
+        assertFalse(RiverStationColumn.freshwaterUsesLake(false, 0, true, false));
+    }
+
+    @Test
+    void effectiveLakeKeepsLakeEvenUnderCorridorStamp() {
+        assertTrue(RiverStationColumn.freshwaterUsesLake(true, 5, false, true));
+        assertTrue(RiverStationColumn.freshwaterUsesLake(true, 99, true, true));
+        assertTrue(RiverStationColumn.freshwaterUsesLake(false, 0, true, true));
     }
 
     @Test

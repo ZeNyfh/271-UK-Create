@@ -33,9 +33,21 @@ class RiverWaterPlaneTest {
     }
 
     @Test
-    void conformBankTopHighBankNearWaterFlushesToPlane() {
-        assertEquals(100, RiverWaterPlane.conformBankTop(110, 100, 1.0, 12.0));
-        assertEquals(100, RiverWaterPlane.conformBankTop(110, 100, 2.0, 12.0));
+    void conformBankTopCapsMountainIncision() {
+        // DEM 160, baked water 100 must not open a 60-block canyon.
+        int near = RiverWaterPlane.conformBankTop(160, 100, 1.0, RiverBankFit.BANK_CARVE_REACH);
+        assertTrue(near >= 160 - RiverBankFit.MAX_BANK_INCISION_NEAR, "near=" + near);
+        assertTrue(near <= 160);
+        int far = RiverWaterPlane.conformBankTop(160, 100, RiverBankFit.BANK_CARVE_REACH, RiverBankFit.BANK_CARVE_REACH);
+        assertTrue(far >= near, "far should be at least as high as near: near=" + near + " far=" + far);
+        assertTrue(far <= 160);
+    }
+
+    @Test
+    void conformBankTopModestValleyStillLowersNearWater() {
+        int near = RiverWaterPlane.conformBankTop(110, 100, 1.0, RiverBankFit.BANK_CARVE_REACH);
+        assertTrue(near < 110, "near=" + near);
+        assertTrue(near >= 100, "should not go below water plane, near=" + near);
     }
 
     @Test
@@ -47,7 +59,7 @@ class RiverWaterPlaneTest {
 
     @Test
     void conformBankTopFarHighBankTalusNotFullCarve() {
-        int far = RiverWaterPlane.conformBankTop(110, 100, 11.5, 12.0);
+        int far = RiverWaterPlane.conformBankTop(110, 100, 7.5, RiverBankFit.BANK_CARVE_REACH);
         assertTrue(far > 100 && far <= 110);
     }
 }

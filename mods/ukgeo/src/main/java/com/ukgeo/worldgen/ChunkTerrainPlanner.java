@@ -92,6 +92,7 @@ final class ChunkTerrainPlanner {
         cutCascadeLips(columns, minBuildY, maxBuildY);
         smoothFreshwaterLakeBeds(columns, minBuildY, maxBuildY);
         smoothRiverBedsInComponents(columns, minBuildY, maxBuildY);
+        smoothDryRiverBanks(columns, minBuildY, maxBuildY);
         long oreStartNanos = System.nanoTime();
         Plan plan = new Plan(columns, generator.buildOrePlacements(data, chunk, columns), generator.seaLevel());
         long oreElapsedNanos = System.nanoTime() - oreStartNanos;
@@ -1506,7 +1507,8 @@ final class ChunkTerrainPlanner {
     }
 
     /**
-     * One light pass on large freshwater lake beds: interior cells with most cardinal lake neighbours.
+     * Soften cubic lake beds/water planes: level the water surface per lake component,
+     * then diffuse beds over several 8-connected averaging passes.
      */
     private static void smoothFreshwaterLakeBeds(ColumnPlan[] columns, int minBuildY, int maxBuildY) {
         int[] componentOf = labelWaterComponents(columns);
@@ -1516,15 +1518,46 @@ final class ChunkTerrainPlanner {
         }
         int componentCount = maxId + 1;
         int[] waterCounts = new int[componentCount];
+        int[] waterMax = new int[componentCount];
+        java.util.Arrays.fill(waterMax, Integer.MIN_VALUE);
         for (int index = 0; index < columns.length; index++) {
-            if (!columns[index].river().hasWater()) {
+            ColumnPlan column = columns[index];
+            if (!column.river().hasWater()
+                || column.vegetationClass() != UkGeoChunkGenerator.VEGETATION_FRESHWATER) {
                 continue;
             }
             int id = componentOf[index];
-            if (id >= 0 && id < componentCount) {
-                waterCounts[id]++;
+            if (id < 0 || id >= componentCount) {
+                continue;
             }
+            waterCounts[id]++;
+            waterMax[id] = Math.max(waterMax[id], column.river().waterSurfaceY());
         }
+
+        // Flatten stepped lake water planes within each sizable freshwater component.
+        for (int index = 0; index < columns.length; index++) {
+            ColumnPlan column = columns[index];
+            if (!column.river().hasWater()
+                || column.vegetationClass() != UkGeoChunkGenerator.VEGETATION_FRESHWATER) {
+                continue;
+            }
+            int id = componentOf[index];
+            if (id < 0 || id >= componentCount || waterCounts[id] < LAKE_SMOOTH_MIN_CELLS) {
+                continue;
+            }
+            int targetWater = waterMax[id];
+            if (targetWater == Integer.MIN_VALUE || targetWater == column.river().waterSurfaceY()) {
+                continue;
+            }
+            columns[index] = withRiverBedAndWater(
+                column,
+                column.river().terrainSurfaceY(),
+                targetWater,
+                minBuildY,
+                maxBuildY
+            );
+        }
+
         int[] beds = new int[columns.length];
         for (int index = 0; index < columns.length; index++) {
             ColumnPlan column = columns[index];
@@ -1534,14 +1567,14 @@ final class ChunkTerrainPlanner {
                 continue;
             }
             int id = componentOf[index];
-            if (id < 0 || id >= componentCount || waterCounts[id] < 12) {
+            if (id < 0 || id >= componentCount || waterCounts[id] < LAKE_SMOOTH_MIN_CELLS) {
                 beds[index] = Integer.MIN_VALUE;
                 continue;
             }
             int localZ = index / CHUNK_SIZE;
             int localX = index - localZ * CHUNK_SIZE;
             int freshwaterNeighbors = 0;
-            for (int[] offset : CARDINAL_OFFSETS) {
+            for (int[] offset : EIGHT_OFFSETS) {
                 int nx = localX + offset[0];
                 int nz = localZ + offset[1];
                 if (nx < 0 || nz < 0 || nx >= CHUNK_SIZE || nz >= CHUNK_SIZE) {
@@ -1555,51 +1588,66 @@ final class ChunkTerrainPlanner {
                     freshwaterNeighbors++;
                 }
             }
-            if (freshwaterNeighbors < 3) {
+            // Include near-shore cells so cubic rings dissolve at the edge too.
+            if (freshwaterNeighbors < 2) {
                 beds[index] = Integer.MIN_VALUE;
             } else {
                 beds[index] = column.river().terrainSurfaceY();
             }
         }
-        int[] next = beds.clone();
-        for (int index = 0; index < columns.length; index++) {
-            if (beds[index] == Integer.MIN_VALUE) {
-                continue;
-            }
-            int localZ = index / CHUNK_SIZE;
-            int localX = index - localZ * CHUNK_SIZE;
-            int component = componentOf[index];
-            int bed = beds[index];
-            for (int[] offset : CARDINAL_OFFSETS) {
-                int nx = localX + offset[0];
-                int nz = localZ + offset[1];
-                if (nx < 0 || nz < 0 || nx >= CHUNK_SIZE || nz >= CHUNK_SIZE) {
+
+        for (int pass = 0; pass < LAKE_BED_SMOOTH_PASSES; pass++) {
+            int[] next = beds.clone();
+            for (int index = 0; index < columns.length; index++) {
+                if (beds[index] == Integer.MIN_VALUE) {
                     continue;
                 }
-                int neighbor = nz * CHUNK_SIZE + nx;
-                if (componentOf[neighbor] != component || beds[neighbor] == Integer.MIN_VALUE) {
-                    continue;
+                int localZ = index / CHUNK_SIZE;
+                int localX = index - localZ * CHUNK_SIZE;
+                int component = componentOf[index];
+                int sum = beds[index];
+                int count = 1;
+                for (int[] offset : EIGHT_OFFSETS) {
+                    int nx = localX + offset[0];
+                    int nz = localZ + offset[1];
+                    if (nx < 0 || nz < 0 || nx >= CHUNK_SIZE || nz >= CHUNK_SIZE) {
+                        continue;
+                    }
+                    int neighbor = nz * CHUNK_SIZE + nx;
+                    if (componentOf[neighbor] != component || beds[neighbor] == Integer.MIN_VALUE) {
+                        continue;
+                    }
+                    sum += beds[neighbor];
+                    count++;
                 }
-                int neighborBed = beds[neighbor];
-                if (bed > neighborBed + 1) {
-                    bed = neighborBed + 1;
-                } else if (bed < neighborBed - 1) {
-                    bed = neighborBed - 1;
+                int averaged = Math.round(sum / (float) count);
+                int bed = beds[index];
+                if (averaged > bed + 1) {
+                    averaged = bed + 1;
+                } else if (averaged < bed - 1) {
+                    averaged = bed - 1;
                 }
+                next[index] = Math.max(minBuildY + 1, averaged);
             }
-            next[index] = Math.max(minBuildY + 1, bed);
+            beds = next;
         }
+
         for (int index = 0; index < columns.length; index++) {
             if (beds[index] == Integer.MIN_VALUE) {
-                continue;
-            }
-            int newBed = next[index];
-            if (newBed == beds[index]) {
                 continue;
             }
             ColumnPlan column = columns[index];
-            int waterY = column.river().waterSurfaceY();
-            columns[index] = withRiverBedAndWater(column, newBed, waterY, minBuildY, maxBuildY);
+            int newBed = beds[index];
+            if (newBed == column.river().terrainSurfaceY()) {
+                continue;
+            }
+            columns[index] = withRiverBedAndWater(
+                column,
+                newBed,
+                column.river().waterSurfaceY(),
+                minBuildY,
+                maxBuildY
+            );
         }
     }
 
@@ -1702,8 +1750,7 @@ final class ChunkTerrainPlanner {
         if (bankTop <= waterY) {
             return;
         }
-        int height = bankTop - waterY;
-        int notchedTop = waterY + (int) Math.round(RiverChannelForm.bankRise(Math.max(0.0, dOut), height, Math.max(1.0, reach), 0.55));
+        int notchedTop = RiverBankFit.bankCarveTarget(bankTop, waterY, dOut, Math.max(1.0, reach));
         notchedTop = Math.clamp(notchedTop, Math.max(minBuildY + 1, waterY), bankTop);
         if (notchedTop >= neighbor.terrainTop()) {
             return;
@@ -1738,9 +1785,101 @@ final class ChunkTerrainPlanner {
         return max;
     }
 
+    /**
+     * Light 8-neighbour average on dry river-influenced bank tops to break triangular stamp facets.
+     * Does not edit wet columns or baked water Y.
+     */
+    private static void smoothDryRiverBanks(ColumnPlan[] columns, int minBuildY, int maxBuildY) {
+        int[] tops = new int[columns.length];
+        boolean[] editable = new boolean[columns.length];
+        for (int index = 0; index < columns.length; index++) {
+            ColumnPlan column = columns[index];
+            UkGeoChunkGenerator.RiverShape river = column.river();
+            if (!river.influenced() || river.hasWater()) {
+                tops[index] = Integer.MIN_VALUE;
+                continue;
+            }
+            tops[index] = column.terrainTop();
+            editable[index] = true;
+        }
+        for (int pass = 0; pass < 2; pass++) {
+            int[] next = tops.clone();
+            for (int index = 0; index < columns.length; index++) {
+                if (!editable[index]) {
+                    continue;
+                }
+                int localZ = index / CHUNK_SIZE;
+                int localX = index - localZ * CHUNK_SIZE;
+                int sum = tops[index];
+                int count = 1;
+                for (int[] offset : EIGHT_OFFSETS) {
+                    int nx = localX + offset[0];
+                    int nz = localZ + offset[1];
+                    if (nx < 0 || nz < 0 || nx >= CHUNK_SIZE || nz >= CHUNK_SIZE) {
+                        continue;
+                    }
+                    int neighbor = nz * CHUNK_SIZE + nx;
+                    if (!editable[neighbor]) {
+                        continue;
+                    }
+                    sum += tops[neighbor];
+                    count++;
+                }
+                int averaged = Math.round(sum / (float) count);
+                int top = tops[index];
+                if (averaged > top + 1) {
+                    averaged = top + 1;
+                } else if (averaged < top - 1) {
+                    averaged = top - 1;
+                }
+                // Never carve further below the original DEM than the bank cap allows.
+                int floor = columns[index].originalSurfaceY() - RiverBankFit.MAX_BANK_INCISION_NEAR;
+                next[index] = Math.max(minBuildY + 1, Math.max(averaged, floor));
+            }
+            tops = next;
+        }
+        for (int index = 0; index < columns.length; index++) {
+            if (!editable[index]) {
+                continue;
+            }
+            ColumnPlan column = columns[index];
+            int newTop = tops[index];
+            if (newTop == column.terrainTop()) {
+                continue;
+            }
+            UkGeoChunkGenerator.RiverShape river = column.river();
+            UkGeoChunkGenerator.RiverShape shaped = new UkGeoChunkGenerator.RiverShape(
+                false,
+                true,
+                newTop,
+                river.waterSurfaceY(),
+                river.floorMaterial()
+            );
+            int columnTop = Math.clamp(Math.max(column.columnTop(), newTop), minBuildY, maxBuildY);
+            columns[index] = new ColumnPlan(
+                column.originalSurfaceY(),
+                newTop,
+                columnTop,
+                column.steep(),
+                column.coastalBeach(),
+                shaped,
+                column.vegetationClass(),
+                column.surfaceRock(),
+                column.exposedSurfaceRock(),
+                column.hasHeightData()
+            );
+        }
+    }
+
     private static final int[][] CARDINAL_OFFSETS = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+    private static final int[][] EIGHT_OFFSETS = {
+        {1, 0}, {-1, 0}, {0, 1}, {0, -1},
+        {1, 1}, {1, -1}, {-1, 1}, {-1, -1}
+    };
     private static final int RIVER_BED_MAX_NEIGHBOR_STEP = 1;
     private static final int RIVER_BED_SMOOTH_PASSES = 3;
+    private static final int LAKE_BED_SMOOTH_PASSES = 4;
+    private static final int LAKE_SMOOTH_MIN_CELLS = 8;
 
     /** 4-connected flood-fill labels for hasWater columns; -1 = dry / no water. */
     private static int[] labelWaterComponents(ColumnPlan[] columns) {
