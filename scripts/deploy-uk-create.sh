@@ -170,7 +170,8 @@ update_client() {
   require_dir "$MOD_DIR"
   install_project_mods_into "$MOD_DIR"
   sync_kubejs_into "$INSTANCE_DIR"
-  if [[ "$DO_DATA" == "1" ]]; then
+  # Client uk_world_data is opt-in; only the dedicated server needs it.
+  if [[ "${DO_CLIENT_DATA:-0}" == "1" ]]; then
     sync_world_data_into "$INSTANCE_DIR"
   fi
   log "client updated: $INSTANCE_DIR"
