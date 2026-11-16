@@ -37,8 +37,9 @@ CLIENT_ONLY_GLOBS=(
   'appleskin-*.jar'
   'veil-*.jar'
   'sable-companion-*.jar'
-  'exposure-*.jar'
-  'ponder-*.jar'
+  'ponder-*.jar',
+  'DistantHorizons-*.jar',
+  'distant-horizons-*.jar'
 )
 
 PROJECT_MOD_PREFIXES=(
@@ -215,7 +216,7 @@ printf 'eula=true\n' > eula.txt
 if [[ ! -f server.properties ]]; then
   cat > server.properties << PROP
 motd=UK Create
-max-players=10
+max-players=15
 online-mode=true
 difficulty=hard
 gamemode=survival
@@ -283,7 +284,7 @@ purge_remote_stale_project_jars() {
 set -euo pipefail
 MODS="$SERVER_REMOTE_DIR/mods"
 cd "\$MODS"
-for prefix in ukgeo- ukgeo-animals- animalhunger- foodspoilage- pollution- vanillaadjust- vanilla_adjustments- createenginebalance- enginebalance- realtime_localised_weather- realtime-localised-weather-; do
+for prefix in ukgeo-animals- animalhunger- foodspoilage- pollution- vanillaadjust- vanilla_adjustments- createenginebalance- enginebalance- realtime_localised_weather- realtime-localised-weather-; do
   mapfile -t jars < <(ls -1 \${prefix}*.jar 2>/dev/null | sort -V || true)
   if ((\${#jars[@]} > 1)); then
     # keep lexicographically last / highest version-ish; prefer newest mtime
@@ -337,35 +338,29 @@ sync_jvm_args() {
 
 start_server() {
   sync_jvm_args
-  local java_bin="$SERVER_JAVA_HOME/bin/java"
-  ssh "$SERVER_SSH_HOST" bash -s << REMOTE
+  ssh "$SERVER_SSH_HOST" bash -s <<EOF
 set -euo pipefail
 REMOTE_DIR="$SERVER_REMOTE_DIR"
-JAVA_HOME_REMOTE="$SERVER_JAVA_HOME"
-JAVA_BIN="$java_bin"
-MEM="$SERVER_MEMORY"
-export JAVA_HOME="\$JAVA_HOME_REMOTE"
-export PATH="\$JAVA_HOME/bin:\$PATH"
+JAVA_BIN="$SERVER_JAVA_HOME/bin/java"
 cd "\$REMOTE_DIR"
 mkdir -p logs
+ARGS_FILE=\$(ls libraries/net/neoforged/neoforge/*/unix_args.txt | head -n1)
+cat > run.sh <<RUN
+#!/usr/bin/env sh
+cd "\$(dirname "\$0")"
+JAVA_BIN="$SERVER_JAVA_HOME/bin/java"
+if [ ! -x "\$JAVA_BIN" ]; then
+  echo "Java not found at \$JAVA_BIN" >&2
+  exit 1
+fi
+exec "\$JAVA_BIN" @user_jvm_args.txt @\$ARGS_FILE "\$@"
+RUN
+chmod +x run.sh
 if [[ -f server.pid ]] && kill -0 "\$(cat server.pid)" 2>/dev/null; then
   echo "[remote] server already running pid=\$(cat server.pid)"
   exit 0
 fi
-# Prefer NeoForge run script; ensure JDK 21.
-if [[ -x ./run.sh ]]; then
-  # Rewrite launcher java path idempotently.
-  if grep -q '^java ' run.sh; then
-    sed -i "s|^java |\"\$JAVA_BIN\" |" run.sh || true
-  fi
-  nohup env JAVA_HOME="\$JAVA_HOME_REMOTE" PATH="\$JAVA_HOME_REMOTE/bin:\$PATH" ./run.sh nogui > logs/console.out 2>&1 &
-elif [[ -f user_jvm_args.txt ]]; then
-  ARGS_FILE=\$(ls libraries/net/neoforged/neoforge/*/unix_args.txt | head -n1)
-  nohup "\$JAVA_BIN" -Xms\$MEM -Xmx\$MEM @user_jvm_args.txt @"\$ARGS_FILE" nogui > logs/console.out 2>&1 &
-else
-  echo "[remote] missing NeoForge run files in \$REMOTE_DIR" >&2
-  exit 1
-fi
+nohup ./run.sh nogui > logs/console.out 2>&1 &
 echo \$! > server.pid
 sleep 2
 if kill -0 "\$(cat server.pid)" 2>/dev/null; then
@@ -375,8 +370,9 @@ else
   tail -n 40 logs/console.out >&2 || true
   exit 1
 fi
-REMOTE
+EOF
 }
+
 
 stop_server() {
   ssh "$SERVER_SSH_HOST" bash -s << REMOTE

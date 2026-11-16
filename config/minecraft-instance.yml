@@ -5,7 +5,7 @@ mod_dir: "/mnt/f9e25c87-6bec-4284-bbee-92babc61d5c7/Games/Minecraft/Instances/UK
 # Optional local JDK override for builds (empty = auto temurin-21).
 java_dir: "/home/zenyfh/.jdks/temurin-21.0.11"
 
-# Dedicated server on zenvibelaptop (my local device) (created/managed by scripts/deploy-uk-create.sh).
+# Dedicated server on zenvibelaptop (managed by scripts/deploy-uk-create.sh).
 server:
   ssh_host: "zenyfh@zenvibelaptop"
   remote_dir: "/home/zenyfh/uk-create-server"

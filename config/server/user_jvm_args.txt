@@ -1,66 +1,39 @@
-# Aikar-style G1GC flags for NeoForge 1.21 / Java 21 (max 8G)
-# https://docs.papermc.io/paper/aikars-flags
+# zenvibelaptop: Ryzen 7 5825U 8C/16T, 32G RAM — server-focused UKGeo profile
+# Heap 8G start; raise to 10G only if GC logs show pressure.
 -Xms8G
 -Xmx8G
+
+# G1: prefer Java 21 defaults; tune pause target before forcing generation sizes.
 -XX:+UseG1GC
+-XX:MaxGCPauseMillis=300
 -XX:+ParallelRefProcEnabled
--XX:MaxGCPauseMillis=200
--XX:+UnlockExperimentalVMOptions
 -XX:+DisableExplicitGC
 -XX:+AlwaysPreTouch
--XX:G1NewSizePercent=30
--XX:G1MaxNewSizePercent=40
--XX:G1HeapRegionSize=8M
--XX:G1ReservePercent=20
--XX:G1HeapWastePercent=5
--XX:G1MixedGCCountTarget=4
--XX:InitiatingHeapOccupancyPercent=15
--XX:G1MixedGCLiveThresholdPercent=90
--XX:G1RSetUpdatingPauseTimePercent=5
--XX:SurvivorRatio=32
 -XX:+PerfDisableSharedMem
--XX:MaxTenuringThreshold=1
--Dusing.aikars.flags=https://mcflags.emc.gs
--Daikars.new.flags=true
-# UKGeo: async plan defaults to Util.backgroundExecutor (do NOT enableParallelChunkPlanning — fights MC workers)
-# Opt-in dedicated ukgeo-plan-* pool: -Dukgeo.useDedicatedPlanPool=true
-# planThreads default = max(4, cpus-1) capped at 12; inlineChunkPlanning=true forces sync A/B
--Dukgeo.debugPerfSummary=true
--Dukgeo.perfLogIntervalChunks=50
+
+# GC logging for heap/thread experiments
+-Xlog:gc*:file=logs/gc.log:time,uptime,level,tags:filecount=5,filesize=10M
+
+# UKGeo dedicated planners (main test = 8; also try 4/6/10/12 when benchmarking)
 -Dukgeo.asyncChunkPlanning=true
-# -Dukgeo.useDedicatedPlanPool=true
-# -Dukgeo.planThreads=4
-# -Dukgeo.inlineChunkPlanning=true
+-Dukgeo.useDedicatedPlanPool=true
+-Dukgeo.planThreads=8
 -Dukgeo.enableRiverSearchIndex=true
+-Dukgeo.debugPerfSummary=true
+-Dukgeo.perfLogIntervalChunks=100
 -Dukgeo.slowFillFromNoiseWarnMs=250
 -Dukgeo.slowApplyBiomeDecorationWarnMs=250
 -Dukgeo.slowPlanWarnMs=250
 
-# UKGeo Phase 3: region origin index for ore SliceBags (default on; safer than voxel bags)
-# Sticky empty-origin set soft cap (default 262144; stop remembering rather than thrash)
-# Vein/slice caches sized to avoid thrash (was 4096 → ~7% hit rate)
 -Dukgeo.maxOreVeinPlanCache=131072
 -Dukgeo.maxOreSliceBagCache=131072
 -Dukgeo.maxOreRegionIndexEntries=16384
-# -Dukgeo.disableOreRegionIndex=true
-# -Dukgeo.oreRegionChunkSize=8
-# -Dukgeo.maxOreEmptyOriginCache=262144
-# Section writes still on unless: -Dukgeo.disableFastSectionWrites=true
 
-# UKGeo Phase 4: velocity-aware travel prefetch corridor (temporary TicketType tickets)
 -Dukgeo.enableTravelPrefetch=true
-# -Dukgeo.prefetchMinSpeedBps=40
-# -Dukgeo.prefetchLookAheadSeconds=2.5
-# -Dukgeo.prefetchHalfWidthChunks=1
-# -Dukgeo.prefetchMaxTickets=128
-# -Dukgeo.prefetchIntervalTicks=10
-# -Dukgeo.debugTravelPrefetch=true
-# OPTIONAL high-speed view-distance (GLOBAL — affects all players; risk of client desync / lag spikes)
-# -Dukgeo.enableHighSpeedViewDistance=true
-# -Dukgeo.highSpeedViewDistanceBps=80
-# -Dukgeo.highSpeedViewDistance=6
+-Dukgeo.prefetchMaxTickets=96
+-Dukgeo.prefetchLookAheadSeconds=2.5
+-Dukgeo.prefetchHalfWidthChunks=1
+-Dukgeo.prefetchIntervalTicks=10
 
-# UKGeo Phase 5: custom Distant Horizons tile→LOD generator
-# Custom tile LODs used for terrain/rivers (fast); vegetation canopy cubes removed.
--Dukgeo.enableDhLodGenerator=true
-
+# DH not shipped on dedicated server pack.
+-Dukgeo.enableDhLodGenerator=false
