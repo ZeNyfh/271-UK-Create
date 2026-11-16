@@ -109,6 +109,13 @@ The mod registers `/realtimeweather` commands for operators:
 - `/realtimeweather refresh`
 - `/realtimeweather sample <x> <z>`
 
+Severity for override commands must be one of: `TRACE`, `LIGHT`, `MODERATE`, `HEAVY`, `EXTREME` (not a percent).
+
+Visual debug percent overrides (local weather chunk, no UKGeo required):
+
+- `/rain <percent>` — `0`–`100`
+- `/snow <percent>` — `0`–`100`
+
 ## Runtime model
 
 - The server does not send particles or client fog values.

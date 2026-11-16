@@ -39,32 +39,41 @@ public final class RealtimeWeatherCommands {
                     return 1;
                 }))
                 .then(Commands.literal("override")
-                    .then(Commands.literal("clear").executes(context -> applyOverride(context, ResolvedPrecipitation.NONE, GameplaySeverity.TRACE, 30 * 60 * 1000L)))
+                    .then(Commands.literal("clear").executes(context -> applyOverride(context, ResolvedPrecipitation.NONE, "TRACE", 30 * 60 * 1000L)))
                     .then(Commands.literal("rain")
                         .then(Commands.argument("severity", StringArgumentType.word())
-                            .executes(context -> applyOverride(context, ResolvedPrecipitation.RAIN, parseSeverity(StringArgumentType.getString(context, "severity")), 30 * 60 * 1000L))
+                            .executes(context -> applyOverride(context, ResolvedPrecipitation.RAIN, StringArgumentType.getString(context, "severity"), 30 * 60 * 1000L))
                             .then(Commands.argument("duration", IntegerArgumentType.integer(1))
-                                .executes(context -> applyOverride(context, ResolvedPrecipitation.RAIN, parseSeverity(StringArgumentType.getString(context, "severity")), IntegerArgumentType.getInteger(context, "duration") * 1000L)))))
+                                .executes(context -> applyOverride(context, ResolvedPrecipitation.RAIN, StringArgumentType.getString(context, "severity"), IntegerArgumentType.getInteger(context, "duration") * 1000L)))))
                     .then(Commands.literal("snow")
                         .then(Commands.argument("severity", StringArgumentType.word())
-                            .executes(context -> applyOverride(context, ResolvedPrecipitation.SNOW, parseSeverity(StringArgumentType.getString(context, "severity")), 30 * 60 * 1000L))))
+                            .executes(context -> applyOverride(context, ResolvedPrecipitation.SNOW, StringArgumentType.getString(context, "severity"), 30 * 60 * 1000L))
+                            .then(Commands.argument("duration", IntegerArgumentType.integer(1))
+                                .executes(context -> applyOverride(context, ResolvedPrecipitation.SNOW, StringArgumentType.getString(context, "severity"), IntegerArgumentType.getInteger(context, "duration") * 1000L)))))
                     .then(Commands.literal("thunder")
                         .then(Commands.argument("severity", StringArgumentType.word())
-                            .executes(context -> applyOverride(context, ResolvedPrecipitation.THUNDER_RAIN, parseSeverity(StringArgumentType.getString(context, "severity")), 30 * 60 * 1000L))))
+                            .executes(context -> applyOverride(context, ResolvedPrecipitation.THUNDER_RAIN, StringArgumentType.getString(context, "severity"), 30 * 60 * 1000L))
+                            .then(Commands.argument("duration", IntegerArgumentType.integer(1))
+                                .executes(context -> applyOverride(context, ResolvedPrecipitation.THUNDER_RAIN, StringArgumentType.getString(context, "severity"), IntegerArgumentType.getInteger(context, "duration") * 1000L)))))
                     .then(Commands.literal("region")
                         .then(Commands.argument("zoneX", IntegerArgumentType.integer())
                             .then(Commands.argument("zoneZ", IntegerArgumentType.integer())
                                 .then(Commands.argument("type", StringArgumentType.word())
                                     .then(Commands.argument("severity", StringArgumentType.word())
                                         .executes(context -> {
-                                            RealtimeLocalisedWeatherMod.serverWeatherManager().applyRegionalOverride(
-                                                context.getSource().getLevel(),
-                                                IntegerArgumentType.getInteger(context, "zoneX"),
-                                                IntegerArgumentType.getInteger(context, "zoneZ"),
-                                                parsePrecipitation(StringArgumentType.getString(context, "type")),
-                                                parseSeverity(StringArgumentType.getString(context, "severity")),
-                                                30 * 60 * 1000L
-                                            );
+                                            try {
+                                                RealtimeLocalisedWeatherMod.serverWeatherManager().applyRegionalOverride(
+                                                    context.getSource().getLevel(),
+                                                    IntegerArgumentType.getInteger(context, "zoneX"),
+                                                    IntegerArgumentType.getInteger(context, "zoneZ"),
+                                                    parsePrecipitation(StringArgumentType.getString(context, "type")),
+                                                    parseSeverity(StringArgumentType.getString(context, "severity")),
+                                                    30 * 60 * 1000L
+                                                );
+                                            } catch (IllegalStateException | IllegalArgumentException exception) {
+                                                context.getSource().sendFailure(Component.literal(exception.getMessage()));
+                                                return 0;
+                                            }
                                             context.getSource().sendSuccess(() -> Component.literal("Realtime Localised Weather regional override applied."), true);
                                             return 1;
                                         })))))))
@@ -92,6 +101,23 @@ public final class RealtimeWeatherCommands {
                         return 0;
                     }
                     source.sendSuccess(() -> Component.literal("Debug rain set to " + percent + "% for this weather chunk."), false);
+                    return 1;
+                }))
+        );
+        event.getDispatcher().register(
+            Commands.literal("snow")
+                .requires(source -> source.hasPermission(2))
+                .then(Commands.argument("percent", IntegerArgumentType.integer(0, 100)).executes(context -> {
+                    int percent = IntegerArgumentType.getInteger(context, "percent");
+                    CommandSourceStack source = context.getSource();
+                    try {
+                        // Debug-only visual snow amount for the local weather chunk; does not require UKGeo location data.
+                        RealtimeLocalisedWeatherMod.serverWeatherManager().applyVisualSnowOverride(source.getLevel(), BlockPos.containing(source.getPosition()), percent);
+                    } catch (IllegalStateException exception) {
+                        source.sendFailure(Component.literal(exception.getMessage()));
+                        return 0;
+                    }
+                    source.sendSuccess(() -> Component.literal("Debug snow set to " + percent + "% for this weather chunk."), false);
                     return 1;
                 }))
         );
@@ -124,10 +150,11 @@ public final class RealtimeWeatherCommands {
         return 1;
     }
 
-    private static int applyOverride(com.mojang.brigadier.context.CommandContext<net.minecraft.commands.CommandSourceStack> context, ResolvedPrecipitation precipitation, GameplaySeverity severity, long durationMillis) {
+    private static int applyOverride(com.mojang.brigadier.context.CommandContext<net.minecraft.commands.CommandSourceStack> context, ResolvedPrecipitation precipitation, String severityName, long durationMillis) {
         try {
+            GameplaySeverity severity = parseSeverity(severityName);
             RealtimeLocalisedWeatherMod.serverWeatherManager().applyGlobalOverride(context.getSource().getLevel(), precipitation, severity, durationMillis);
-        } catch (IllegalStateException exception) {
+        } catch (IllegalStateException | IllegalArgumentException exception) {
             context.getSource().sendFailure(Component.literal(exception.getMessage()));
             return 0;
         }
@@ -136,7 +163,13 @@ public final class RealtimeWeatherCommands {
     }
 
     private static GameplaySeverity parseSeverity(String value) {
-        return GameplaySeverity.valueOf(value.toUpperCase(java.util.Locale.ROOT));
+        try {
+            return GameplaySeverity.valueOf(value.toUpperCase(java.util.Locale.ROOT));
+        } catch (IllegalArgumentException exception) {
+            throw new IllegalArgumentException(
+                "Invalid severity '" + value + "'. Use TRACE, LIGHT, MODERATE, HEAVY, or EXTREME. For percent-based visual tests use /rain <0-100> or /snow <0-100>."
+            );
+        }
     }
 
     private static ResolvedPrecipitation parsePrecipitation(String value) {

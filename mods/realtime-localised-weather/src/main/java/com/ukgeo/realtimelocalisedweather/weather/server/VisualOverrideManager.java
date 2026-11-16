@@ -13,29 +13,50 @@ final class VisualOverrideManager {
     private volatile Entry visualTestEntry;
 
     void setRain(com.ukgeo.realtimelocalisedweather.weather.WeatherTileKey key, int percent) {
-        visualTestEntry = new Entry(percent, revisions.incrementAndGet());
+        visualTestEntry = new Entry(percent, false, revisions.incrementAndGet());
+    }
+
+    void setSnow(com.ukgeo.realtimelocalisedweather.weather.WeatherTileKey key, int percent) {
+        visualTestEntry = new Entry(percent, true, revisions.incrementAndGet());
     }
 
     Optional<Entry> lookup(com.ukgeo.realtimelocalisedweather.weather.WeatherTileKey key) {
         return Optional.ofNullable(visualTestEntry);
     }
 
-    record Entry(Integer rainPercent, long revision) {
+    record Entry(Integer percent, boolean snow, long revision) {
         ServerWeatherSnapshot apply(ServerWeatherSnapshot base) {
-            // The client maps live millimetres/hour logarithmically to vanilla's rain gradient.
-            // Invert that mapping here so /rain 50 is a genuine 50% visual test rather than
-            // almost-full rain caused by feeding it 6 mm/h.
-            float rainRate = rainPercent == null
-                ? base.precipitationRateMmPerHour()
-                : (float) Math.expm1(Math.log1p(12.0D) * rainPercent / 100.0D);
-            boolean raining = rainPercent != null && rainPercent > 0;
-            ResolvedPrecipitation precipitation = rainPercent == null ? base.resolvedPrecipitation() : (raining ? ResolvedPrecipitation.RAIN : ResolvedPrecipitation.NONE);
-            MeteorologicalPrecipitation meteorological = rainPercent == null ? base.precipitation() : (raining ? MeteorologicalPrecipitation.RAIN : MeteorologicalPrecipitation.NONE);
+            if (percent == null) {
+                return base;
+            }
+            if (percent == 0) {
+                return new ServerWeatherSnapshot(
+                    base.observedAt(), base.latitude(), base.longitude(), base.weatherCode(),
+                    MeteorologicalPrecipitation.NONE,
+                    0.0F, 0.0F, 0.0F, base.temperatureCelsius(), base.relativeHumidity(),
+                    base.visibilityMetres(), base.windSpeedKmh(), base.windDirectionDegrees(), base.windGustKmh(),
+                    ResolvedPrecipitation.NONE, GameplaySeverity.TRACE, 0.0F,
+                    base.stale(), Math.max(base.revision() + 1L, revision)
+                );
+            }
+            // Invert client logarithmic rain mapping so /rain|/snow N is a genuine N% visual test.
+            float liquidEquivalent = (float) Math.expm1(Math.log1p(12.0D) * percent / 100.0D);
+            if (snow) {
+                return new ServerWeatherSnapshot(
+                    base.observedAt(), base.latitude(), base.longitude(), base.weatherCode(),
+                    MeteorologicalPrecipitation.SNOW,
+                    liquidEquivalent, 0.0F, liquidEquivalent / 10.0F, base.temperatureCelsius(), base.relativeHumidity(),
+                    base.visibilityMetres(), base.windSpeedKmh(), base.windDirectionDegrees(), base.windGustKmh(),
+                    ResolvedPrecipitation.SNOW, GameplaySeverity.MODERATE, 0.0F,
+                    base.stale(), Math.max(base.revision() + 1L, revision)
+                );
+            }
             return new ServerWeatherSnapshot(
-                base.observedAt(), base.latitude(), base.longitude(), base.weatherCode(), meteorological,
-                rainRate, raining ? rainRate : 0.0F, 0.0F, base.temperatureCelsius(), base.relativeHumidity(),
+                base.observedAt(), base.latitude(), base.longitude(), base.weatherCode(),
+                MeteorologicalPrecipitation.RAIN,
+                liquidEquivalent, liquidEquivalent, 0.0F, base.temperatureCelsius(), base.relativeHumidity(),
                 base.visibilityMetres(), base.windSpeedKmh(), base.windDirectionDegrees(), base.windGustKmh(),
-                precipitation, raining ? GameplaySeverity.MODERATE : GameplaySeverity.TRACE, raining ? base.thunderPotential() : 0.0F,
+                ResolvedPrecipitation.RAIN, GameplaySeverity.MODERATE, base.thunderPotential(),
                 base.stale(), Math.max(base.revision() + 1L, revision)
             );
         }

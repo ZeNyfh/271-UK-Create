@@ -59,6 +59,8 @@ public final class ServerWeatherManager implements RegionalWeatherAccess {
     private static final Duration WEATHER_FETCH_FAILURE_INITIAL_BACKOFF = Duration.ofMinutes(2);
     private static final Duration WEATHER_FETCH_FAILURE_MAX_BACKOFF = Duration.ofMinutes(30);
     private static final Duration WEATHER_FETCH_LOG_INTERVAL = Duration.ofMinutes(1);
+    /** Approx column samples per Minecraft day: 1200 gameplay ticks/day x 2 samples / 256 columns. */
+    private static final double GAMEPLAY_COLUMN_SAMPLES_PER_MINECRAFT_DAY = 9.375D;
 
     private final OpenMeteoClient openMeteoClient = new OpenMeteoClient(Executors.newFixedThreadPool(1, runnable -> {
         Thread thread = new Thread(runnable, "realtime-localised-weather-http");
@@ -183,7 +185,15 @@ public final class ServerWeatherManager implements RegionalWeatherAccess {
     }
 
     public void applyVisualRainOverride(ServerLevel level, BlockPos position, int percent) {
-        // /rain is a visual debug tool and must work even when UKGeo location data is unavailable.
+        applyVisualPrecipitationOverride(level, position, percent, false);
+    }
+
+    public void applyVisualSnowOverride(ServerLevel level, BlockPos position, int percent) {
+        applyVisualPrecipitationOverride(level, position, percent, true);
+    }
+
+    private void applyVisualPrecipitationOverride(ServerLevel level, BlockPos position, int percent, boolean snow) {
+        // /rain and /snow are visual debug tools and must work even when UKGeo location data is unavailable.
         LevelState state = requireLevelState(level, true);
         int zoneSize = ServerWeatherConfig.ZONE_SIZE_BLOCKS.get();
         WeatherTileKey key = WeatherTileKey.fromBlock(level.dimension(), position.getX(), position.getZ(), zoneSize);
@@ -204,7 +214,11 @@ public final class ServerWeatherManager implements RegionalWeatherAccess {
                 tile.snapshot = placeholderSnapshot();
             }
         }
-        state.visualOverrideManager.setRain(key, percent);
+        if (snow) {
+            state.visualOverrideManager.setSnow(key, percent);
+        } else {
+            state.visualOverrideManager.setRain(key, percent);
+        }
         syncPlayers(level, state, true);
     }
 
@@ -677,6 +691,34 @@ public final class ServerWeatherManager implements RegionalWeatherAccess {
                 continue;
             }
             LocalWeatherState weather = getWeatherAt(level, topPos);
+            if (weather.snapshot() != null
+                && !weather.snapshot().resolvedPrecipitation().isSnowy()) {
+                if (ServerWeatherConfig.ENABLE_SNOW_ACCUMULATION.get()) {
+                    net.minecraft.world.level.block.state.BlockState surface = level.getBlockState(topPos);
+                    if (surface.is(net.minecraft.world.level.block.Blocks.SNOW)) {
+                        int layers = surface.getValue(net.minecraft.world.level.block.SnowLayerBlock.LAYERS);
+                        double meltDays = ServerWeatherConfig.SNOW_MELT_MINECRAFT_DAYS.get();
+                        double meltChance = Math.min(1.0D, layers / (GAMEPLAY_COLUMN_SAMPLES_PER_MINECRAFT_DAY * meltDays));
+                        if (level.random.nextFloat() < meltChance) {
+                            meltSnowAt(level, topPos);
+                        }
+                    }
+                }
+                if (ServerWeatherConfig.ENABLE_ICE_FORMATION.get()) {
+                    BlockPos icePos = null;
+                    if (level.getBlockState(topPos).is(net.minecraft.world.level.block.Blocks.ICE)) {
+                        icePos = topPos;
+                    } else if (level.getBlockState(topPos.below()).is(net.minecraft.world.level.block.Blocks.ICE)) {
+                        icePos = topPos.below();
+                    }
+                    if (icePos != null) {
+                        double meltChance = Math.min(1.0D, 1.0D / (GAMEPLAY_COLUMN_SAMPLES_PER_MINECRAFT_DAY * ServerWeatherConfig.ICE_MELT_MINECRAFT_DAYS.get()));
+                        if (level.random.nextFloat() < meltChance) {
+                            meltIceAt(level, icePos);
+                        }
+                    }
+                }
+            }
             if (weather.snapshot() == null || !weather.snapshot().hasPrecipitation()) {
                 continue;
             }
@@ -691,9 +733,8 @@ public final class ServerWeatherManager implements RegionalWeatherAccess {
             }
             if (ServerWeatherConfig.ENABLE_SNOW_ACCUMULATION.get()
                 && weather.snapshot().resolvedPrecipitation().isSnowy()
-                && level.random.nextFloat() < 0.03F * WeatherSeverityMapper.toGameplayMultiplier(weather.snapshot().gameplaySeverity())
-                && level.getBlockState(topPos.below()).isAir()) {
-                level.setBlockAndUpdate(topPos.below(), net.minecraft.world.level.block.Blocks.SNOW.defaultBlockState());
+                && level.random.nextFloat() < 0.03F * WeatherSeverityMapper.toGameplayMultiplier(weather.snapshot().gameplaySeverity())) {
+                accumulateSnowAt(level, topPos);
             }
             if (ServerWeatherConfig.ENABLE_ICE_FORMATION.get()
                 && weather.snapshot().resolvedPrecipitation().isSnowy()
@@ -708,6 +749,40 @@ public final class ServerWeatherManager implements RegionalWeatherAccess {
                 entity.clearFire();
             }
         });
+    }
+
+    private void accumulateSnowAt(ServerLevel level, BlockPos topPos) {
+        // MOTION_BLOCKING height is the air cell above the surface — place/thicken snow there.
+        net.minecraft.world.level.block.state.BlockState state = level.getBlockState(topPos);
+        if (state.is(net.minecraft.world.level.block.Blocks.SNOW)) {
+            int layers = state.getValue(net.minecraft.world.level.block.SnowLayerBlock.LAYERS);
+            if (layers < 8) {
+                level.setBlockAndUpdate(topPos, state.setValue(net.minecraft.world.level.block.SnowLayerBlock.LAYERS, layers + 1));
+            }
+            return;
+        }
+        if (state.isAir() && net.minecraft.world.level.block.Blocks.SNOW.defaultBlockState().canSurvive(level, topPos)) {
+            level.setBlockAndUpdate(topPos, net.minecraft.world.level.block.Blocks.SNOW.defaultBlockState());
+        }
+    }
+
+    private void meltSnowAt(ServerLevel level, BlockPos topPos) {
+        net.minecraft.world.level.block.state.BlockState state = level.getBlockState(topPos);
+        if (!state.is(net.minecraft.world.level.block.Blocks.SNOW)) {
+            return;
+        }
+        int layers = state.getValue(net.minecraft.world.level.block.SnowLayerBlock.LAYERS);
+        if (layers <= 1) {
+            level.removeBlock(topPos, false);
+        } else {
+            level.setBlockAndUpdate(topPos, state.setValue(net.minecraft.world.level.block.SnowLayerBlock.LAYERS, layers - 1));
+        }
+    }
+
+    private void meltIceAt(ServerLevel level, BlockPos icePos) {
+        if (level.getBlockState(icePos).is(net.minecraft.world.level.block.Blocks.ICE)) {
+            level.setBlockAndUpdate(icePos, net.minecraft.world.level.block.Blocks.WATER.defaultBlockState());
+        }
     }
 
     private void spawnLightning(ServerLevel level, BlockPos position) {

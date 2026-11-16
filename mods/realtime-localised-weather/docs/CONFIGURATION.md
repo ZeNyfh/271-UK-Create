@@ -35,7 +35,9 @@ Gameplay controls:
 
 - `enable_gameplay_rain`
 - `enable_snow_accumulation`
+- `snow_melt_minecraft_days`: approx Minecraft days for a snow column to clear while the chunk stays loaded near players (default 2.5; melting only when not snowing)
 - `enable_ice_formation`
+- `ice_melt_minecraft_days`: approx Minecraft days for weather-formed ice to thaw (default 1.25; only when not snowing)
 - `enable_cauldron_filling`
 - `enable_fire_extinguishing`
 - `enable_authoritative_lightning`

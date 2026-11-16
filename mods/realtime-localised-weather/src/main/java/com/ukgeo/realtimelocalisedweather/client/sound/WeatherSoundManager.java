@@ -34,8 +34,10 @@ public final class WeatherSoundManager {
             return;
         }
         var sample = ClientWeatherManager.sample(minecraft.player.blockPosition());
+        // Liquid precip only — snow must not loop WEATHER_RAIN ambient.
         boolean raining = sample.isPresent()
             && sample.get().snapshot().hasPrecipitation()
+            && !sample.get().snapshot().resolvedPrecipitation().isSnowy()
             && sample.get().interpolatedRate() > 0.05F;
         if (!raining) {
             stop(minecraft);

@@ -62,6 +62,9 @@ public final class WeatherOverrideManager {
                 case FREEZING_RAIN -> MeteorologicalPrecipitation.FREEZING_RAIN;
                 case HAIL -> MeteorologicalPrecipitation.HAIL;
             };
+            float temperatureCelsius = precipitation.isSnowy()
+                ? Math.min(base.temperatureCelsius(), 0.0F)
+                : base.temperatureCelsius();
             return new ServerWeatherSnapshot(
                 Instant.now(),
                 base.latitude(),
@@ -70,8 +73,9 @@ public final class WeatherOverrideManager {
                 meteorological,
                 rate,
                 precipitation.isLiquid() ? rate : 0.0F,
-                precipitation.isSnowy() ? rate : 0.0F,
-                base.temperatureCelsius(),
+                // Client visual density uses snowfallCmPerHour * 10; keep snowy overrides on that scale.
+                precipitation.isSnowy() ? rate / 10.0F : 0.0F,
+                temperatureCelsius,
                 base.relativeHumidity(),
                 base.visibilityMetres(),
                 base.windSpeedKmh(),

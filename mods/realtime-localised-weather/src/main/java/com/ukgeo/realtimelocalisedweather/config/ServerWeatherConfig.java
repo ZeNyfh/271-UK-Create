@@ -32,7 +32,9 @@ public final class ServerWeatherConfig {
     public static final ModConfigSpec.BooleanValue TROPICAL_WINTER_CONVERSION;
     public static final ModConfigSpec.BooleanValue ENABLE_GAMEPLAY_RAIN;
     public static final ModConfigSpec.BooleanValue ENABLE_SNOW_ACCUMULATION;
+    public static final ModConfigSpec.DoubleValue SNOW_MELT_MINECRAFT_DAYS;
     public static final ModConfigSpec.BooleanValue ENABLE_ICE_FORMATION;
+    public static final ModConfigSpec.DoubleValue ICE_MELT_MINECRAFT_DAYS;
     public static final ModConfigSpec.BooleanValue ENABLE_CAULDRON_FILLING;
     public static final ModConfigSpec.BooleanValue ENABLE_FIRE_EXTINGUISHING;
     public static final ModConfigSpec.BooleanValue ENABLE_AUTHORITATIVE_LIGHTNING;
@@ -78,7 +80,13 @@ public final class ServerWeatherConfig {
         TROPICAL_WINTER_CONVERSION = builder.define("tropical_winter_conversion", false);
         ENABLE_GAMEPLAY_RAIN = builder.define("enable_gameplay_rain", true);
         ENABLE_SNOW_ACCUMULATION = builder.define("enable_snow_accumulation", true);
+        SNOW_MELT_MINECRAFT_DAYS = builder
+            .comment("Approx Minecraft days for a snow column to clear while the chunk stays loaded near players (melting only when not snowing).")
+            .defineInRange("snow_melt_minecraft_days", 2.5D, 0.5D, 14.0D);
         ENABLE_ICE_FORMATION = builder.define("enable_ice_formation", true);
+        ICE_MELT_MINECRAFT_DAYS = builder
+            .comment("Approx Minecraft days for weather-formed ice to thaw while the chunk stays loaded near players (melting only when not snowing).")
+            .defineInRange("ice_melt_minecraft_days", 1.25D, 0.25D, 14.0D);
         ENABLE_CAULDRON_FILLING = builder.define("enable_cauldron_filling", true);
         ENABLE_FIRE_EXTINGUISHING = builder.define("enable_fire_extinguishing", true);
         ENABLE_AUTHORITATIVE_LIGHTNING = builder.define("enable_authoritative_lightning", true);
