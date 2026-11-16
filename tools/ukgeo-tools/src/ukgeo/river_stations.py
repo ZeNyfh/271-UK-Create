@@ -8,9 +8,12 @@ match. Junctions stay split.
 Ownership is an associative minimum of
 (|perp| millicells, -strahler_order, reach_id, station_id). Distance is the
 absolute cross-track offset from the station tangent, not Euclidean range to
-the station point. Rasterisation order does not change the winner. Water Y is
-computed once per station from the lower bank and stamped unchanged across
-that station's corridor.
+the station point. Station tangents are blended with neighbours so bends do
+not flip abruptly; stamp eligibility uses a rounded rectangle so hard corners
+do not leave triangular bank spikes. Rasterisation order does not change the
+winner. Water Y is computed once per station from the lower bank, gently
+stepped in integer Minecraft Y along the reach (cascades kept), and stamped
+unchanged across that station's corridor.
 
 Reach ids are uint32. The minimum compares the full id, so ids above 65535
 do not alias and are never masked with 0xFFFF.
@@ -50,13 +53,13 @@ from .tiles import (
 
 console = Console()
 
-BANK_CARVE_REACH = 12
+BANK_CARVE_REACH = 8
 STATION_SPACING_CELLS = 1.0
 CASCADE_DROP_METRES = 2.5
 BANK_OFFSET_MIN = 2
 BANK_OFFSET_MAX = 6
 LONGITUDINAL_DELTAS = (-1, 0, 1)
-SMOOTH_RADIUS = 2
+SMOOTH_RADIUS = 3
 # Half a spacing cell, plus a cell so neighboring stamps overlap on bends.
 ALONG_LIMIT = 1.5
 CROSS_PAD = 0.5
@@ -233,7 +236,49 @@ def smooth_longitudinal_profile(raw_metres: np.ndarray) -> np.ndarray:
     return out
 
 
+
+def smooth_water_y_profile(
+    raw_ys: np.ndarray,
+    *,
+    max_step: int = 1,
+    cascade_min_drop: int = 3,
+) -> np.ndarray:
+    """Integer Minecraft Y along a reach: gradual slopes, intact cascades.
+
+    Starts from per-station metre→Y conversion, then never rises downstream.
+    Neighbouring stations on gentle reaches step by at most ``max_step``.
+    Steps whose monotone input drop is ``cascade_min_drop`` or more are kept
+    in full (waterfall / cascade). Call once per reach; do not blend across
+    confluences.
+    """
+    raw = np.asarray(raw_ys, dtype=np.float64).reshape(-1)
+    if raw.size == 0:
+        return raw.copy()
+    mono = raw.copy()
+    finite = np.isfinite(mono)
+    if not bool(finite.any()):
+        return mono
+    first = int(np.flatnonzero(finite)[0])
+    last_v = float(mono[first])
+    for i in range(mono.size):
+        if np.isfinite(mono[i]):
+            last_v = float(mono[i])
+        else:
+            mono[i] = last_v
+    for i in range(1, mono.size):
+        mono[i] = min(mono[i], mono[i - 1])
+    result = mono.copy()
+    for i in range(1, result.size):
+        input_drop = float(mono[i - 1] - mono[i])
+        if input_drop >= float(cascade_min_drop):
+            result[i] = min(float(result[i - 1]), float(mono[i]))
+        else:
+            result[i] = max(float(mono[i]), float(result[i - 1]) - float(max_step))
+    return result
+
+
 def _fill_bank_gaps(raw: np.ndarray) -> np.ndarray:
+
     out = raw.astype(np.float64, copy=True)
     finite_idx = np.flatnonzero(np.isfinite(out))
     if finite_idx.size == 0:
@@ -369,10 +414,45 @@ def _polyline_samples(points: Sequence[tuple[float, float]], spacing: float = ST
         x0, z0, tx, tz, start, length = segments[seg_i]
         dist = min(length, max(0.0, target - start))
         samples.append(_Sample(x0 + tx * dist, z0 + tz * dist, tx, tz))
-    return samples
+    return _smooth_sample_tangents(samples)
+
+
+
+def _smooth_sample_tangents(samples: list[_Sample], window: int = 1) -> list[_Sample]:
+    """Blend each station tangent with neighbours so bends do not flip abruptly.
+
+    Abrupt per-segment tangents make oriented stamps fan into triangular bank
+    spikes at polyline vertices. A small circular-mean blend keeps ownership
+    cross-track while stabilising stamp orientation through curves.
+    """
+    n = len(samples)
+    if n < 3 or window <= 0:
+        return samples
+    out: list[_Sample] = []
+    for i, sample in enumerate(samples):
+        sx = 0.0
+        sz = 0.0
+        weight = 0.0
+        for j in range(max(0, i - window), min(n, i + window + 1)):
+            # Distance weight: centre sample counts most.
+            w = 1.0 / (1.0 + abs(j - i))
+            sx += samples[j].tx * w
+            sz += samples[j].tz * w
+            weight += w
+        if weight <= 1e-12:
+            out.append(sample)
+            continue
+        tx, tz = _unit_tangent(sx / weight, sz / weight)
+        # Reject reversals that would invert flow; keep original if blend flips.
+        if (tx * sample.tx + tz * sample.tz) < 0.0:
+            out.append(sample)
+            continue
+        out.append(_Sample(sample.x, sample.z, tx, tz))
+    return out
 
 
 def _bank_metres(sample: _Sample, half_width: int, height_at: HeightFn, mask_at: MaskFn) -> float:
+
     nx = -sample.tz
     nz = sample.tx
     radius = max(0, int(half_width))
@@ -424,10 +504,18 @@ def _stations_from_reach(
         count=len(samples),
     )
     smoothed = smooth_longitudinal_profile(raw)
+    raw_ys = np.array(
+        [
+            metres_to_minecraft_y(float(m), **params) if math.isfinite(float(m)) else math.nan
+            for m in smoothed
+        ],
+        dtype=np.float64,
+    )
+    water_ys = smooth_water_y_profile(raw_ys)
     stations: list[Station] = []
-    for station_id, (sample, metres) in enumerate(zip(samples, smoothed)):
+    for station_id, (sample, metres, water_y) in enumerate(zip(samples, smoothed, water_ys)):
         metres_f = float(metres)
-        if not math.isfinite(metres_f):
+        if not math.isfinite(metres_f) or not math.isfinite(float(water_y)):
             continue
         stations.append(
             Station(
@@ -440,7 +528,7 @@ def _stations_from_reach(
                 tz=sample.tz,
                 half_width=int(reach.half_width),
                 water_metres=metres_f,
-                water_y=int(metres_to_minecraft_y(metres_f, **params)),
+                water_y=int(water_y),
                 azimuth=flow_azimuth_u8(sample.tx, sample.tz),
             )
         )
@@ -711,7 +799,16 @@ def _stamp_one(
     dz = zs[:, None] - sz
     along = dx * tx + dz * tz
     perp = dx * (-tz) + dz * tx
-    inside = (np.abs(along) <= ALONG_LIMIT + 1e-6) & (np.abs(perp) <= cross_lim + 1e-6)
+    # Rounded-rectangle eligibility: hard rect corners become quarter-circles so
+    # neighbouring stamps with different tangents do not leave triangular spikes.
+    abs_along = np.abs(along)
+    abs_perp = np.abs(perp)
+    corner = (np.maximum(0.0, abs_along - ALONG_LIMIT) ** 2) + (
+        np.maximum(0.0, abs_perp - (cross_lim - CROSS_PAD)) ** 2
+    )
+    inside = (abs_along <= ALONG_LIMIT + CROSS_PAD + 1e-6) & (abs_perp <= cross_lim + 1e-6) & (
+        corner <= (CROSS_PAD + 1e-6) ** 2
+    )
     if not bool(inside.any()):
         return
     dist_milli = np.floor(np.abs(perp) * 1000.0 + 0.5).astype(np.int64)

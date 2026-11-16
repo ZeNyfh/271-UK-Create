@@ -83,6 +83,7 @@ def make_surface_geology_tiles(*, bgs: Path, rules: Path, manifest_path: Path, o
                     replace_nonzero_in_place(arr, burned)
                     console.print(f"{class_name}: burned {len(shapes)} features as id {class_id}")
 
+            remove_isolated_surface_pixels(arr)
             root = out / "geology" / "surface"
             _write_tiles(arr, root, tile_size)
             manifest["surface_geology"] = {
@@ -107,7 +108,105 @@ def make_surface_geology_tiles(*, bgs: Path, rules: Path, manifest_path: Path, o
             tmp.cleanup()
 
 
+
+def remove_isolated_surface_pixels(
+    arr: np.ndarray,
+    *,
+    max_island: int = 3,
+    tile_size: int = 4096,
+) -> int:
+    """Replace tiny class islands with the majority 4-neighbour class.
+
+    Preserves legitimate geological boundaries between larger regions and does
+    not blur contiguous deposits. Operates in-place. Returns pixels changed.
+
+    Large disk-backed rasters are cleaned in overlapping tiles so we never build
+    world-sized label/roll buffers (those OOMed on the UK extent).
+    """
+    data = arr
+    if getattr(data, "ndim", None) != 2:
+        raise ValueError("surface array must be 2D")
+    height, width = int(data.shape[0]), int(data.shape[1])
+    if height * width <= 8_000_000:
+        changed = _remove_isolated_block(np.asarray(data), max_island=max_island)
+        if changed and isinstance(arr, np.memmap):
+            arr.flush()
+        return changed
+
+    overlap = max(1, int(max_island))
+    changed = 0
+    for z0 in range(0, height, tile_size):
+        for x0 in range(0, width, tile_size):
+            z1 = min(height, z0 + tile_size)
+            x1 = min(width, x0 + tile_size)
+            rz0 = max(0, z0 - overlap)
+            rx0 = max(0, x0 - overlap)
+            rz1 = min(height, z1 + overlap)
+            rx1 = min(width, x1 + overlap)
+            block = np.array(data[rz0:rz1, rx0:rx1], dtype=np.uint8, copy=True)
+            local = _remove_isolated_block(block, max_island=max_island)
+            if local == 0:
+                continue
+            cz0 = z0 - rz0
+            cx0 = x0 - rx0
+            data[z0:z1, x0:x1] = block[cz0 : cz0 + (z1 - z0), cx0 : cx0 + (x1 - x0)]
+            changed += local
+    if isinstance(arr, np.memmap):
+        arr.flush()
+    return changed
+
+
+def _remove_isolated_block(data: np.ndarray, *, max_island: int) -> int:
+    """In-place isolate cleanup for a small/medium dense block."""
+    from scipy import ndimage
+
+    if data.ndim != 2:
+        raise ValueError("surface block must be 2D")
+    structure = ndimage.generate_binary_structure(2, 1)
+    changed = 0
+    shifts = [
+        np.roll(data, 1, axis=0),
+        np.roll(data, -1, axis=0),
+        np.roll(data, 1, axis=1),
+        np.roll(data, -1, axis=1),
+    ]
+    shifts[0] = shifts[0].copy(); shifts[0][0, :] = 0
+    shifts[1] = shifts[1].copy(); shifts[1][-1, :] = 0
+    shifts[2] = shifts[2].copy(); shifts[2][:, 0] = 0
+    shifts[3] = shifts[3].copy(); shifts[3][:, -1] = 0
+
+    for cls_i in (int(v) for v in np.unique(data)):
+        if cls_i == 0:
+            continue
+        mask = data == cls_i
+        if not bool(mask.any()):
+            continue
+        labels, count = ndimage.label(mask, structure=structure)
+        if count == 0:
+            continue
+        sizes = np.bincount(labels.ravel())
+        small = np.flatnonzero((sizes > 0) & (sizes <= max_island))
+        small = small[small != 0]
+        if small.size == 0:
+            continue
+        island = np.isin(labels, small)
+        votes = np.stack([s[island] for s in shifts], axis=0)
+        replacement = np.zeros(votes.shape[1], dtype=np.uint8)
+        for i in range(votes.shape[1]):
+            vals = votes[:, i]
+            vals = vals[vals != cls_i]
+            if vals.size == 0:
+                replacement[i] = 0
+                continue
+            uniq, counts = np.unique(vals, return_counts=True)
+            replacement[i] = uniq[int(np.argmax(counts * 1000 - uniq))]
+        data[island] = replacement
+        changed += int(island.sum())
+    return changed
+
+
 def _write_tiles(arr: np.ndarray, root: Path, tile_size: int) -> None:
+
     for tile_z in tqdm(range(math.ceil(arr.shape[0] / tile_size)), desc="surface geology tile rows"):
         for tile_x in range(math.ceil(arr.shape[1] / tile_size)):
             tile = arr[tile_z * tile_size : (tile_z + 1) * tile_size, tile_x * tile_size : (tile_x + 1) * tile_size]

@@ -27,6 +27,7 @@ from ukgeo.river_stations import (
     rasterize_stations,
     reaches_from_edges,
     smooth_longitudinal_profile,
+    smooth_water_y_profile,
 )
 import ukgeo.river_stations as _river_stations
 from ukgeo.tiles import (
@@ -989,3 +990,78 @@ def test_write_curved_channel_ownership_preview(tmp_path: Path):
     assert euclid_png.is_file()
     assert perp_png.is_file()
     assert curve_note.is_file()
+
+
+def test_bank_carve_reach_matches_java():
+    assert BANK_CARVE_REACH == 8
+
+
+def test_tangent_smoothing_stabilises_bend():
+    points = [(0.0, 10.0), (10.0, 10.0), (10.0, 20.0)]
+    samples = _river_stations._polyline_samples(points, spacing=1.0)
+    assert len(samples) >= 5
+    dots = [a.tx * b.tx + a.tz * b.tz for a, b in zip(samples, samples[1:])]
+    assert min(dots) > 0.2
+
+
+def test_rounded_stamp_eligibility_rejects_sharp_corner():
+    # Outer corner of the hard rectangle lies outside the rounded stamp.
+    half_width = 1
+    cross_lim = float(half_width + BANK_CARVE_REACH) + CROSS_PAD
+    along = ALONG_LIMIT + CROSS_PAD
+    perp = cross_lim
+    corner = (max(0.0, along - ALONG_LIMIT) ** 2) + (max(0.0, perp - (cross_lim - CROSS_PAD)) ** 2)
+    assert corner > (CROSS_PAD + 1e-6) ** 2
+    depth, width = 32, 32
+    reach = np.zeros((depth, width), dtype="<u4")
+    station_id = np.zeros((depth, width), dtype="<u2")
+    water = np.full((depth, width), HEIGHT_NODATA, dtype=np.int16)
+    azimuth = np.zeros((depth, width), dtype=np.uint8)
+    best_hi = np.full((depth, width), _river_stations._EMPTY_KEY, dtype=np.uint64)
+    best_lo = np.full((depth, width), _river_stations._EMPTY_KEY, dtype=np.uint64)
+    _river_stations._stamp_one(
+        16.0, 16.0, 1.0, 0.0, half_width, 5, 1, 0, 70, 0,
+        reach, station_id, water, azimuth, best_hi, best_lo,
+        origin_x=0, origin_z=0, width=width, depth=depth,
+    )
+    x = int(np.floor(16.0 + along))
+    z = int(np.floor(16.0 + perp))
+    assert int(reach[16, 16]) == 1
+    assert int(reach[z, x]) == 0
+
+
+def test_smooth_water_y_gradual_and_keeps_cascade():
+    gradual = smooth_water_y_profile(np.array([100, 98, 96, 94, 92], dtype=np.float64))
+    assert np.all(np.diff(gradual) <= 0)
+    assert np.all(np.diff(gradual) >= -1 - 1e-9)
+    cascade = smooth_water_y_profile(np.array([100, 100, 100, 90, 90], dtype=np.float64))
+    assert cascade[2] == 100
+    assert cascade[3] == 90
+    assert cascade[2] - cascade[3] >= 3
+
+
+def test_ownership_still_order_independent_with_rounded_stamps():
+    stations = [
+        _station(reach_id=1, station_id=0, order=4, x=10.0, z=10.0, tx=1.0, tz=0.0, water_y=70, azimuth=0),
+        _station(reach_id=1, station_id=1, order=4, x=12.0, z=10.0, tx=0.7, tz=0.7, water_y=69, azimuth=32),
+        _station(reach_id=1, station_id=2, order=4, x=14.0, z=12.0, tx=0.0, tz=1.0, water_y=68, azimuth=64),
+    ]
+    _assert_order_independent(stations, depth=24, width=24)
+
+
+def test_no_triangular_ownership_spikes_on_curve():
+    stations = _quarter_circle_stations()
+    grid = rasterize_stations(stations, depth=48, width=48)
+    owned = grid.reach_id != 0
+    tips = 0
+    owned_count = 0
+    for z, x in zip(*np.nonzero(owned)):
+        owned_count += 1
+        n = 0
+        for oz, ox in ((z - 1, x), (z + 1, x), (z, x - 1), (z, x + 1)):
+            if 0 <= oz < 48 and 0 <= ox < 48 and owned[oz, ox]:
+                n += 1
+        if n <= 1:
+            tips += 1
+    assert owned_count > 50
+    assert tips < max(8, owned_count // 20), f"tips={tips} owned={owned_count}"

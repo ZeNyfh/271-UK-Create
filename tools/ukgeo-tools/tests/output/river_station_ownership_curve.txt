@@ -1,5 +1,5 @@
 Quarter-circle channel ownership comparison.
 euclidean=/home/zenyfh/Documents/GitHub/mapcreator/tools/ukgeo-tools/tests/output/river_station_ownership_curve_euclidean.png (hypot ownership, test helper)
 perp=/home/zenyfh/Documents/GitHub/mapcreator/tools/ukgeo-tools/tests/output/river_station_ownership_curve_perp.png (production |perp| via rasterize_stations)
-owned_euclidean=793
-owned_perp=793
+owned_euclidean=658
+owned_perp=694

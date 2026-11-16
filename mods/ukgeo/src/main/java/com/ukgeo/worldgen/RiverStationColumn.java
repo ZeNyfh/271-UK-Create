@@ -68,8 +68,9 @@ final class RiverStationColumn {
         int water = baked.getAsInt();
         boolean inChannel = distanceFound && blocks <= waterRadius;
         if (inChannel) {
-            // Extreme mountain stamps: shallow DEM notch. Otherwise baked water Y is absolute.
-            int plane = RiverBankFit.cappedPlane(originalSurfaceY, water, RiverBankFit.MAX_CHANNEL_INCISION);
+            // Mountain stamps: DEM→bed ≤ MOUNTAIN_TOTAL_INCISION (depth included).
+            // Valleys keep absolute baked water Y.
+            int plane = RiverBankFit.cappedPlane(originalSurfaceY, water, depth);
             int bed = RiverWaterPlane.bedUnderPlane(plane, depth, minBuildY);
             return new Shape(true, true, bed, plane);
         }

@@ -2450,13 +2450,17 @@ final class ChunkTerrainPlanner {
             return Blocks.SAND.defaultBlockState();
         }
         if (steep && y == surfaceY) {
-            return surfaceRock; // never grass dither on cliffs — prevents hollow checkerboard look
+            // Restricted minerals only via coherent patches (exposedSurfaceRock).
+            return exposedSurfaceRock;
         }
         if (steep && y >= surfaceY - 4) {
-            return surfaceRock;
+            return exposedSurfaceRock.is(Blocks.GRASS_BLOCK) ? surfaceRock : exposedSurfaceRock;
         }
         if (y == surfaceY) {
-            // Urban/suburban (vegetation class 11) should be grass on the surface, not stone.
+            // Rare coherent mineral patches may break the grass cover; otherwise grass.
+            if (!exposedSurfaceRock.is(Blocks.GRASS_BLOCK) && isRestrictedSurfaceOre(surfaceRock)) {
+                return exposedSurfaceRock;
+            }
             return Blocks.GRASS_BLOCK.defaultBlockState();
         }
         if (y >= surfaceY - 3) {
@@ -2495,19 +2499,16 @@ final class ChunkTerrainPlanner {
         };
     }
 
+    /**
+     * Spatially coherent exposure patches for restricted surface minerals.
+     * Uses smooth value noise so exposures form small regions rather than
+     * isolated single-column speckles. Threshold keeps coverage near ~5%.
+     */
     private static boolean allowRareExposedSurfaceOre(int worldX, int worldZ, BlockState state) {
         String id = BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString();
-        long hash = 0x9e3779b97f4a7c15L;
-        hash ^= (long) worldX * 0xbf58476d1ce4e5b9L;
-        hash ^= (long) worldZ * 0x94d049bb133111ebL;
-        hash ^= (long) id.hashCode() * 0x632be59bd9b4e019L;
-        hash ^= hash >>> 30;
-        hash *= 0xbf58476d1ce4e5b9L;
-        hash ^= hash >>> 27;
-        hash *= 0x94d049bb133111ebL;
-        hash ^= hash >>> 31;
-        return Math.floorMod(hash, 100) < 5;
+        return SurfaceExposureNoise.allowExposure(worldX, worldZ, id.hashCode());
     }
+
 
     private static void setBlock(
         ChunkAccess chunk,
