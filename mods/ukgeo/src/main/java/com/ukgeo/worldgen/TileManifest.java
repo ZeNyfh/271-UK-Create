@@ -8,7 +8,9 @@ import java.io.IOException;
 import java.io.Reader;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 public final class TileManifest {
@@ -56,6 +58,21 @@ public final class TileManifest {
     public final String riverNearestHalfWidthPath;
     public final int riverDistanceSearchRadius;
     public final int maxRiverHalfWidth;
+    public final int stationSchemaVersion;
+    public final String riverReachIdPath;
+    public final String riverStationIdPath;
+    public final String riverWaterYPath;
+    public final String riverFlowAzimuthPath;
+    public final String riverReachIdExtension;
+    public final String riverStationIdExtension;
+    public final String riverWaterYExtension;
+    public final String riverFlowAzimuthExtension;
+    public final LayerStorage riverReachIdStorage;
+    public final LayerStorage riverStationIdStorage;
+    public final LayerStorage riverWaterYStorage;
+    public final LayerStorage riverFlowAzimuthStorage;
+    public final Map<String, LayerStorage> u16Storages;
+    public final Map<String, LayerStorage> u32Storages;
     public final double axisScaleX;
     public final double axisScaleZ;
 
@@ -86,6 +103,8 @@ public final class TileManifest {
         this.heightExtension = extension(height, DEFAULT_HEIGHT_EXTENSION);
         this.heightStorage = LayerStorage.fromLayer(height, this.heightPath, this.heightExtension, ".r16rg", -32768);
         this.u8Storages = new LinkedHashMap<>();
+        this.u16Storages = new LinkedHashMap<>();
+        this.u32Storages = new LinkedHashMap<>();
         this.surfaceGeologyClasses = new LinkedHashMap<>();
         JsonObject surface = json.getAsJsonObject("surface_geology");
         if (surface != null) {
@@ -143,6 +162,19 @@ public final class TileManifest {
             this.riverNearestHalfWidthPath = null;
             this.riverDistanceSearchRadius = 0;
             this.maxRiverHalfWidth = 0;
+            this.stationSchemaVersion = 0;
+            this.riverReachIdPath = null;
+            this.riverStationIdPath = null;
+            this.riverWaterYPath = null;
+            this.riverFlowAzimuthPath = null;
+            this.riverReachIdExtension = ".u32";
+            this.riverStationIdExtension = ".u16";
+            this.riverWaterYExtension = ".r16";
+            this.riverFlowAzimuthExtension = ".u8";
+            this.riverReachIdStorage = null;
+            this.riverStationIdStorage = null;
+            this.riverWaterYStorage = null;
+            this.riverFlowAzimuthStorage = null;
         } else {
             this.riversPath = rivers.get("path").getAsString();
             this.riversExtension = extension(rivers, DEFAULT_U8_EXTENSION);
@@ -165,6 +197,36 @@ public final class TileManifest {
                 this.u8Storages.put("river_nearest_half_width", LayerStorage.fromRiver(rivers, "nearest_half_width_path", "nearest_half_width", this.riverNearestHalfWidthPath, this.riversExtension, ".u8rg", 0));
             }
             this.maxRiverHalfWidth = rivers.has("max_half_width") ? Math.max(0, rivers.get("max_half_width").getAsInt()) : 0;
+            this.stationSchemaVersion = optionalInt(rivers, "station_schema_version", 0);
+            this.riverReachIdPath = nullableString(rivers, "reach_id_path");
+            this.riverStationIdPath = nullableString(rivers, "station_id_path");
+            this.riverWaterYPath = nullableString(rivers, "water_y_path");
+            this.riverFlowAzimuthPath = nullableString(rivers, "flow_azimuth_path");
+            this.riverReachIdExtension = namedExtension(rivers, "reach_id_extension", ".u32");
+            this.riverStationIdExtension = namedExtension(rivers, "station_id_extension", ".u16");
+            this.riverWaterYExtension = namedExtension(rivers, "water_y_extension", ".r16");
+            this.riverFlowAzimuthExtension = namedExtension(rivers, "flow_azimuth_extension", ".u8");
+            this.riverReachIdStorage = this.riverReachIdPath == null
+                ? null
+                : LayerStorage.fromRiver(rivers, "reach_id_path", "reach_id", this.riverReachIdPath, this.riverReachIdExtension, ".u32rg", 0);
+            this.riverStationIdStorage = this.riverStationIdPath == null
+                ? null
+                : LayerStorage.fromRiver(rivers, "station_id_path", "station_id", this.riverStationIdPath, this.riverStationIdExtension, ".u16rg", 0);
+            this.riverWaterYStorage = this.riverWaterYPath == null
+                ? null
+                : LayerStorage.fromRiver(rivers, "water_y_path", "water_y", this.riverWaterYPath, this.riverWaterYExtension, ".r16rg", -32768);
+            this.riverFlowAzimuthStorage = this.riverFlowAzimuthPath == null
+                ? null
+                : LayerStorage.fromRiver(rivers, "flow_azimuth_path", "flow_azimuth", this.riverFlowAzimuthPath, this.riverFlowAzimuthExtension, ".u8rg", 0);
+            if (this.riverReachIdStorage != null) {
+                this.u32Storages.put("river_reach_id", this.riverReachIdStorage);
+            }
+            if (this.riverStationIdStorage != null) {
+                this.u16Storages.put("river_station_id", this.riverStationIdStorage);
+            }
+            if (this.riverFlowAzimuthStorage != null) {
+                this.u8Storages.put("river_flow_azimuth", this.riverFlowAzimuthStorage);
+            }
         }
         this.orePaths = new LinkedHashMap<>();
         this.oreExtensions = new LinkedHashMap<>();
@@ -206,12 +268,37 @@ public final class TileManifest {
             case "vegetation" -> vegetationExtension;
             case "biome_regions" -> biomeRegionsExtension;
             case "rivers", "river_order", "river_half_width", "river_distance", "river_nearest_half_width" -> riversExtension;
+            case "river_flow_azimuth" -> riverFlowAzimuthExtension;
             default -> oreExtensions.getOrDefault(layerName, DEFAULT_U8_EXTENSION);
         };
     }
 
     public LayerStorage u8StorageFor(String layerName, String path, String extension) {
         return u8Storages.getOrDefault(layerName, LayerStorage.tiles(path, extension, 0));
+    }
+
+    public List<String> riverStationProblems() {
+        List<String> missing = new ArrayList<>();
+        if (stationSchemaVersion != RiverStationColumn.REQUIRED_SCHEMA) {
+            missing.add("station_schema_version=" + stationSchemaVersion + " (required " + RiverStationColumn.REQUIRED_SCHEMA + ")");
+        }
+        if (riverReachIdPath == null) {
+            missing.add("reach_id_path");
+        }
+        if (riverStationIdPath == null) {
+            missing.add("station_id_path");
+        }
+        if (riverWaterYPath == null) {
+            missing.add("water_y_path");
+        }
+        if (riverFlowAzimuthPath == null) {
+            missing.add("flow_azimuth_path");
+        }
+        return List.copyOf(missing);
+    }
+
+    public boolean riverStationsEnabled() {
+        return riverStationProblems().isEmpty();
     }
 
     public String originSummary() {
@@ -247,6 +334,19 @@ public final class TileManifest {
         }
         String value = object.get("extension").getAsString();
         return value == null || value.isBlank() ? fallback : value;
+    }
+
+    private static String nullableString(JsonObject object, String key) {
+        if (object == null || !object.has(key) || object.get(key).isJsonNull()) {
+            return null;
+        }
+        String value = object.get(key).getAsString();
+        return value == null || value.isBlank() ? null : value;
+    }
+
+    private static String namedExtension(JsonObject object, String key, String fallback) {
+        String value = nullableString(object, key);
+        return value == null ? fallback : value;
     }
 
     private static String optionalString(JsonObject object, String key, String fallback) {

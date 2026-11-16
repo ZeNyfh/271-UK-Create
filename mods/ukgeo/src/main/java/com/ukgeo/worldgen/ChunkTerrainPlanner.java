@@ -87,13 +87,11 @@ final class ChunkTerrainPlanner {
         }
         long waterElapsedNanos = System.nanoTime() - waterStartNanos;
         logTiming("ChunkTerrainPlanner.waterPlanning", chunk, waterStartNanos);
-        // Centerline-shared bank plane (deterministic, cross-chunk safe).
-        // Do not component-flatten / fitWaterToBanksByComponent — that creates cubic holes.
+        // Baked station water Y is authoritative. Do not call fitWaterToBanks*,
+        // levelGentleReachWater, or smoothRiverWaterSurfacesLocally.
         cutCascadeLips(columns, minBuildY, maxBuildY);
         smoothFreshwaterLakeBeds(columns, minBuildY, maxBuildY);
-        // One light bed smooth only (neighbor Δ clamp):
         smoothRiverBedsInComponents(columns, minBuildY, maxBuildY);
-        // Do not rewrite water Y (smoothRiverWaterSurfacesLocally) — station plane is authoritative.
         long oreStartNanos = System.nanoTime();
         Plan plan = new Plan(columns, generator.buildOrePlacements(data, chunk, columns), generator.seaLevel());
         long oreElapsedNanos = System.nanoTime() - oreStartNanos;
@@ -1606,8 +1604,8 @@ final class ChunkTerrainPlanner {
     }
 
     /**
-     * Just upstream of a cascade/step, cut into adjacent dry banks so water does not spill
-     * sideways onto land. Prefer a notch (terrainTop → waterSurface) or shallow channel carve.
+     * Just upstream of a cascade, notch dry banks toward each bank's own baked water Y.
+     * Water columns are not edited, and no column's waterSurfaceY is replaced.
      */
     private static void cutCascadeLips(ColumnPlan[] columns, int minBuildY, int maxBuildY) {
         boolean[] isLip = new boolean[columns.length];
@@ -1633,14 +1631,11 @@ final class ChunkTerrainPlanner {
             }
         }
 
-        // Cut into banks before drops so mountain streams seat into the slope (not spill).
         final int lipCarveRadius = 3;
-        final int shallowDepth = 2;
         for (int index = 0; index < columns.length; index++) {
             if (!isLip[index]) {
                 continue;
             }
-            int waterY = columns[index].river().waterSurfaceY();
             int localZ = index / CHUNK_SIZE;
             int localX = index - localZ * CHUNK_SIZE;
             for (int dz = -lipCarveRadius; dz <= lipCarveRadius; dz++) {
@@ -1656,181 +1651,83 @@ final class ChunkTerrainPlanner {
                     if (nx < 0 || nz < 0 || nx >= CHUNK_SIZE || nz >= CHUNK_SIZE) {
                         continue;
                     }
-                    int nIndex = nz * CHUNK_SIZE + nx;
-                    ColumnPlan neighbor = columns[nIndex];
-                    if (neighbor.river().hasWater()) {
-                        continue;
-                    }
-                    int bankTop = Math.min(neighbor.terrainTop(), neighbor.originalSurfaceY());
-                    boolean riverStrip = neighbor.river().influenced();
-                    boolean spillShelf = bankTop <= waterY + 1;
-                    if (!riverStrip && !spillShelf) {
-                        continue;
-                    }
-                    // Prefer notch into the bank (terrainTop → water plane). Only true
-                    // overflow shelves (bank at/below water) become shallow channel water.
-                    if (bankTop <= waterY) {
-                        int bed = RiverBankFit.bedForWater(waterY, shallowDepth, minBuildY);
-                        bed = Math.min(bed, waterY - 1);
-                        UkGeoChunkGenerator.RiverShape carved = new UkGeoChunkGenerator.RiverShape(
-                            true,
-                            true,
-                            bed,
-                            waterY,
-                            neighbor.river().floorMaterial()
-                        );
-                        int columnTop = Math.clamp(Math.max(neighbor.columnTop(), waterY), minBuildY, maxBuildY);
-                        columns[nIndex] = new ColumnPlan(
-                            neighbor.originalSurfaceY(),
-                            bed,
-                            columnTop,
-                            neighbor.steep(),
-                            neighbor.coastalBeach(),
-                            carved,
-                            neighbor.vegetationClass(),
-                            neighbor.surfaceRock(),
-                            neighbor.exposedSurfaceRock(),
-                            neighbor.hasHeightData()
-                        );
-                    } else {
-                        double dOut = Math.hypot(dx, dz);
-                        int height = Math.max(0, bankTop - waterY);
-                        int notchedTop = waterY + (int) Math.round(
-                            RiverChannelForm.bankRise(dOut, height, lipCarveRadius, 0.55)
-                        );
-                        notchedTop = Math.clamp(notchedTop, waterY, bankTop);
-                        notchedTop = Math.clamp(notchedTop, minBuildY + 1, maxBuildY);
-                        if (notchedTop >= neighbor.terrainTop()) {
-                            continue;
-                        }
-                        UkGeoChunkGenerator.RiverShape river = neighbor.river();
-                        UkGeoChunkGenerator.RiverShape notched = new UkGeoChunkGenerator.RiverShape(
-                            false,
-                            true,
-                            notchedTop,
-                            waterY,
-                            river.floorMaterial()
-                        );
-                        int columnTop = Math.clamp(Math.max(neighbor.columnTop(), notchedTop), minBuildY, maxBuildY);
-                        columns[nIndex] = new ColumnPlan(
-                            neighbor.originalSurfaceY(),
-                            notchedTop,
-                            columnTop,
-                            neighbor.steep(),
-                            neighbor.coastalBeach(),
-                            notched,
-                            neighbor.vegetationClass(),
-                            neighbor.surfaceRock(),
-                            neighbor.exposedSurfaceRock(),
-                            neighbor.hasHeightData()
-                        );
-                    }
+                    notchBankToOwnWater(columns, nz * CHUNK_SIZE + nx, Math.hypot(dx, dz), lipCarveRadius, minBuildY, maxBuildY);
                 }
             }
         }
 
-        // Steep mountain brooks: seat shallow channel into bank shoulders along the reach (not only cascade lips).
         final int brookCarveRadius = 2;
-        final int brookDepth = 2;
         for (int index = 0; index < columns.length; index++) {
             ColumnPlan column = columns[index];
             if (!column.steep() || !column.river().hasWater()) {
                 continue;
             }
-            int brookWaterY = column.river().waterSurfaceY();
-            int brookLocalZ = index / CHUNK_SIZE;
-            int brookLocalX = index - brookLocalZ * CHUNK_SIZE;
-            carveSteepBrookShoulders(columns, index, brookWaterY, brookLocalX, brookLocalZ, brookCarveRadius, brookDepth, minBuildY, maxBuildY);
-        }
-    }
-
-
-    private static void carveSteepBrookShoulders(
-        ColumnPlan[] columns,
-        int index,
-        int waterY,
-        int localX,
-        int localZ,
-        int carveRadius,
-        int shallowDepth,
-        int minBuildY,
-        int maxBuildY
-    ) {
-        for (int dz = -carveRadius; dz <= carveRadius; dz++) {
-            for (int dx = -carveRadius; dx <= carveRadius; dx++) {
-                if (dx == 0 && dz == 0) {
-                    continue;
-                }
-                if (Math.abs(dx) + Math.abs(dz) > carveRadius) {
-                    continue;
-                }
-                int nx = localX + dx;
-                int nz = localZ + dz;
-                if (nx < 0 || nz < 0 || nx >= CHUNK_SIZE || nz >= CHUNK_SIZE) {
-                    continue;
-                }
-                int nIndex = nz * CHUNK_SIZE + nx;
-                ColumnPlan neighbor = columns[nIndex];
-                if (neighbor.river().hasWater() || !neighbor.river().influenced()) {
-                    continue;
-                }
-                int bankTop = Math.min(neighbor.terrainTop(), neighbor.originalSurfaceY());
-                if (bankTop > waterY + 1) {
-                    continue;
-                }
-                if (bankTop <= waterY) {
-                    int bed = RiverBankFit.bedForWater(waterY, shallowDepth, minBuildY);
-                    bed = Math.min(bed, waterY - 1);
-                    UkGeoChunkGenerator.RiverShape carved = new UkGeoChunkGenerator.RiverShape(
-                        true,
-                        true,
-                        bed,
-                        waterY,
-                        neighbor.river().floorMaterial()
-                    );
-                    int columnTop = Math.clamp(Math.max(neighbor.columnTop(), waterY), minBuildY, maxBuildY);
-                    columns[nIndex] = new ColumnPlan(
-                        neighbor.originalSurfaceY(),
-                        bed,
-                        columnTop,
-                        neighbor.steep(),
-                        neighbor.coastalBeach(),
-                        carved,
-                        neighbor.vegetationClass(),
-                        neighbor.surfaceRock(),
-                        neighbor.exposedSurfaceRock(),
-                        neighbor.hasHeightData()
-                    );
-                } else {
-                    int notchedTop = Math.clamp(waterY, minBuildY + 1, maxBuildY);
-                    if (notchedTop >= neighbor.terrainTop()) {
+            int localZ = index / CHUNK_SIZE;
+            int localX = index - localZ * CHUNK_SIZE;
+            for (int dz = -brookCarveRadius; dz <= brookCarveRadius; dz++) {
+                for (int dx = -brookCarveRadius; dx <= brookCarveRadius; dx++) {
+                    if (dx == 0 && dz == 0) {
                         continue;
                     }
-                    UkGeoChunkGenerator.RiverShape river = neighbor.river();
-                    UkGeoChunkGenerator.RiverShape notched = new UkGeoChunkGenerator.RiverShape(
-                        false,
-                        true,
-                        notchedTop,
-                        waterY,
-                        river.floorMaterial()
-                    );
-                    int columnTop = Math.clamp(Math.max(neighbor.columnTop(), notchedTop), minBuildY, maxBuildY);
-                    columns[nIndex] = new ColumnPlan(
-                        neighbor.originalSurfaceY(),
-                        notchedTop,
-                        columnTop,
-                        neighbor.steep(),
-                        neighbor.coastalBeach(),
-                        notched,
-                        neighbor.vegetationClass(),
-                        neighbor.surfaceRock(),
-                        neighbor.exposedSurfaceRock(),
-                        neighbor.hasHeightData()
-                    );
+                    if (Math.abs(dx) + Math.abs(dz) > brookCarveRadius) {
+                        continue;
+                    }
+                    int nx = localX + dx;
+                    int nz = localZ + dz;
+                    if (nx < 0 || nz < 0 || nx >= CHUNK_SIZE || nz >= CHUNK_SIZE) {
+                        continue;
+                    }
+                    notchBankToOwnWater(columns, nz * CHUNK_SIZE + nx, Math.hypot(dx, dz), brookCarveRadius, minBuildY, maxBuildY);
                 }
             }
         }
+    }
 
+    /** Lower a dry bank toward its own baked water Y. Does not create water or change water Y. */
+    private static void notchBankToOwnWater(
+        ColumnPlan[] columns,
+        int nIndex,
+        double dOut,
+        double reach,
+        int minBuildY,
+        int maxBuildY
+    ) {
+        ColumnPlan neighbor = columns[nIndex];
+        UkGeoChunkGenerator.RiverShape river = neighbor.river();
+        if (river.hasWater() || !river.influenced()) {
+            return;
+        }
+        int waterY = river.waterSurfaceY();
+        int bankTop = Math.min(neighbor.terrainTop(), neighbor.originalSurfaceY());
+        if (bankTop <= waterY) {
+            return;
+        }
+        int height = bankTop - waterY;
+        int notchedTop = waterY + (int) Math.round(RiverChannelForm.bankRise(Math.max(0.0, dOut), height, Math.max(1.0, reach), 0.55));
+        notchedTop = Math.clamp(notchedTop, Math.max(minBuildY + 1, waterY), bankTop);
+        if (notchedTop >= neighbor.terrainTop()) {
+            return;
+        }
+        UkGeoChunkGenerator.RiverShape notched = new UkGeoChunkGenerator.RiverShape(
+            false,
+            true,
+            notchedTop,
+            waterY,
+            river.floorMaterial()
+        );
+        int columnTop = Math.clamp(Math.max(neighbor.columnTop(), notchedTop), minBuildY, maxBuildY);
+        columns[nIndex] = new ColumnPlan(
+            neighbor.originalSurfaceY(),
+            notchedTop,
+            columnTop,
+            neighbor.steep(),
+            neighbor.coastalBeach(),
+            notched,
+            neighbor.vegetationClass(),
+            neighbor.surfaceRock(),
+            neighbor.exposedSurfaceRock(),
+            neighbor.hasHeightData()
+        );
     }
 
     private static int maxLabel(int[] labels) {
@@ -1972,7 +1869,27 @@ final class ChunkTerrainPlanner {
             if (newBed == river.terrainSurfaceY()) {
                 continue;
             }
-            columns[index] = withRiverBedAndWater(column, newBed, waterY, minBuildY, maxBuildY);
+            // Beds only: copy the baked water Y and never raise it to follow the bed.
+            UkGeoChunkGenerator.RiverShape shaped = new UkGeoChunkGenerator.RiverShape(
+                true,
+                river.influenced(),
+                newBed,
+                waterY,
+                river.floorMaterial()
+            );
+            int columnTop = Math.clamp(Math.max(column.columnTop(), waterY), minBuildY, maxBuildY);
+            columns[index] = new ColumnPlan(
+                column.originalSurfaceY(),
+                newBed,
+                columnTop,
+                column.steep(),
+                column.coastalBeach(),
+                shaped,
+                column.vegetationClass(),
+                column.surfaceRock(),
+                column.exposedSurfaceRock(),
+                column.hasHeightData()
+            );
         }
     }
 

@@ -81,7 +81,7 @@ public final class U8OreTileLayer {
 
     private static int cacheEntriesFor(String oreName) {
         int defaultEntries = switch (oreName) {
-            case "vegetation", "biome_regions", "surface_geology", "rivers", "river_half_width", "river_order", "river_distance", "river_nearest_half_width" -> 192;
+            case "vegetation", "biome_regions", "surface_geology", "rivers", "river_half_width", "river_order", "river_distance", "river_nearest_half_width", "river_flow_azimuth" -> 192;
             default -> 96;
         };
         return Math.max(1, Integer.getInteger("ukgeo.u8TileCacheEntries." + oreName, Integer.getInteger("ukgeo.u8TileCacheEntries", defaultEntries)));

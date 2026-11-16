@@ -31,7 +31,9 @@ from .ore_image_overlay import apply_named_svg_ore_overlays as apply_named_svg_o
 from .ore_image_overlay import apply_ore_image_overlay as apply_ore_image_overlay_impl
 from .ores import make_ore_tiles as make_ore_tiles_impl
 from .preview import make_preview
+from .river_stations import bake_river_stations_standalone as bake_river_stations_standalone_impl
 from .rivers import bake_river_distance_grids as bake_river_distance_grids_impl
+from .rivers import load_river_edges as load_river_edges_impl
 from .rivers import make_river_tiles as make_river_tiles_impl
 from .surface import make_surface_geology_tiles as make_surface_geology_tiles_impl
 from .ni_height import add_osni_height_tiles as add_osni_height_tiles_impl
@@ -373,6 +375,28 @@ def make_river_tiles(
         debug_geotiff=debug_geotiff,
         resume_memmaps=resume_memmaps,
         skip_edges=skip_edges,
+    )
+
+
+@app.command("bake-river-stations")
+def bake_river_stations(
+    rivers: Path = typer.Option(..., "--rivers"),
+    manifest: Path = typer.Option(..., "--manifest"),
+    out: Path = typer.Option(..., "--out"),
+    layer: str | None = typer.Option(None, "--layer"),
+    resume_tiles: bool = typer.Option(
+        False,
+        "--resume-tiles",
+        help="Skip station tiles that already have reach_id, station_id, water_y, and flow_azimuth. Build and stamp default to 12 workers. STATION_BAKE_WORKERS overrides both; STATION_BUILD_WORKERS overrides reach sampling only.",
+    ),
+) -> None:
+    """Bake river station layers from the GPKG and on-disk river mask tiles."""
+    edges = load_river_edges_impl(rivers, manifest, layer=layer)
+    bake_river_stations_standalone_impl(
+        out,
+        manifest_path=manifest,
+        edges=edges,
+        skip_existing=resume_tiles,
     )
 
 

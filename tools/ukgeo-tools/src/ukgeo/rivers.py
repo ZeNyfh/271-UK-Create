@@ -5,12 +5,15 @@ from functools import lru_cache
 from pathlib import Path
 from collections import defaultdict, deque
 import math
+from typing import Any
 
 import geopandas as gpd
 import numpy as np
 from rasterio.enums import MergeAlg
 from rasterio.features import rasterize
 from rasterio.transform import from_bounds
+from rasterio.windows import Window
+from rasterio.windows import transform as window_transform
 from rich.console import Console
 from shapely.geometry import LineString, MultiLineString
 from shapely.ops import linemerge
@@ -19,6 +22,7 @@ from tqdm import tqdm
 from .bgs import resolve_gpkg
 from .manifest import read_manifest, write_manifest
 from .raster_memory import U8Raster, find_memmap_path, maximum_in_place, row_windows
+from .river_stations import BANK_CARVE_REACH, STATION_BAKE_WORKERS, _ForkWorkers, _env_workers, bake_river_stations_standalone
 from .tiles import (
     HEIGHT_NODATA,
     layer_uses_regions,
@@ -56,6 +60,10 @@ GB_MAJOR_RIVER_WIDTH_FACTOR = 1.15
 TOP_ORDER_THINNING_FACTORS = (0.5, 1.0 / 1.5, 1.0 / 1.25, 1.0 / 1.125)
 RIVER_OUTPUT_WIDTH_FACTOR = 1.0 / 6.0
 RIVER_RASTER_BATCH_SIZE = 25000
+# Fork workers for edge rasterization. Override with RIVER_RASTER_WORKERS.
+# Each worker burns one tile (typically 512²) and never a world-sized array.
+RIVER_RASTER_WORKERS = 12
+_RIVER_RASTER_MIN_EDGES = 100
 PREVIEW_RIVER_WIDTH_SCALE = 0.18
 PREVIEW_RIVER_MAX_RADIUS = 6
 RIVER_MEMMAP_LABELS = (
@@ -65,6 +73,60 @@ RIVER_MEMMAP_LABELS = (
     "river-preview-radius",
     "river-burn",
 )
+# Fork workers. Override with DISTANCE_BAKE_WORKERS. Each worker caches 16 source tiles.
+DISTANCE_BAKE_WORKERS = 12
+_DISTANCE_TILE_CACHE_MAX = 16
+
+
+def _read_river_frame(rivers: Path, manifest: dict[str, Any], *, layer: str | None):
+    geo = manifest["georeferencing"]
+    gpkg, tmp = resolve_gpkg(rivers)
+    try:
+        layer_name = layer or _default_layer(gpkg)
+        frame = gpd.read_file(
+            gpkg,
+            layer=layer_name,
+            bbox=(
+                geo["bng_min_easting"],
+                geo["bng_min_northing"],
+                geo["bng_max_easting"],
+                geo["bng_max_northing"],
+            ),
+        )
+    except Exception:
+        if tmp is not None:
+            tmp.cleanup()
+        raise
+    return frame, tmp
+
+
+def _prepare_river_frame(frame: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    if frame.empty or not frame.crs:
+        return frame
+    if str(frame.crs).upper() != "EPSG:27700":
+        return frame.to_crs("EPSG:27700")
+    return frame
+
+
+def river_edges_from_frame(frame: gpd.GeoDataFrame, manifest: dict[str, Any], root: Path) -> list[_Edge]:
+    if frame.empty:
+        return []
+    return _strahler_widths(_extract_lines(frame), manifest, root).edges
+
+
+def load_river_edges(rivers: Path, manifest_path: Path, *, layer: str | None = None) -> list[_Edge]:
+    """Directed edges from the rivers GPKG, matching make_river_tiles."""
+    manifest = read_manifest(manifest_path)
+    frame, tmp = _read_river_frame(rivers, manifest, layer=layer)
+    try:
+        frame = _prepare_river_frame(frame)
+        if frame.empty:
+            console.print("[yellow]No river features intersect the manifest extent.[/yellow]")
+            return []
+        return river_edges_from_frame(frame, manifest, manifest_path.parent)
+    finally:
+        if tmp is not None:
+            tmp.cleanup()
 
 
 def make_river_tiles(
@@ -106,16 +168,12 @@ def make_river_tiles(
         console.print(
             f"[cyan]Resuming river memmaps under {out}; skipping first {skip_edges} edges[/cyan]"
         )
-    gpkg, tmp = resolve_gpkg(rivers)
+    frame, tmp = _read_river_frame(rivers, manifest, layer=layer)
     try:
-        layer_name = layer or _default_layer(gpkg)
-        frame = gpd.read_file(
-            gpkg,
-            layer=layer_name,
-            bbox=(geo["bng_min_easting"], geo["bng_min_northing"], geo["bng_max_easting"], geo["bng_max_northing"]),
-        )
         if frame.empty:
             console.print("[yellow]No river features intersect the manifest extent.[/yellow]")
+        frame = _prepare_river_frame(frame)
+        vector_edges = river_edges_from_frame(frame, manifest, manifest_path.parent)
         with (
             U8Raster((depth, width), tmp_parent=out, label="rivers", resume_path=resume_paths.get("rivers")) as arr,
             U8Raster(
@@ -135,12 +193,8 @@ def make_river_tiles(
             ) as preview_radius_arr,
         ):
             if not frame.empty:
-                if frame.crs and str(frame.crs).upper() != "EPSG:27700":
-                    frame = frame.to_crs("EPSG:27700")
-                lines = _extract_lines(frame)
-                strahler = _strahler_widths(lines, manifest, manifest_path.parent)
                 # Fall back to the old fixed-width raster if graph extraction produced no usable line edges.
-                fallback_fixed = not strahler.edges
+                fallback_fixed = not vector_edges
                 cell_metres = _cell_metres(geo, width, depth)
                 axis_scale = _horizontal_axis_scale(manifest)
                 if fallback_fixed:
@@ -181,7 +235,7 @@ def make_river_tiles(
                     _rasterize_shape_batches_direct(order_shapes, order_arr, transform)
                     _rasterize_shape_batches_direct(preview_shapes, preview_radius_arr, transform)
                 else:
-                    edges = strahler.edges
+                    edges = vector_edges
                     if skip_edges > len(edges):
                         raise ValueError(f"--skip-edges {skip_edges} exceeds edge count {len(edges)}")
                     remaining_edges = edges[skip_edges:]
@@ -190,6 +244,7 @@ def make_river_tiles(
                         arr,
                         transform,
                         cell_metres,
+                        tile_size=tile_size,
                         value_fn=lambda edge: 255,
                         desc="rasterizing river coverage",
                         initial=skip_edges,
@@ -200,6 +255,7 @@ def make_river_tiles(
                         order_arr,
                         transform,
                         cell_metres,
+                        tile_size=tile_size,
                         value_fn=lambda edge: min(255, max(1, edge.order)),
                         desc="rasterizing river order",
                     )
@@ -208,6 +264,7 @@ def make_river_tiles(
                         half_width_arr,
                         transform,
                         cell_metres,
+                        tile_size=tile_size,
                         value_fn=lambda edge: min(255, max(1, edge.half_width)),
                         desc="rasterizing river half width",
                     )
@@ -216,6 +273,7 @@ def make_river_tiles(
                         preview_radius_arr,
                         transform,
                         cell_metres,
+                        tile_size=tile_size,
                         value_fn=_preview_radius_for_edge,
                         desc="rasterizing river preview radius",
                     )
@@ -241,15 +299,170 @@ def make_river_tiles(
             if debug_geotiff:
                 _write_debug(debug_geotiff, arr, transform)
             bake_river_distance_grids(out, manifest_path=manifest_path)
+        # Memmaps are closed before station stamps. The mask is re-read from river tiles.
+        if vector_edges:
+            bake_river_stations_standalone(
+                out,
+                manifest_path=manifest_path,
+                edges=vector_edges,
+                default_workers=STATION_BAKE_WORKERS,
+            )
+        elif not frame.empty:
+            raise ValueError("river station bake requires vector edges; refusing centroid fallback")
     finally:
         if tmp is not None:
             tmp.cleanup()
 
 
-def bake_river_distance_grids(root: Path, *, manifest_path: Path | None = None) -> None:
-    """Offline-bake river distance + nearest-half-width u8 layers for O(1) runtime samples."""
+# Set in the parent before fork. Workers read this; it is not pickled per task.
+_DISTANCE_BAKE: dict[str, Any] | None = None
+
+
+def _distance_read_tile(layer_name: str, tile_x: int, tile_z: int) -> np.ndarray:
+    ctx = _DISTANCE_BAKE
+    if ctx is None:
+        raise RuntimeError("river distance bake worker missing fork context")
+    tile_size = int(ctx["tile_size"])
+    tiles_x = int(ctx["tiles_x"])
+    tiles_z = int(ctx["tiles_z"])
+    if tile_x < 0 or tile_z < 0 or tile_x >= tiles_x or tile_z >= tiles_z:
+        return np.zeros((tile_size, tile_size), dtype=np.uint8)
+    return _distance_read_tile_cached(layer_name, tile_x, tile_z)
+
+
+@lru_cache(maxsize=_DISTANCE_TILE_CACHE_MAX)
+def _distance_read_tile_cached(layer_name: str, tile_x: int, tile_z: int) -> np.ndarray:
+    ctx = _DISTANCE_BAKE
+    if ctx is None:
+        raise RuntimeError("river distance bake worker missing fork context")
+    tile_size = int(ctx["tile_size"])
+    layer = ctx["river_layer"] if layer_name == "rivers" else ctx["half_layer"]
+    return np.array(read_layer_tile(ctx["root"], layer, tile_x, tile_z, tile_size), dtype=np.uint8, copy=True)
+
+
+def _distance_halo_stack(layer_name: str, tile_x: int, tile_z: int) -> np.ndarray:
+    ctx = _DISTANCE_BAKE
+    if ctx is None:
+        raise RuntimeError("river distance bake worker missing fork context")
+    tile_size = int(ctx["tile_size"])
+    halo = int(ctx["halo"])
+    tiles_x = int(ctx["tiles_x"])
+    tiles_z = int(ctx["tiles_z"])
+    size = tile_size + halo * 2
+    out = np.zeros((size, size), dtype=np.uint8)
+    world_x0 = tile_x * tile_size - halo
+    world_z0 = tile_z * tile_size - halo
+    world_x1 = world_x0 + size
+    world_z1 = world_z0 + size
+    src_tx0 = max(0, world_x0 // tile_size)
+    src_tz0 = max(0, world_z0 // tile_size)
+    src_tx1 = min(tiles_x - 1, (world_x1 - 1) // tile_size)
+    src_tz1 = min(tiles_z - 1, (world_z1 - 1) // tile_size)
+    for src_tz in range(src_tz0, src_tz1 + 1):
+        for src_tx in range(src_tx0, src_tx1 + 1):
+            tile = _distance_read_tile(layer_name, src_tx, src_tz)
+            tx0 = src_tx * tile_size
+            tz0 = src_tz * tile_size
+            ix0 = max(world_x0, tx0)
+            iz0 = max(world_z0, tz0)
+            ix1 = min(world_x1, tx0 + tile_size)
+            iz1 = min(world_z1, tz0 + tile_size)
+            if ix0 >= ix1 or iz0 >= iz1:
+                continue
+            out_z0 = iz0 - world_z0
+            out_x0 = ix0 - world_x0
+            tile_z0 = iz0 - tz0
+            tile_x0 = ix0 - tx0
+            out[out_z0 : out_z0 + (iz1 - iz0), out_x0 : out_x0 + (ix1 - ix0)] = tile[
+                tile_z0 : tile_z0 + (iz1 - iz0), tile_x0 : tile_x0 + (ix1 - ix0)
+            ]
+    return out
+
+
+def _encode_distance_tile(tile_x: int, tile_z: int) -> tuple[np.ndarray, np.ndarray]:
     from scipy.ndimage import distance_transform_edt
 
+    ctx = _DISTANCE_BAKE
+    if ctx is None:
+        raise RuntimeError("river distance bake worker missing fork context")
+    tile_size = int(ctx["tile_size"])
+    halo = int(ctx["halo"])
+    search_radius = int(ctx["search_radius"])
+    dist_tile = np.full((tile_size, tile_size), 255, dtype=np.uint8)
+    hw_tile = np.zeros((tile_size, tile_size), dtype=np.uint8)
+    center = _distance_read_tile("rivers", tile_x, tile_z)
+    if not np.any(center):
+        tile_radius = (halo + tile_size - 1) // tile_size
+        has_nearby = False
+        for dz in range(-tile_radius, tile_radius + 1):
+            for dx in range(-tile_radius, tile_radius + 1):
+                if dx == 0 and dz == 0:
+                    continue
+                if np.any(_distance_read_tile("rivers", tile_x + dx, tile_z + dz)):
+                    has_nearby = True
+                    break
+            if has_nearby:
+                break
+        if not has_nearby:
+            return dist_tile, hw_tile
+    mask_halo = _distance_halo_stack("rivers", tile_x, tile_z) > 0
+    if not np.any(mask_halo):
+        return dist_tile, hw_tile
+    half_halo = _distance_halo_stack("half_width", tile_x, tile_z)
+    distances, indices = distance_transform_edt(~mask_halo, return_indices=True)
+    center_dist = distances[halo : halo + tile_size, halo : halo + tile_size]
+    nearest_z = indices[0][halo : halo + tile_size, halo : halo + tile_size]
+    nearest_x = indices[1][halo : halo + tile_size, halo : halo + tile_size]
+    nearest_hw = half_halo[nearest_z, nearest_x]
+    within = center_dist <= search_radius
+    codes = np.minimum(254, np.rint(center_dist * 2.0).astype(np.int16)).astype(np.uint8)
+    dist_tile = np.where(within, codes, np.uint8(255)).astype(np.uint8)
+    hw_tile = np.where(within, nearest_hw, np.uint8(0)).astype(np.uint8)
+    return dist_tile, hw_tile
+
+
+def _bake_one_distance_tile(task: tuple[int, int]) -> None:
+    tile_x, tile_z = task
+    dist_tile, hw_tile = _encode_distance_tile(tile_x, tile_z)
+    ctx = _DISTANCE_BAKE
+    if ctx is None:
+        raise RuntimeError("river distance bake worker missing fork context")
+    tile_size = int(ctx["tile_size"])
+    extension = ctx["extension"]
+    write_u8_tile(
+        ctx["dist_root"] / f"{tile_x:03d}_{tile_z:03d}{extension}",
+        dist_tile,
+        tile_size,
+        sparse_fill=255,
+    )
+    write_u8_tile(ctx["hw_root"] / f"{tile_x:03d}_{tile_z:03d}{extension}", hw_tile, tile_size)
+
+
+def _encode_distance_region_slot(
+    task: tuple[int, int, int],
+) -> tuple[int, np.ndarray | None, np.ndarray | None]:
+    index, tile_x, tile_z = task
+    dist_tile, hw_tile = _encode_distance_tile(tile_x, tile_z)
+    dist_out = None if np.all(dist_tile == 255) else dist_tile
+    hw_out = None if not np.any(hw_tile) else hw_tile
+    return index, dist_out, hw_out
+
+
+def _iter_distance_tiles(tiles_x: int, tiles_z: int):
+    for tile_z in range(tiles_z):
+        for tile_x in range(tiles_x):
+            yield (tile_x, tile_z)
+
+
+def _source_region_file(root: Path, river_layer: dict[str, Any], region_x: int, region_z: int) -> Path:
+    region_path = str(river_layer.get("region_path", f"{river_layer['path']}/regions"))
+    region_ext = str(river_layer.get("region_extension", ".u8rg"))
+    return root / region_path / f"{region_x:03d}_{region_z:03d}{region_ext}"
+
+
+def bake_river_distance_grids(root: Path, *, manifest_path: Path | None = None) -> None:
+    """Offline-bake river distance + nearest-half-width u8 layers for O(1) runtime samples."""
+    global _DISTANCE_BAKE
     manifest_file = manifest_path or (root / "manifest.json")
     manifest = read_manifest(manifest_file)
     rivers = manifest.get("rivers")
@@ -266,7 +479,7 @@ def bake_river_distance_grids(root: Path, *, manifest_path: Path | None = None) 
     tiles_x = math.ceil(padded_width / tile_size)
     tiles_z = math.ceil(padded_depth / tile_size)
     max_half_width = int(rivers.get("max_half_width", 0))
-    search_radius = max(max_half_width, 1) + 4
+    search_radius = max(max_half_width, 1) + BANK_CARVE_REACH
     halo = search_radius
 
     river_layer = river_u8_layer(rivers)
@@ -277,155 +490,107 @@ def bake_river_distance_grids(root: Path, *, manifest_path: Path | None = None) 
     distance_path = "water/river_distance"
     nearest_hw_path = "water/river_nearest_half_width"
     extension = rivers.get("extension", u8_extension())
+    dist_root = root / distance_path
+    hw_root = root / nearest_hw_path
 
-    @lru_cache(maxsize=2048)
-    def read_tile(layer_name: str, tile_x: int, tile_z: int) -> np.ndarray:
-        if tile_x < 0 or tile_z < 0 or tile_x >= tiles_x or tile_z >= tiles_z:
-            return np.zeros((tile_size, tile_size), dtype=np.uint8)
-        layer = river_layer if layer_name == "rivers" else half_layer
-        return np.array(read_layer_tile(root, layer, tile_x, tile_z, tile_size), dtype=np.uint8, copy=True)
-
-    def halo_stack(layer_name: str, tile_x: int, tile_z: int) -> np.ndarray:
-        size = tile_size + halo * 2
-        out = np.zeros((size, size), dtype=np.uint8)
-        world_x0 = tile_x * tile_size - halo
-        world_z0 = tile_z * tile_size - halo
-        world_x1 = world_x0 + size
-        world_z1 = world_z0 + size
-        src_tx0 = max(0, world_x0 // tile_size)
-        src_tz0 = max(0, world_z0 // tile_size)
-        src_tx1 = min(tiles_x - 1, (world_x1 - 1) // tile_size)
-        src_tz1 = min(tiles_z - 1, (world_z1 - 1) // tile_size)
-        for src_tz in range(src_tz0, src_tz1 + 1):
-            for src_tx in range(src_tx0, src_tx1 + 1):
-                tile = read_tile(layer_name, src_tx, src_tz)
-                tx0 = src_tx * tile_size
-                tz0 = src_tz * tile_size
-                ix0 = max(world_x0, tx0)
-                iz0 = max(world_z0, tz0)
-                ix1 = min(world_x1, tx0 + tile_size)
-                iz1 = min(world_z1, tz0 + tile_size)
-                if ix0 >= ix1 or iz0 >= iz1:
-                    continue
-                out_z0 = iz0 - world_z0
-                out_x0 = ix0 - world_x0
-                tile_z0 = iz0 - tz0
-                tile_x0 = ix0 - tx0
-                out[out_z0 : out_z0 + (iz1 - iz0), out_x0 : out_x0 + (ix1 - ix0)] = tile[
-                    tile_z0 : tile_z0 + (iz1 - iz0), tile_x0 : tile_x0 + (ix1 - ix0)
-                ]
-        return out
-
-    def _source_region_file(region_x: int, region_z: int) -> Path:
-        region_path = str(river_layer.get("region_path", f"{river_layer['path']}/regions"))
-        region_ext = str(river_layer.get("region_extension", ".u8rg"))
-        return root / region_path / f"{region_x:03d}_{region_z:03d}{region_ext}"
-
-    def encode_tile(tile_x: int, tile_z: int) -> tuple[np.ndarray, np.ndarray]:
-        dist_tile = np.full((tile_size, tile_size), 255, dtype=np.uint8)
-        hw_tile = np.zeros((tile_size, tile_size), dtype=np.uint8)
-        center = read_tile("rivers", tile_x, tile_z)
-        if not np.any(center):
-            # Cheap neighbor probe before assembling a full halo stack / EDT.
-            tile_radius = (halo + tile_size - 1) // tile_size
-            has_nearby = False
-            for dz in range(-tile_radius, tile_radius + 1):
-                for dx in range(-tile_radius, tile_radius + 1):
-                    if dx == 0 and dz == 0:
-                        continue
-                    if np.any(read_tile("rivers", tile_x + dx, tile_z + dz)):
-                        has_nearby = True
-                        break
-                if has_nearby:
-                    break
-            if not has_nearby:
-                return dist_tile, hw_tile
-        mask_halo = halo_stack("rivers", tile_x, tile_z) > 0
-        if not np.any(mask_halo):
-            return dist_tile, hw_tile
-        half_halo = halo_stack("half_width", tile_x, tile_z)
-        distances, indices = distance_transform_edt(~mask_halo, return_indices=True)
-        center_dist = distances[halo : halo + tile_size, halo : halo + tile_size]
-        nearest_z = indices[0][halo : halo + tile_size, halo : halo + tile_size]
-        nearest_x = indices[1][halo : halo + tile_size, halo : halo + tile_size]
-        nearest_hw = half_halo[nearest_z, nearest_x]
-        within = center_dist <= search_radius
-        codes = np.minimum(254, np.rint(center_dist * 2.0).astype(np.int16)).astype(np.uint8)
-        dist_tile = np.where(within, codes, np.uint8(255)).astype(np.uint8)
-        hw_tile = np.where(within, nearest_hw, np.uint8(0)).astype(np.uint8)
-        return dist_tile, hw_tile
-
-    if use_regions:
-        regions_x = math.ceil(tiles_x / region_tiles)
-        regions_z = math.ceil(tiles_z / region_tiles)
-        dist_region_root = root / distance_path / "regions"
-        hw_region_root = root / nearest_hw_path / "regions"
-        dist_region_root.mkdir(parents=True, exist_ok=True)
-        hw_region_root.mkdir(parents=True, exist_ok=True)
-        for region_z in tqdm(range(regions_z), desc="river distance regions"):
-            for region_x in range(regions_x):
-                dist_out = dist_region_root / f"{region_x:03d}_{region_z:03d}.u8rg"
-                hw_out = hw_region_root / f"{region_x:03d}_{region_z:03d}.u8rg"
-                if not _source_region_file(region_x, region_z).exists():
-                    dist_out.unlink(missing_ok=True)
-                    hw_out.unlink(missing_ok=True)
-                    continue
-                dist_tiles: list[np.ndarray | None] = []
-                hw_tiles: list[np.ndarray | None] = []
-                for local_z in range(region_tiles):
-                    for local_x in range(region_tiles):
-                        tile_x = region_x * region_tiles + local_x
-                        tile_z = region_z * region_tiles + local_z
-                        if tile_x >= tiles_x or tile_z >= tiles_z:
-                            dist_tiles.append(None)
-                            hw_tiles.append(None)
+    _DISTANCE_BAKE = {
+        "root": root,
+        "tile_size": tile_size,
+        "tiles_x": tiles_x,
+        "tiles_z": tiles_z,
+        "halo": halo,
+        "search_radius": search_radius,
+        "river_layer": river_layer,
+        "half_layer": half_layer,
+        "extension": extension,
+        "dist_root": dist_root,
+        "hw_root": hw_root,
+    }
+    _distance_read_tile_cached.cache_clear()
+    total_tiles = tiles_x * tiles_z
+    processes = min(_env_workers("DISTANCE_BAKE_WORKERS", DISTANCE_BAKE_WORKERS), max(1, total_tiles))
+    if processes > 1:
+        console.print(
+            f"[cyan]River distance tiles[/cyan] workers={processes} cache={_DISTANCE_TILE_CACHE_MAX}"
+        )
+    try:
+        with _ForkWorkers(processes, enabled=processes > 1) as pool:
+            if use_regions:
+                regions_x = math.ceil(tiles_x / region_tiles)
+                regions_z = math.ceil(tiles_z / region_tiles)
+                dist_region_root = root / distance_path / "regions"
+                hw_region_root = root / nearest_hw_path / "regions"
+                dist_region_root.mkdir(parents=True, exist_ok=True)
+                hw_region_root.mkdir(parents=True, exist_ok=True)
+                slot_count = region_tiles * region_tiles
+                for region_z in tqdm(range(regions_z), desc="river distance regions"):
+                    for region_x in range(regions_x):
+                        dist_out = dist_region_root / f"{region_x:03d}_{region_z:03d}.u8rg"
+                        hw_out = hw_region_root / f"{region_x:03d}_{region_z:03d}.u8rg"
+                        if not _source_region_file(root, river_layer, region_x, region_z).exists():
+                            dist_out.unlink(missing_ok=True)
+                            hw_out.unlink(missing_ok=True)
                             continue
-                        dist_tile, hw_tile = encode_tile(tile_x, tile_z)
-                        dist_tiles.append(None if np.all(dist_tile == 255) else dist_tile)
-                        hw_tiles.append(None if not np.any(hw_tile) else hw_tile)
-                write_region_file_from_tiles(
-                    dist_out,
-                    tiles=dist_tiles,
-                    tile_size=tile_size,
-                    region_tiles=region_tiles,
-                    dtype="uint8",
-                    missing_tile=255,
-                )
-                write_region_file_from_tiles(
-                    hw_out,
-                    tiles=hw_tiles,
-                    tile_size=tile_size,
-                    region_tiles=region_tiles,
-                    dtype="uint8",
-                    missing_tile=0,
-                )
-    else:
-        dist_root = root / distance_path
-        hw_root = root / nearest_hw_path
-        dist_root.mkdir(parents=True, exist_ok=True)
-        hw_root.mkdir(parents=True, exist_ok=True)
-        for tile_z in tqdm(range(tiles_z), desc="river distance tiles"):
-            for tile_x in range(tiles_x):
-                dist_tile, hw_tile = encode_tile(tile_x, tile_z)
-                write_u8_tile(dist_root / f"{tile_x:03d}_{tile_z:03d}{extension}", dist_tile, tile_size, sparse_fill=255)
-                write_u8_tile(hw_root / f"{tile_x:03d}_{tile_z:03d}{extension}", hw_tile, tile_size)
-
-    rivers["distance_path"] = distance_path
-    rivers["nearest_half_width_path"] = nearest_hw_path
-    rivers["distance_search_radius"] = int(search_radius)
-    rivers["distance_units"] = "half_blocks"
-    if use_regions:
-        for key, value in region_metadata(distance_path, "uint8", region_tiles=region_tiles, missing_tile=255).items():
-            rivers[f"distance_{key}"] = value
-        for key, value in region_metadata(nearest_hw_path, "uint8", region_tiles=region_tiles, missing_tile=0).items():
-            rivers[f"nearest_half_width_{key}"] = value
-    write_manifest(manifest_file, manifest)
-    console.print(
-        f"[green]Baked river distance grids[/green] search_radius={search_radius} "
-        f"storage={'regions' if use_regions else 'tiles'}"
-    )
-
-
+                        tasks: list[tuple[int, int, int]] = []
+                        for local_z in range(region_tiles):
+                            for local_x in range(region_tiles):
+                                tile_x = region_x * region_tiles + local_x
+                                tile_z = region_z * region_tiles + local_z
+                                if tile_x >= tiles_x or tile_z >= tiles_z:
+                                    continue
+                                tasks.append((local_z * region_tiles + local_x, tile_x, tile_z))
+                        dist_tiles: list[np.ndarray | None] = [None] * slot_count
+                        hw_tiles: list[np.ndarray | None] = [None] * slot_count
+                        for index, dist_tile, hw_tile in pool.imap(
+                            _encode_distance_region_slot,
+                            tasks,
+                            task_count=len(tasks),
+                        ):
+                            dist_tiles[index] = dist_tile
+                            hw_tiles[index] = hw_tile
+                        write_region_file_from_tiles(
+                            dist_out,
+                            tiles=dist_tiles,
+                            tile_size=tile_size,
+                            region_tiles=region_tiles,
+                            dtype="uint8",
+                            missing_tile=255,
+                        )
+                        write_region_file_from_tiles(
+                            hw_out,
+                            tiles=hw_tiles,
+                            tile_size=tile_size,
+                            region_tiles=region_tiles,
+                            dtype="uint8",
+                            missing_tile=0,
+                        )
+            else:
+                dist_root.mkdir(parents=True, exist_ok=True)
+                hw_root.mkdir(parents=True, exist_ok=True)
+                for _ in pool.imap(
+                    _bake_one_distance_tile,
+                    _iter_distance_tiles(tiles_x, tiles_z),
+                    task_count=total_tiles,
+                    desc="river distance tiles",
+                ):
+                    pass
+        rivers["distance_path"] = distance_path
+        rivers["nearest_half_width_path"] = nearest_hw_path
+        rivers["distance_search_radius"] = int(search_radius)
+        rivers["distance_units"] = "half_blocks"
+        if use_regions:
+            for key, value in region_metadata(distance_path, "uint8", region_tiles=region_tiles, missing_tile=255).items():
+                rivers[f"distance_{key}"] = value
+            for key, value in region_metadata(nearest_hw_path, "uint8", region_tiles=region_tiles, missing_tile=0).items():
+                rivers[f"nearest_half_width_{key}"] = value
+        write_manifest(manifest_file, manifest)
+        console.print(
+            f"[green]Baked river distance grids[/green] search_radius={search_radius} "
+            f"storage={'regions' if use_regions else 'tiles'}"
+        )
+    finally:
+        _DISTANCE_BAKE = None
+        _distance_read_tile_cached.cache_clear()
 
 
 def _resolve_resume_paths(out: Path) -> dict[str, Path]:
@@ -490,7 +655,235 @@ def _rasterize_shape_batches(
     maximum_in_place(out, burned)
 
 
-def _rasterize_edge_pass(
+def _river_raster_workers() -> int:
+    return _env_workers("RIVER_RASTER_WORKERS", RIVER_RASTER_WORKERS)
+
+
+def _river_raster_chunksize(task_count: int) -> int:
+    if task_count >= 2048:
+        return 16
+    if task_count >= 256:
+        return 8
+    return 4
+
+
+def _inverse_affine_coeffs(transform) -> tuple[float, float, float, float, float, float]:
+    inverse = ~transform
+    return (
+        float(inverse.a),
+        float(inverse.b),
+        float(inverse.c),
+        float(inverse.d),
+        float(inverse.e),
+        float(inverse.f),
+    )
+
+
+def _tile_span_for_bounds(
+    minx: float,
+    miny: float,
+    maxx: float,
+    maxy: float,
+    coeffs: tuple[float, float, float, float, float, float],
+    tile_size: int,
+    width: int,
+    depth: int,
+) -> tuple[int, int, int, int] | None:
+    """Cell-space tile span of a world AABB.
+
+    Corner mapping matches ``rasterio.windows.from_bounds`` on the full-world
+    affine. One extra cell is included so ``all_touched`` pixels on the
+    boundary still fall in a visited tile.
+    """
+    if not (math.isfinite(minx) and math.isfinite(miny) and math.isfinite(maxx) and math.isfinite(maxy)):
+        return None
+    if maxx < minx:
+        minx, maxx = maxx, minx
+    if maxy < miny:
+        miny, maxy = maxy, miny
+    ia, ib, ic, id_, ie, if_ = coeffs
+    corners = ((minx, maxy), (maxx, maxy), (maxx, miny), (minx, miny))
+    cols = [ia * x + ib * y + ic for x, y in corners]
+    rows = [id_ * x + ie * y + if_ for x, y in corners]
+    col_start, col_stop = min(cols), max(cols)
+    row_start, row_stop = min(rows), max(rows)
+    col0 = max(0, int(math.floor(col_start)) - 1)
+    row0 = max(0, int(math.floor(row_start)) - 1)
+    col1 = min(width, int(math.ceil(col_stop)) + 1)
+    row1 = min(depth, int(math.ceil(row_stop)) + 1)
+    if col0 >= col1 or row0 >= row1:
+        return None
+    tx0 = col0 // tile_size
+    tz0 = row0 // tile_size
+    tx1 = (col1 - 1) // tile_size
+    tz1 = (row1 - 1) // tile_size
+    return tx0, tx1, tz0, tz1
+
+
+def _tiles_touched_by_edge(
+    edge: _Edge,
+    half_width_cells: int,
+    transform,
+    cell_metres: float,
+    tile_size: int,
+    width: int,
+    depth: int,
+    coeffs: tuple[float, float, float, float, float, float] | None = None,
+) -> set[tuple[int, int]]:
+    line = edge.line
+    if line is None or line.is_empty:
+        return set()
+    coords = list(line.coords)
+    if len(coords) < 2:
+        return set()
+    if coeffs is None:
+        coeffs = _inverse_affine_coeffs(transform)
+    expand = max(1, int(half_width_cells)) * float(cell_metres)
+    expand += max(abs(float(transform.a)), abs(float(transform.e)), 0.0)
+    tiles: set[tuple[int, int]] = set()
+    for start, end in zip(coords, coords[1:]):
+        x0, y0 = float(start[0]), float(start[1])
+        x1, y1 = float(end[0]), float(end[1])
+        if not (math.isfinite(x0) and math.isfinite(y0) and math.isfinite(x1) and math.isfinite(y1)):
+            continue
+        span = _tile_span_for_bounds(
+            min(x0, x1) - expand,
+            min(y0, y1) - expand,
+            max(x0, x1) + expand,
+            max(y0, y1) + expand,
+            coeffs,
+            tile_size,
+            width,
+            depth,
+        )
+        if span is None:
+            continue
+        tx0, tx1, tz0, tz1 = span
+        for tile_z in range(tz0, tz1 + 1):
+            for tile_x in range(tx0, tx1 + 1):
+                tiles.add((tile_x, tile_z))
+    return tiles
+
+
+def _edge_raster_arrays(edges: list[_Edge], value_fn) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    count = len(edges)
+    orders = np.empty(count, dtype=np.int32)
+    half_widths = np.empty(count, dtype=np.int32)
+    values = np.empty(count, dtype=np.int32)
+    for index, edge in enumerate(edges):
+        orders[index] = int(edge.order)
+        half_widths[index] = max(1, int(edge.half_width))
+        values[index] = int(value_fn(edge))
+    return orders, half_widths, values
+
+
+def _bucket_river_edge_tiles(
+    edges: list[_Edge],
+    half_widths: np.ndarray,
+    transform,
+    cell_metres: float,
+    tile_size: int,
+    width: int,
+    depth: int,
+    *,
+    desc: str,
+) -> dict[tuple[int, int], list[int]]:
+    buckets: dict[tuple[int, int], list[int]] = defaultdict(list)
+    coeffs = _inverse_affine_coeffs(transform)
+    iterator: Any = edges
+    if len(edges) >= 1000:
+        iterator = tqdm(edges, desc=f"{desc} index", leave=False)
+    for index, edge in enumerate(iterator):
+        touched = _tiles_touched_by_edge(
+            edge,
+            int(half_widths[index]),
+            transform,
+            cell_metres,
+            tile_size,
+            width,
+            depth,
+            coeffs,
+        )
+        for key in touched:
+            buckets[key].append(index)
+    return buckets
+
+
+def _tile_raster_transform(transform, col0: int, row0: int, cols: int, rows: int):
+    """Windowed affine so this tile's pixels match the full-world transform."""
+    return window_transform(Window(col_off=col0, row_off=row0, width=cols, height=rows), transform)
+
+
+def _maximum_tile_into(out: np.ndarray, tile_x: int, tile_z: int, tile: np.ndarray, tile_size: int) -> None:
+    depth, width = out.shape
+    row0 = tile_z * tile_size
+    col0 = tile_x * tile_size
+    if row0 < 0 or col0 < 0 or row0 >= depth or col0 >= width:
+        return
+    rows = min(tile_size, depth - row0, int(tile.shape[0]))
+    cols = min(tile_size, width - col0, int(tile.shape[1]))
+    if rows <= 0 or cols <= 0:
+        return
+    dest = out[row0 : row0 + rows, col0 : col0 + cols]
+    np.maximum(dest, tile[:rows, :cols], out=dest)
+
+
+# Set in the parent before fork. Workers read edges and precomputed values
+# from here so tasks stay small and value_fn is never pickled.
+_RIVER_EDGE_RASTER: dict[str, Any] | None = None
+
+
+def _rasterize_one_edge_tile(task: tuple[int, int, list[int]]) -> tuple[int, int, np.ndarray] | None:
+    tile_x, tile_z, indices = task
+    ctx = _RIVER_EDGE_RASTER
+    if ctx is None:
+        raise RuntimeError("river raster worker missing fork context")
+    edges: list[_Edge] = ctx["edges"]
+    half_widths: np.ndarray = ctx["half_widths"]
+    values: np.ndarray = ctx["values"]
+    transform = ctx["transform"]
+    cell_metres = float(ctx["cell_metres"])
+    tile_size = int(ctx["tile_size"])
+    width = int(ctx["width"])
+    depth = int(ctx["depth"])
+    row0 = tile_z * tile_size
+    col0 = tile_x * tile_size
+    if row0 < 0 or col0 < 0 or row0 >= depth or col0 >= width:
+        return None
+    rows = min(tile_size, depth - row0)
+    cols = min(tile_size, width - col0)
+    if rows <= 0 or cols <= 0:
+        return None
+    shapes: list[tuple[int, object]] = []
+    for index in indices:
+        edge = edges[index]
+        line = edge.line
+        if line is None or line.is_empty:
+            continue
+        buffered = line.buffer(int(half_widths[index]) * cell_metres, cap_style="round", join_style="round")
+        if buffered.is_empty:
+            continue
+        shapes.append((int(values[index]), buffered))
+    if not shapes:
+        return None
+    # Ascending value + MergeAlg.replace makes the higher burn win inside the tile.
+    shapes.sort(key=lambda item: item[0])
+    burned = [(geom, value) for value, geom in shapes]
+    tile = np.zeros((rows, cols), dtype=np.uint8)
+    rasterize(
+        burned,
+        out=tile,
+        transform=_tile_raster_transform(transform, col0, row0, cols, rows),
+        dtype=np.uint8,
+        merge_alg=MergeAlg.replace,
+        all_touched=True,
+    )
+    if not tile.any():
+        return None
+    return tile_x, tile_z, tile
+
+
+def _rasterize_edge_pass_sequential(
     edges: list[_Edge],
     out: np.ndarray,
     transform,
@@ -514,6 +907,136 @@ def _rasterize_edge_pass(
             _rasterize_shape_batches_direct(shapes, out, transform)
             shapes.clear()
     _rasterize_shape_batches_direct(shapes, out, transform)
+
+
+def _rasterize_edge_pass_parallel(
+    edges: list[_Edge],
+    out: np.ndarray,
+    transform,
+    cell_metres: float,
+    *,
+    tile_size: int,
+    value_fn,
+    desc: str,
+    workers: int,
+    initial: int = 0,
+    total: int | None = None,
+) -> None:
+    """Rasterize edges per tile and merge with ``np.maximum``.
+
+    Empty tiles are skipped. A single tile, or ``workers <= 1``, falls back
+    to the sequential pass. ``initial`` and ``total`` apply only to that fallback.
+    """
+    if tile_size <= 0:
+        raise ValueError(f"tile_size must be positive, got {tile_size}")
+    depth, width = (int(out.shape[0]), int(out.shape[1]))
+    if depth <= 0 or width <= 0 or not edges:
+        return
+    orders, half_widths, values = _edge_raster_arrays(edges, value_fn)
+    buckets = _bucket_river_edge_tiles(
+        edges,
+        half_widths,
+        transform,
+        cell_metres,
+        tile_size,
+        width,
+        depth,
+        desc=desc,
+    )
+    if not buckets:
+        return
+    tasks = [(tile_x, tile_z, indices) for (tile_x, tile_z), indices in buckets.items()]
+    buckets.clear()
+    worker_count = min(max(1, int(workers)), len(tasks))
+    if worker_count <= 1:
+        _rasterize_edge_pass_sequential(
+            edges,
+            out,
+            transform,
+            cell_metres,
+            value_fn=value_fn,
+            desc=desc,
+            initial=initial,
+            total=total,
+        )
+        return
+    global _RIVER_EDGE_RASTER
+    _RIVER_EDGE_RASTER = {
+        "edges": edges,
+        "orders": orders,
+        "half_widths": half_widths,
+        "values": values,
+        "transform": transform,
+        "cell_metres": float(cell_metres),
+        "tile_size": int(tile_size),
+        "width": width,
+        "depth": depth,
+    }
+    try:
+        # _ForkWorkers uses multiprocessing.get_context("fork") so the edge
+        # list stays shared copy-on-write. Tasks carry only tile coordinates
+        # and edge indices.
+        with _ForkWorkers(worker_count, enabled=True) as pool:
+            for result in pool.imap(
+                _rasterize_one_edge_tile,
+                tasks,
+                task_count=len(tasks),
+                desc=desc,
+                chunksize=_river_raster_chunksize(len(tasks)),
+            ):
+                if result is None:
+                    continue
+                tile_x, tile_z, tile = result
+                _maximum_tile_into(out, tile_x, tile_z, tile, tile_size)
+    finally:
+        _RIVER_EDGE_RASTER = None
+    if isinstance(out, np.memmap):
+        out.flush()
+
+
+def _rasterize_edge_pass(
+    edges: list[_Edge],
+    out: np.ndarray,
+    transform,
+    cell_metres: float,
+    *,
+    value_fn,
+    desc: str,
+    tile_size: int = 512,
+    initial: int = 0,
+    total: int | None = None,
+    workers: int | None = None,
+) -> None:
+    """Burn buffered edges into ``out``.
+
+    Fewer than 100 edges, or a single worker, keeps the sequential full-raster
+    path. Otherwise tiles are burned in forked workers and merged with maximum.
+    """
+    configured = _river_raster_workers() if workers is None else max(1, int(workers))
+    if len(edges) < _RIVER_RASTER_MIN_EDGES or configured <= 1:
+        _rasterize_edge_pass_sequential(
+            edges,
+            out,
+            transform,
+            cell_metres,
+            value_fn=value_fn,
+            desc=desc,
+            initial=initial,
+            total=total,
+        )
+        return
+    _rasterize_edge_pass_parallel(
+        edges,
+        out,
+        transform,
+        cell_metres,
+        tile_size=tile_size,
+        value_fn=value_fn,
+        desc=desc,
+        workers=configured,
+        initial=initial,
+        total=total,
+    )
 
 
 def _rasterize_shape_batches_direct(

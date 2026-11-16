@@ -105,6 +105,12 @@ final class PackedRegionTileReader {
             return data;
         }
         ByteBuffer buffer = ByteBuffer.wrap(data).order(ByteOrder.LITTLE_ENDIAN);
+        if (bytesPerCell == 4) {
+            for (int i = 0; i < tileBytes / 4; i++) {
+                buffer.putInt(defaultValue);
+            }
+            return data;
+        }
         short value = (short) defaultValue;
         for (int i = 0; i < tileBytes / 2; i++) {
             buffer.putShort(value);

@@ -278,29 +278,29 @@ stage_server_pack_local() {
 
 purge_remote_stale_project_jars() {
   # rsync without --delete leaves old ukgeo-*.jar versions; NeoForge dual-loads them.
-  ssh "$SERVER_SSH_HOST" bash -s <<'REMOTE'
+  ssh "$SERVER_SSH_HOST" bash -s <<REMOTE
 set -euo pipefail
-MODS="'"$SERVER_REMOTE_DIR"'/mods"
-cd "$MODS"
+MODS="$SERVER_REMOTE_DIR/mods"
+cd "\$MODS"
 for prefix in ukgeo- ukgeo-animals- animalhunger- foodspoilage- pollution- vanillaadjust- vanilla_adjustments- createenginebalance- enginebalance- realtime_localised_weather- realtime-localised-weather-; do
-  mapfile -t jars < <(ls -1 ${prefix}*.jar 2>/dev/null | sort -V || true)
-  if ((${#jars[@]} > 1)); then
+  mapfile -t jars < <(ls -1 \${prefix}*.jar 2>/dev/null | sort -V || true)
+  if ((\${#jars[@]} > 1)); then
     # keep lexicographically last / highest version-ish; prefer newest mtime
-    mapfile -t jars < <(ls -1t ${prefix}*.jar 2>/dev/null || true)
-    keep="${jars[0]}"
-    for j in "${jars[@]:1}"; do
-      echo "[remote] removing stale $j (keeping $keep)"
-      rm -f "$j"
+    mapfile -t jars < <(ls -1t \${prefix}*.jar 2>/dev/null || true)
+    keep="\${jars[0]}"
+    for j in "\${jars[@]:1}"; do
+      echo "[remote] removing stale \$j (keeping \$keep)"
+      rm -f "\$j"
     done
   fi
 done
 # special: ukgeo-*.jar but not ukgeo-animals
 mapfile -t ujars < <(ls -1t ukgeo-[0-9]*.jar 2>/dev/null || true)
-if ((${#ujars[@]} > 1)); then
-  keep="${ujars[0]}"
-  for j in "${ujars[@]:1}"; do
-    echo "[remote] removing stale $j (keeping $keep)"
-    rm -f "$j"
+if ((\${#ujars[@]} > 1)); then
+  keep="\${ujars[0]}"
+  for j in "\${ujars[@]:1}"; do
+    echo "[remote] removing stale \$j (keeping \$keep)"
+    rm -f "\$j"
   done
 fi
 REMOTE

@@ -4,6 +4,8 @@ import geopandas as gpd
 import numpy as np
 from shapely.geometry import LineString, MultiLineString
 
+from rasterio.transform import from_bounds
+
 from ukgeo.rivers import (
     _Edge,
     _InputLine,
@@ -19,8 +21,12 @@ from ukgeo.rivers import (
     _preview_radius_for_edge,
     _preview_radius_for_half_width,
     _preview_radius_for_order,
+    _rasterize_edge_pass,
+    _rasterize_edge_pass_parallel,
+    _rasterize_edge_pass_sequential,
     _strahler_widths,
     _thin_top_order_half_widths,
+    _tiles_touched_by_edge,
 )
 
 
@@ -315,3 +321,78 @@ def test_survival_half_width_table_at_axis_scales():
 
     assert finals(1.0) == [1, 1, 2, 3, 5, 7, 10]
     assert finals(2.0) == [2, 2, 4, 6, 10, 14, 20]
+
+
+def test_parallel_river_edge_raster_matches_sequential_max():
+    width, depth = 40, 20
+    cell = 2.0
+    transform = from_bounds(0.0, 0.0, width * cell, depth * cell, width, depth)
+    tile_size = 16
+    edges = [
+        _Edge(LineString([(4, 20), (70, 20)]), 2, 2),
+        _Edge(LineString([(30, 4), (30, 36)]), 7, 3),
+        _Edge(LineString([(70, 2), (78, 8)]), 4, 1),
+        _Edge(LineString([(2, 36), (20, 30)]), 1, 2),
+        _Edge(LineString([(-100, -100), (-90, -90)]), 5, 2),
+    ]
+
+    def value_fn(edge: _Edge) -> int:
+        return int(edge.order)
+
+    touched: set[tuple[int, int]] = set()
+    for edge in edges:
+        touched |= _tiles_touched_by_edge(edge, edge.half_width, transform, cell, tile_size, width, depth)
+    assert len(touched) > 1
+    assert (2, 1) in touched
+
+    sequential = np.zeros((depth, width), dtype=np.uint8)
+    _rasterize_edge_pass_sequential(
+        sorted(edges, key=value_fn),
+        sequential,
+        transform,
+        cell,
+        value_fn=value_fn,
+        desc="sequential river raster",
+    )
+    parallel = np.zeros((depth, width), dtype=np.uint8)
+    _rasterize_edge_pass_parallel(
+        list(reversed(edges)),
+        parallel,
+        transform,
+        cell,
+        tile_size=tile_size,
+        value_fn=value_fn,
+        desc="parallel river raster",
+        workers=2,
+    )
+    assert int(parallel.max()) == 7
+    assert np.array_equal(sequential, parallel)
+
+    low_rows, low_cols = np.where(sequential == 2)
+    assert low_rows.size
+    seeded = np.zeros((depth, width), dtype=np.uint8)
+    seeded[int(low_rows[0]), int(low_cols[0])] = 9
+    _rasterize_edge_pass_parallel(
+        list(reversed(edges)),
+        seeded,
+        transform,
+        cell,
+        tile_size=tile_size,
+        value_fn=value_fn,
+        desc="parallel river raster max",
+        workers=2,
+    )
+    assert seeded[int(low_rows[0]), int(low_cols[0])] == 9
+    assert int(seeded.max()) == 9
+
+    small = np.zeros((depth, width), dtype=np.uint8)
+    _rasterize_edge_pass(
+        sorted(edges, key=value_fn),
+        small,
+        transform,
+        cell,
+        tile_size=tile_size,
+        value_fn=value_fn,
+        desc="small river raster",
+    )
+    assert np.array_equal(sequential, small)

@@ -47,6 +47,16 @@ def u8_extension(compression: str | None = None) -> str:
     return ".u8.gz" if mode == "gzip" else ".u8"
 
 
+def u16_extension(compression: str | None = None) -> str:
+    mode = tile_compression() if compression is None else compression
+    return ".u16.gz" if mode == "gzip" else ".u16"
+
+
+def u32_extension(compression: str | None = None) -> str:
+    mode = tile_compression() if compression is None else compression
+    return ".u32.gz" if mode == "gzip" else ".u32"
+
+
 def is_gzip_path(path: Path) -> bool:
     return path.name.lower().endswith(".gz")
 
@@ -81,10 +91,10 @@ def _read_tile_bytes(path: Path, expected: int) -> bytes:
     return data
 
 
-def write_r16_tile(path: Path, array: np.ndarray) -> None:
+def write_r16_tile(path: Path, array: np.ndarray, tile_size: int = 512) -> None:
     arr = np.asarray(array, dtype="<i2")
-    if arr.shape != (512, 512):
-        raise ValueError(f"height tile must be 512x512, got {arr.shape}")
+    if arr.shape != (tile_size, tile_size):
+        raise ValueError(f"height tile must be {tile_size}x{tile_size}, got {arr.shape}")
     if np.all(arr == HEIGHT_NODATA):
         path.unlink(missing_ok=True)
         gzip_alternate(path).unlink(missing_ok=True)
@@ -129,6 +139,54 @@ def read_u8_tile(path: Path, tile_size: int = 512) -> np.ndarray:
     return np.frombuffer(data, dtype=np.uint8).reshape((tile_size, tile_size))
 
 
+def write_u16_tile(path: Path, array: np.ndarray, tile_size: int = 512, *, sparse_fill: int = 0) -> None:
+    arr = np.asarray(array, dtype="<u2")
+    if arr.shape != (tile_size, tile_size):
+        raise ValueError(f"uint16 tile must be {tile_size}x{tile_size}, got {arr.shape}")
+    if np.all(arr == sparse_fill):
+        path.unlink(missing_ok=True)
+        gzip_alternate(path).unlink(missing_ok=True)
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = arr.tobytes(order="C")
+    if is_gzip_path(path):
+        with gzip.open(path, "wb", compresslevel=1) as fh:
+            fh.write(data)
+    else:
+        path.write_bytes(data)
+
+
+def read_u16_tile(path: Path, tile_size: int = 512) -> np.ndarray:
+    if not resolve_existing_tile(path).exists():
+        return np.zeros((tile_size, tile_size), dtype="<u2")
+    data = _read_tile_bytes(path, tile_size * tile_size * 2)
+    return np.frombuffer(data, dtype="<u2").reshape((tile_size, tile_size))
+
+
+def write_u32_tile(path: Path, array: np.ndarray, tile_size: int = 512, *, sparse_fill: int = 0) -> None:
+    arr = np.asarray(array, dtype="<u4")
+    if arr.shape != (tile_size, tile_size):
+        raise ValueError(f"uint32 tile must be {tile_size}x{tile_size}, got {arr.shape}")
+    if np.all(arr == sparse_fill):
+        path.unlink(missing_ok=True)
+        gzip_alternate(path).unlink(missing_ok=True)
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = arr.tobytes(order="C")
+    if is_gzip_path(path):
+        with gzip.open(path, "wb", compresslevel=1) as fh:
+            fh.write(data)
+    else:
+        path.write_bytes(data)
+
+
+def read_u32_tile(path: Path, tile_size: int = 512) -> np.ndarray:
+    if not resolve_existing_tile(path).exists():
+        return np.zeros((tile_size, tile_size), dtype="<u4")
+    data = _read_tile_bytes(path, tile_size * tile_size * 4)
+    return np.frombuffer(data, dtype="<u4").reshape((tile_size, tile_size))
+
+
 def read_r16_tile_or_nodata(path: Path, tile_size: int = 512) -> np.ndarray:
     return read_r16_tile(path, tile_size)
 
@@ -140,21 +198,78 @@ def tile_path(root: Path, tile_x: int, tile_z: int, extension: str) -> Path:
 def region_extension(dtype: str) -> str:
     if dtype == "uint8":
         return ".u8rg"
+    if dtype == "uint16_le":
+        return ".u16rg"
+    if dtype == "uint32_le":
+        return ".u32rg"
     if dtype == "int16_le":
         return ".r16rg"
     raise ValueError(f"Unsupported packed region dtype: {dtype}")
 
 
+def default_tile_extension(dtype: str) -> str:
+    if dtype == "uint16_le":
+        return u16_extension()
+    if dtype == "uint32_le":
+        return u32_extension()
+    if dtype == "int16_le":
+        return r16_extension()
+    if dtype == "uint8":
+        return u8_extension()
+    raise ValueError(f"Unsupported tile dtype: {dtype}")
+
+
 def default_tile_value(dtype: str) -> int:
-    return 0 if dtype == "uint8" else HEIGHT_NODATA
+    if dtype in {"uint8", "uint16_le", "uint32_le"}:
+        return 0
+    return HEIGHT_NODATA
 
 
 def raw_tile_bytes(dtype: str, tile_size: int) -> int:
-    return tile_size * tile_size * (2 if dtype == "int16_le" else 1)
+    if dtype in {"int16_le", "uint16_le"}:
+        return tile_size * tile_size * 2
+    if dtype == "uint32_le":
+        return tile_size * tile_size * 4
+    if dtype == "uint8":
+        return tile_size * tile_size
+    raise ValueError(f"Unsupported tile dtype: {dtype}")
 
 
 def tile_dtype(dtype: str) -> np.dtype:
-    return np.dtype("<i2") if dtype == "int16_le" else np.dtype(np.uint8)
+    if dtype == "int16_le":
+        return np.dtype("<i2")
+    if dtype == "uint16_le":
+        return np.dtype("<u2")
+    if dtype == "uint32_le":
+        return np.dtype("<u4")
+    if dtype == "uint8":
+        return np.dtype(np.uint8)
+    raise ValueError(f"Unsupported tile dtype: {dtype}")
+
+
+# River station layers stamped by the canonical station bake.
+# Reach ids are uint32 so a UK-wide edge count above 65535 still fits.
+RIVER_STATION_LAYERS = (
+    ("reach_id_path", "reach_id", "uint32_le"),
+    ("station_id_path", "station_id", "uint16_le"),
+    ("water_y_path", "water_y", "int16_le"),
+    ("flow_azimuth_path", "flow_azimuth", "uint8"),
+)
+
+
+def river_typed_layer(rivers: dict[str, Any], path_key: str, prefix: str, dtype: str) -> dict[str, Any]:
+    """Build a pack/read layer dict for one typed river auxiliary."""
+    layer: dict[str, Any] = {
+        "path": rivers[path_key],
+        "extension": rivers.get(f"{prefix}_extension", default_tile_extension(dtype)),
+        "dtype": dtype,
+        "missing_tile": int(rivers.get(f"{prefix}_missing_tile", default_tile_value(dtype))),
+    }
+    for key in ("storage", "region_path", "region_extension", "region_tiles", "missing_tile"):
+        prefixed = f"{prefix}_{key}"
+        if prefixed in rivers:
+            layer[key] = rivers[prefixed]
+    return layer
 
 
 def region_metadata(
@@ -199,10 +314,20 @@ def read_layer_tile(root: Path, layer: dict[str, Any], tile_x: int, tile_z: int,
     dtype = str(layer.get("dtype", "uint8"))
     if layer_uses_regions(layer):
         return read_region_tile(root, layer, tile_x, tile_z, tile_size)
-    extension = str(layer.get("extension", r16_extension() if dtype == "int16_le" else u8_extension()))
+    extension = str(layer.get("extension", default_tile_extension(dtype)))
     path = root / str(layer["path"]) / tile_filename(tile_x, tile_z, extension)
     if dtype == "int16_le":
         return read_r16_tile_or_nodata(path, tile_size)
+    if dtype == "uint16_le":
+        default = int(layer.get("missing_tile", 0))
+        if not resolve_existing_tile(path).exists():
+            return np.full((tile_size, tile_size), default, dtype="<u2")
+        return read_u16_tile(path, tile_size)
+    if dtype == "uint32_le":
+        default = int(layer.get("missing_tile", 0))
+        if not resolve_existing_tile(path).exists():
+            return np.full((tile_size, tile_size), default, dtype="<u4")
+        return read_u32_tile(path, tile_size)
     default = int(layer.get("missing_tile", default_tile_value(dtype)))
     if not resolve_existing_tile(path).exists():
         return np.full((tile_size, tile_size), default, dtype=np.uint8)
@@ -267,6 +392,11 @@ def pack_manifest_regions(root: Path, manifest: dict[str, Any], *, region_tiles:
                     aux["missing_tile"] = 255
                 pack_layer_regions(root, aux, manifest, region_tiles=region_tiles, delete_raw=delete_raw)
                 _copy_layer_region_metadata(aux, rivers, prefix=prefix)
+        for path_key, prefix, dtype in RIVER_STATION_LAYERS:
+            if path_key in rivers:
+                station_layer = river_typed_layer(rivers, path_key, prefix, dtype)
+                pack_layer_regions(root, station_layer, manifest, region_tiles=region_tiles, delete_raw=delete_raw)
+                _copy_layer_region_metadata(station_layer, rivers, prefix=prefix)
     for layer in manifest.get("ore_layers", {}).values():
         pack_layer_regions(root, layer, manifest, region_tiles=region_tiles, delete_raw=delete_raw)
     for layer in manifest.get("animal_habitats", {}).get("entities", {}).values():
@@ -304,6 +434,9 @@ def iter_packable_layers(manifest: dict[str, Any]) -> Iterable[dict[str, Any]]:
                 "dtype": "uint8",
                 "missing_tile": 255,
             }
+        for path_key, prefix, dtype in RIVER_STATION_LAYERS:
+            if path_key in rivers:
+                yield river_typed_layer(rivers, path_key, prefix, dtype)
     yield from manifest.get("ore_layers", {}).values()
     for layer in manifest.get("animal_habitats", {}).get("entities", {}).values():
         yield layer
@@ -317,7 +450,7 @@ def pack_layer_regions(root: Path, layer: dict[str, Any], manifest: dict[str, An
     depth = int(layer.get("depth_cells", math.ceil(int(manifest["world"]["padded_depth"]) / cell_blocks)))
     tiles_x = math.ceil(width / tile_size)
     tiles_z = math.ceil(depth / tile_size)
-    extension = str(layer.get("extension", r16_extension() if dtype == "int16_le" else u8_extension()))
+    extension = str(layer.get("extension", default_tile_extension(dtype)))
     layer_path = str(layer["path"])
     raw_root = root / layer_path
     region_root = root / layer_path / "regions"
