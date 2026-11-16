@@ -16,7 +16,7 @@ public abstract class VanillaPrecipitationRendererMixin {
     private void realtime_localised_weather$renderSnowAndRain(LightTexture lightTexture, float partialTick, double cameraX, double cameraY, double cameraZ, CallbackInfo cir) {
         ClientVisualWeatherController.applyForCamera(cameraX, cameraZ);
         if (ClientWeatherManager.shouldReplaceVanillaWeather()) {
-            LocalisedPrecipitationRenderer.render(partialTick, cameraX, cameraY, cameraZ);
+            LocalisedPrecipitationRenderer.render(lightTexture, partialTick, cameraX, cameraY, cameraZ);
             cir.cancel();
         }
     }

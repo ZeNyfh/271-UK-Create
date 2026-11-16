@@ -1,6 +1,7 @@
 package com.ukgeo.realtimelocalisedweather.client.render;
 
 import com.mojang.blaze3d.systems.RenderSystem;
+import com.mojang.blaze3d.vertex.BufferBuilder;
 import com.mojang.blaze3d.vertex.BufferUploader;
 import com.mojang.blaze3d.vertex.DefaultVertexFormat;
 import com.mojang.blaze3d.vertex.Tesselator;
@@ -9,11 +10,17 @@ import com.ukgeo.realtimelocalisedweather.config.ClientWeatherConfig;
 import com.ukgeo.realtimelocalisedweather.weather.client.ClientWeatherManager;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.GameRenderer;
+import net.minecraft.client.renderer.LevelRenderer;
+import net.minecraft.client.renderer.LightTexture;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
-import org.joml.Matrix4f;
+import net.minecraft.world.level.levelgen.Heightmap;
 
-/** Renders the vanilla rain/snow textures with a local, continuously animated intensity. */
+/**
+ * Renders vanilla rain/snow textures with local, continuously animated intensity.
+ * Positions are camera-relative world anchors; UV scroll is driven by a float-safe
+ * animation clock so streaks keep falling while the player stands still.
+ */
 public final class LocalisedPrecipitationRenderer {
     private static final ResourceLocation RAIN_TEXTURE = ResourceLocation.withDefaultNamespace("textures/environment/rain.png");
     private static final ResourceLocation SNOW_TEXTURE = ResourceLocation.withDefaultNamespace("textures/environment/snow.png");
@@ -22,26 +29,33 @@ public final class LocalisedPrecipitationRenderer {
     private LocalisedPrecipitationRenderer() {
     }
 
-    public static void render(float partialTick, double cameraX, double cameraY, double cameraZ) {
+    public static void render(LightTexture lightTexture, float partialTick, double cameraX, double cameraY, double cameraZ) {
         Minecraft minecraft = Minecraft.getInstance();
         if (minecraft.level == null || minecraft.player == null) return;
 
         int renderDistance = ClientWeatherConfig.PRECIPITATION_RENDER_DISTANCE_BLOCKS.get();
-        Matrix4f modelView = RenderSystem.getModelViewMatrix();
-        // Keep animation in float-safe range — large getGameTime() values freeze UV scroll.
-        float weatherTime = (minecraft.level.getGameTime() & 0xFFFF) + partialTick;
+        float weatherTime = PrecipitationAnimation.weatherTime(minecraft.level.getGameTime(), partialTick);
+
+        lightTexture.turnOnLightLayer();
         RenderSystem.enableBlend();
+        RenderSystem.enableDepthTest();
+        RenderSystem.depthMask(Minecraft.useShaderTransparency());
         RenderSystem.disableCull();
         try {
             RenderSystem.defaultBlendFunc();
-            RenderSystem.setShader(GameRenderer::getPositionTexColorShader);
-            var rainBuilder = Tesselator.getInstance().begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_TEX_COLOR);
-            var snowBuilder = Tesselator.getInstance().begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_TEX_COLOR);
+            RenderSystem.setShader(GameRenderer::getParticleShader);
+            var rainBuilder = Tesselator.getInstance().begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.PARTICLE);
+            var snowBuilder = Tesselator.getInstance().begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.PARTICLE);
             boolean hasRain = false;
             boolean hasSnow = false;
+
             for (int dz = -renderDistance; dz <= renderDistance; dz += COLUMN_SPACING) {
                 for (int dx = -renderDistance; dx <= renderDistance; dx += COLUMN_SPACING) {
-                    BlockPos position = new BlockPos((int) Math.floor(cameraX + dx), (int) Math.floor(cameraY), (int) Math.floor(cameraZ + dz));
+                    BlockPos position = new BlockPos(
+                        (int) Math.floor(cameraX + dx),
+                        (int) Math.floor(cameraY),
+                        (int) Math.floor(cameraZ + dz)
+                    );
                     var sample = ClientWeatherManager.sample(position);
                     if (sample.isEmpty() || !minecraft.level.canSeeSky(position.above())) continue;
 
@@ -54,20 +68,27 @@ public final class LocalisedPrecipitationRenderer {
                     float intensity = Math.min(1.0F, (float) Math.sqrt(Math.max(0.0F, weather.interpolatedRate())) / 3.0F) * multiplier;
                     if (intensity < 0.03F || densityHash(position.getX(), position.getZ()) > intensity) continue;
 
-                    int groundY = minecraft.level.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING, position.getX(), position.getZ());
-                    float top = (float) (Math.min(cameraY + 14.0D, groundY + 28) - cameraY);
-                    float bottom = Math.max((float) (groundY - cameraY), top - (snow ? 10.0F : 18.0F));
+                    int groundY = minecraft.level.getHeight(Heightmap.Types.MOTION_BLOCKING, position.getX(), position.getZ());
+                    float topWorldY = (float) Math.min(cameraY + 14.0D, groundY + 28);
+                    float bottomWorldY = Math.max(groundY, topWorldY - (snow ? 10.0F : 18.0F));
+                    float top = (float) (topWorldY - cameraY);
+                    float bottom = (float) (bottomWorldY - cameraY);
                     float wind = ClientWeatherConfig.ENABLE_WIND_SLANT.get() ? weather.snapshot().windSpeedKmh() / 300.0F : 0.0F;
                     float x = (float) (position.getX() + 0.5D - cameraX);
                     float z = (float) (position.getZ() + 0.5D - cameraZ);
-                    int alpha = (int) (Math.min(0.9F, 0.20F + intensity * 0.70F) * 255.0F);
+                    float alpha = Math.min(0.9F, 0.20F + intensity * 0.70F);
+                    int light = LevelRenderer.getLightColor(minecraft.level, position.atY(Math.max(groundY, (int) Math.floor(cameraY))));
 
                     var builder = snow ? snowBuilder : rainBuilder;
-                    addFallingColumn(builder, modelView, x, top, bottom, z, wind, snow, weatherTime, position.getX(), position.getZ(), alpha);
+                    addFallingColumn(
+                        builder, x, top, bottom, z, topWorldY, bottomWorldY, wind, snow, weatherTime,
+                        position.getX(), position.getZ(), alpha, light
+                    );
                     if (snow) hasSnow = true;
                     else hasRain = true;
                 }
             }
+
             var rainMesh = rainBuilder.build();
             if (hasRain && rainMesh != null) {
                 RenderSystem.setShaderTexture(0, RAIN_TEXTURE);
@@ -81,30 +102,55 @@ public final class LocalisedPrecipitationRenderer {
         } finally {
             RenderSystem.enableCull();
             RenderSystem.disableBlend();
+            lightTexture.turnOffLightLayer();
         }
     }
 
-    private static void addFallingColumn(com.mojang.blaze3d.vertex.BufferBuilder builder, Matrix4f matrix, float x, float top, float bottom, float z, float wind, boolean snow, float weatherTime, int worldX, int worldZ, int alpha) {
+    /**
+     * Builds two crossed, camera-relative quads. Vertices are not pre-multiplied by
+     * the model-view matrix — the particle shader applies ModelViewMat once.
+     * Wind only shifts the bottom horizontally; vertical falling comes from UV scroll.
+     */
+    private static void addFallingColumn(
+        BufferBuilder builder,
+        float x,
+        float top,
+        float bottom,
+        float z,
+        float topWorldY,
+        float bottomWorldY,
+        float wind,
+        boolean snow,
+        float weatherTime,
+        int worldX,
+        int worldZ,
+        float alpha,
+        int light
+    ) {
         float width = snow ? 0.35F : 0.18F;
-        float phase = (weatherTime + hash(worldX, worldZ)) * (snow ? 0.0125F : 0.075F);
-        float v = phase - (float) Math.floor(phase);
-        float u = (hash(worldZ, worldX) & 15) / 16.0F;
-        builder.addVertex(matrix, x - width, top, z).setUv(u, v).setColor(255, 255, 255, alpha);
-        builder.addVertex(matrix, x + width, top, z).setUv(u + 0.0625F, v).setColor(255, 255, 255, alpha);
-        builder.addVertex(matrix, x + width + wind, bottom, z + wind).setUv(u + 0.0625F, v + 1.0F).setColor(255, 255, 255, alpha);
-        builder.addVertex(matrix, x - width + wind, bottom, z + wind).setUv(u, v + 1.0F).setColor(255, 255, 255, alpha);
-        builder.addVertex(matrix, x, top, z - width).setUv(u, v).setColor(255, 255, 255, alpha);
-        builder.addVertex(matrix, x, top, z + width).setUv(u + 0.0625F, v).setColor(255, 255, 255, alpha);
-        builder.addVertex(matrix, x + wind, bottom, z + width + wind).setUv(u + 0.0625F, v + 1.0F).setColor(255, 255, 255, alpha);
-        builder.addVertex(matrix, x + wind, bottom, z - width + wind).setUv(u, v + 1.0F).setColor(255, 255, 255, alpha);
+        float scroll = PrecipitationAnimation.scrollPhase(weatherTime, worldX, worldZ, snow);
+        float vTop = PrecipitationAnimation.verticalUv(bottomWorldY, scroll);
+        float vBottom = PrecipitationAnimation.verticalUv(topWorldY, scroll);
+        float u0 = PrecipitationAnimation.textureU(worldX, worldZ);
+        float u1 = u0 + 0.0625F;
+
+        builder.addVertex(x - width, top, z).setUv(u0, vTop).setColor(1.0F, 1.0F, 1.0F, alpha).setLight(light);
+        builder.addVertex(x + width, top, z).setUv(u1, vTop).setColor(1.0F, 1.0F, 1.0F, alpha).setLight(light);
+        builder.addVertex(x + width + wind, bottom, z + wind).setUv(u1, vBottom).setColor(1.0F, 1.0F, 1.0F, alpha).setLight(light);
+        builder.addVertex(x - width + wind, bottom, z + wind).setUv(u0, vBottom).setColor(1.0F, 1.0F, 1.0F, alpha).setLight(light);
+
+        builder.addVertex(x, top, z - width).setUv(u0, vTop).setColor(1.0F, 1.0F, 1.0F, alpha).setLight(light);
+        builder.addVertex(x, top, z + width).setUv(u1, vTop).setColor(1.0F, 1.0F, 1.0F, alpha).setLight(light);
+        builder.addVertex(x + wind, bottom, z + width + wind).setUv(u1, vBottom).setColor(1.0F, 1.0F, 1.0F, alpha).setLight(light);
+        builder.addVertex(x + wind, bottom, z - width + wind).setUv(u0, vBottom).setColor(1.0F, 1.0F, 1.0F, alpha).setLight(light);
     }
 
-    private static float densityHash(int x, int z) {
-        return (hash(x, z) & 0x7fffffff) / (float) Integer.MAX_VALUE;
+    /** Exposed for density diagnostics / tests — same thresholding as the renderer. */
+    public static boolean passesDensityFilter(int worldX, int worldZ, float intensity) {
+        return intensity >= 0.03F && densityHash(worldX, worldZ) <= intensity;
     }
 
-    private static int hash(int x, int z) {
-        int value = x * 3129871 ^ z * 116129781 ^ x;
-        return value * value * 42317861 + value * 11;
+    public static float densityHash(int x, int z) {
+        return (PrecipitationAnimation.hash(x, z) & 0x7fffffff) / (float) Integer.MAX_VALUE;
     }
 }

@@ -8,9 +8,13 @@ import pytest
 
 from ukgeo.manifest import write_manifest
 from ukgeo.river_stations import (
+    ALONG_LIMIT,
+    BANK_CARVE_REACH,
+    CROSS_PAD,
     CellReach,
     MAX_UINT16,
     Station,
+    StationGrid,
     bake_cell_reaches,
     TileMaskLookup,
     bake_river_stations,
@@ -19,10 +23,12 @@ from ukgeo.river_stations import (
     flow_azimuth_u8,
     merge_reaches,
     metres_to_minecraft_y,
+    ownership_hi_lo,
     rasterize_stations,
     reaches_from_edges,
     smooth_longitudinal_profile,
 )
+import ukgeo.river_stations as _river_stations
 from ukgeo.tiles import (
     HEIGHT_NODATA,
     iter_packable_layers,
@@ -621,3 +627,365 @@ def test_parallel_build_stations_matches_sequential(monkeypatch: pytest.MonkeyPa
     assert entered.get("enabled") is True
     assert len({station.reach_id for station in sequential}) >= 2
     assert parallel == sequential
+
+
+def test_cross_track_ownership_on_bend_not_radial():
+    """Perpendicular corner stations: |perp| splits axes; Euclidean would tie and let order fan."""
+    east = _station(
+        reach_id=1,
+        station_id=0,
+        order=9,
+        x=10.5,
+        z=10.5,
+        tx=1.0,
+        tz=0.0,
+        half_width=2,
+        water_y=70,
+        azimuth=0,
+    )
+    north = _station(
+        reach_id=2,
+        station_id=0,
+        order=1,
+        x=10.5,
+        z=10.5,
+        tx=0.0,
+        tz=1.0,
+        half_width=2,
+        water_y=80,
+        azimuth=64,
+    )
+    grid = _assert_order_independent([east, north], depth=24, width=24)
+    # East of corner on east-flow centerline: smaller |perp| to east station.
+    assert int(grid.reach_id[10, 11]) == 1
+    assert int(grid.station_id[10, 11]) == 0
+    assert int(grid.water_y[10, 11]) == 70
+    # North of corner on north-flow centerline: smaller |perp| to north station
+    # even though east has much higher Strahler order.
+    assert int(grid.reach_id[11, 10]) == 2
+    assert int(grid.water_y[11, 10]) == 80
+
+    # Bank cell farther in Euclidean from north station but with smaller |perp|
+    # to north than to a nearby east-flow station offset upstream.
+    upstream = _station(
+        reach_id=3,
+        station_id=0,
+        order=9,
+        x=8.5,
+        z=10.5,
+        tx=1.0,
+        tz=0.0,
+        half_width=2,
+        water_y=60,
+        azimuth=0,
+    )
+    bend = _station(
+        reach_id=4,
+        station_id=0,
+        order=1,
+        x=10.5,
+        z=10.5,
+        tx=0.0,
+        tz=1.0,
+        half_width=2,
+        water_y=90,
+        azimuth=64,
+    )
+    bent = _assert_order_independent([upstream, bend], depth=24, width=24)
+    # Cell (10, 11) = (10.5, 11.5): Euclidean to upstream ≈ 2.24, to bend = 1.0,
+    # but also |perp| upstream=1 vs bend=0 — bend must win on cross-track.
+    assert int(bent.reach_id[11, 10]) == 4
+    assert int(bent.water_y[11, 10]) == 90
+
+
+_PREVIEW_STATION_PALETTE = (
+    (230, 25, 75),
+    (60, 180, 75),
+    (255, 225, 25),
+    (0, 130, 200),
+    (245, 130, 48),
+    (145, 30, 180),
+    (70, 240, 240),
+    (240, 50, 230),
+    (210, 245, 60),
+    (250, 190, 212),
+    (0, 128, 128),
+    (220, 190, 255),
+)
+
+
+def _stamp_one_euclidean(
+    sx: float,
+    sz: float,
+    tx: float,
+    tz: float,
+    half_width: int,
+    order: int,
+    reach_id: int,
+    station_id: int,
+    water_y: int,
+    azimuth_value: int,
+    reach: np.ndarray,
+    station_out: np.ndarray,
+    water: np.ndarray,
+    azimuth: np.ndarray,
+    best_hi: np.ndarray,
+    best_lo: np.ndarray,
+    *,
+    width: int,
+    depth: int,
+) -> None:
+    """Test-only stamp: same corridor as production, ownership distance = hypot."""
+    tx, tz = _river_stations._unit_tangent(tx, tz)
+    cross_lim = float(max(0, half_width) + BANK_CARVE_REACH) + CROSS_PAD
+    x0 = max(0, int(np.floor(sx - cross_lim - 1.0)))
+    x1 = min(width, int(np.ceil(sx + cross_lim + 1.0)))
+    z0 = max(0, int(np.floor(sz - cross_lim - 1.0)))
+    z1 = min(depth, int(np.ceil(sz + cross_lim + 1.0)))
+    if x0 >= x1 or z0 >= z1:
+        return
+    xs = np.arange(x0, x1, dtype=np.float64) + 0.5
+    zs = np.arange(z0, z1, dtype=np.float64) + 0.5
+    dx = xs[None, :] - sx
+    dz = zs[:, None] - sz
+    along = dx * tx + dz * tz
+    perp = dx * (-tz) + dz * tx
+    inside = (np.abs(along) <= ALONG_LIMIT + 1e-6) & (np.abs(perp) <= cross_lim + 1e-6)
+    if not bool(inside.any()):
+        return
+    dist_milli = np.floor(np.hypot(dx, dz) * 1000.0 + 0.5).astype(np.int64)
+    np.clip(dist_milli, 0, 0xFFFFFF, out=dist_milli)
+    order_hi, keys_lo = ownership_hi_lo(0, order, reach_id, station_id)
+    keys_hi = (dist_milli.astype(np.uint64) << np.uint64(8)) | order_hi
+    hh = z1 - z0
+    ww = x1 - x0
+    best_hi_view = best_hi[z0 : z0 + hh, x0 : x0 + ww]
+    best_lo_view = best_lo[z0 : z0 + hh, x0 : x0 + ww]
+    better = inside & ((keys_hi < best_hi_view) | ((keys_hi == best_hi_view) & (keys_lo < best_lo_view)))
+    if not bool(better.any()):
+        return
+    best_hi_view[better] = keys_hi[better]
+    best_lo_view[better] = keys_lo
+    reach[z0 : z0 + hh, x0 : x0 + ww][better] = np.uint32(int(reach_id) & 0xFFFFFFFF)
+    station_out[z0 : z0 + hh, x0 : x0 + ww][better] = np.uint16(int(station_id) & 0xFFFF)
+    water[z0 : z0 + hh, x0 : x0 + ww][better] = np.int16(water_y)
+    azimuth[z0 : z0 + hh, x0 : x0 + ww][better] = np.uint8(azimuth_value)
+
+
+def _rasterize_stations_euclidean(stations: list[Station], depth: int, width: int) -> StationGrid:
+    reach = np.zeros((depth, width), dtype="<u4")
+    station_id = np.zeros((depth, width), dtype="<u2")
+    water = np.full((depth, width), HEIGHT_NODATA, dtype=np.int16)
+    azimuth = np.zeros((depth, width), dtype=np.uint8)
+    empty = np.uint64(np.iinfo(np.uint64).max)
+    best_hi = np.full((depth, width), empty, dtype=np.uint64)
+    best_lo = np.full((depth, width), empty, dtype=np.uint64)
+    for station in stations:
+        if not math_isfinite(station.water_metres):
+            continue
+        _stamp_one_euclidean(
+            station.x,
+            station.z,
+            station.tx,
+            station.tz,
+            int(station.half_width),
+            int(station.order),
+            int(station.reach_id),
+            int(station.station_id),
+            int(station.water_y),
+            int(station.azimuth),
+            reach,
+            station_id,
+            water,
+            azimuth,
+            best_hi,
+            best_lo,
+            width=width,
+            depth=depth,
+        )
+    return StationGrid(reach, station_id, water, azimuth)
+
+
+def _colorize_station_ids(station_id: np.ndarray, reach_id: np.ndarray) -> np.ndarray:
+    owned = reach_id != 0
+    rgb = np.zeros((*station_id.shape, 3), dtype=np.uint8)
+    palette = np.asarray(_PREVIEW_STATION_PALETTE, dtype=np.uint8)
+    if owned.any():
+        idx = station_id.astype(np.int64) % len(palette)
+        rgb[owned] = palette[idx[owned]]
+    return rgb
+
+
+def _write_station_preview_png(path: Path, station_id: np.ndarray, reach_id: np.ndarray, *, target_px: int = 512) -> Path:
+    from PIL import Image
+
+    rgb = _colorize_station_ids(station_id, reach_id)
+    image = Image.fromarray(rgb, mode="RGB")
+    height, width = rgb.shape[:2]
+    scale = max(1, int(target_px) // max(height, width))
+    if scale > 1:
+        image = image.resize((width * scale, height * scale), Image.NEAREST)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    image.save(path)
+    return path
+
+
+def _l_channel_stations() -> list[Station]:
+    stations: list[Station] = []
+    for i, x in enumerate((4.5, 5.5, 6.5, 7.5, 8.5, 9.5, 10.5)):
+        stations.append(
+            _station(
+                reach_id=1,
+                station_id=i,
+                order=3,
+                x=x,
+                z=10.5,
+                tx=1.0,
+                tz=0.0,
+                half_width=2,
+                water_y=70 + i,
+                azimuth=0,
+            )
+        )
+    for j, z in enumerate((11.5, 12.5, 13.5, 14.5, 15.5, 16.5)):
+        stations.append(
+            _station(
+                reach_id=1,
+                station_id=7 + j,
+                order=3,
+                x=10.5,
+                z=z,
+                tx=0.0,
+                tz=1.0,
+                half_width=2,
+                water_y=77 + j,
+                azimuth=64,
+            )
+        )
+    return stations
+
+
+def _quarter_circle_stations(
+    *,
+    cx: float = 20.5,
+    cz: float = 20.5,
+    radius: float = 16.0,
+    n_arc: int = 33,
+    half_width: int = 2,
+) -> list[Station]:
+    """Eastbound into a quarter-circle bend, then northbound (smooth L)."""
+    import math
+
+    stations: list[Station] = []
+    station_id = 0
+    # West stub into the arc.
+    for x in (cx - 4.0, cx - 3.0, cx - 2.0, cx - 1.0):
+        stations.append(
+            _station(
+                reach_id=1,
+                station_id=station_id,
+                order=3,
+                x=x,
+                z=cz - radius,
+                tx=1.0,
+                tz=0.0,
+                half_width=half_width,
+                water_y=70 + station_id,
+                azimuth=0,
+            )
+        )
+        station_id += 1
+    # theta -pi/2 -> 0: start (cx, cz-R) tangent +X, end (cx+R, cz) tangent +Z.
+    for i in range(n_arc):
+        theta = -0.5 * math.pi + (0.5 * math.pi) * (i / (n_arc - 1))
+        x = cx + radius * math.cos(theta)
+        z = cz + radius * math.sin(theta)
+        # d/dtheta (cos, sin) = (-sin, cos); positive sweep → tangent (-sin, cos).
+        tx = -math.sin(theta)
+        tz = math.cos(theta)
+        stations.append(
+            _station(
+                reach_id=1,
+                station_id=station_id,
+                order=3,
+                x=x,
+                z=z,
+                tx=tx,
+                tz=tz,
+                half_width=half_width,
+                water_y=70 + station_id,
+                azimuth=flow_azimuth_u8(tx, tz),
+            )
+        )
+        station_id += 1
+    # North stub out of the arc.
+    for z in (cz + 1.0, cz + 2.0, cz + 3.0, cz + 4.0):
+        stations.append(
+            _station(
+                reach_id=1,
+                station_id=station_id,
+                order=3,
+                x=cx + radius,
+                z=z,
+                tx=0.0,
+                tz=1.0,
+                half_width=half_width,
+                water_y=70 + station_id,
+                azimuth=64,
+            )
+        )
+        station_id += 1
+    return stations
+
+
+def test_write_curved_channel_ownership_preview(tmp_path: Path):
+    """Write PIL RGB previews: L channel plus Euclidean vs |perp| on a smooth curve."""
+    out_dir = Path(__file__).resolve().parent / "output"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    l_stations = _l_channel_stations()
+    l_grid = rasterize_stations(l_stations, depth=24, width=24)
+    assert int((l_grid.reach_id != 0).sum()) > 40
+    l_png = _write_station_preview_png(
+        out_dir / "river_station_ownership_L.png",
+        l_grid.station_id,
+        l_grid.reach_id,
+    )
+    note_path = out_dir / "river_station_ownership_L.txt"
+    note_path.write_text(
+        "L-shaped channel station ownership preview (cross-track |perp| ownership).\n"
+        f"artifact={l_png}\n"
+        f"owned_cells={int((l_grid.reach_id != 0).sum())}\n"
+        "Colorized station_id palette, nearest-neighbor upscaled PNG via PIL.\n"
+    )
+    assert l_png.is_file()
+    assert note_path.is_file()
+
+    curve_stations = _quarter_circle_stations()
+    depth = width = 48
+    perp_grid = rasterize_stations(curve_stations, depth=depth, width=width)
+    euclid_grid = _rasterize_stations_euclidean(curve_stations, depth=depth, width=width)
+    assert int((perp_grid.reach_id != 0).sum()) > 100
+    assert int((euclid_grid.reach_id != 0).sum()) > 100
+
+    euclid_png = _write_station_preview_png(
+        out_dir / "river_station_ownership_curve_euclidean.png",
+        euclid_grid.station_id,
+        euclid_grid.reach_id,
+    )
+    perp_png = _write_station_preview_png(
+        out_dir / "river_station_ownership_curve_perp.png",
+        perp_grid.station_id,
+        perp_grid.reach_id,
+    )
+    curve_note = out_dir / "river_station_ownership_curve.txt"
+    curve_note.write_text(
+        "Quarter-circle channel ownership comparison.\n"
+        f"euclidean={euclid_png} (hypot ownership, test helper)\n"
+        f"perp={perp_png} (production |perp| via rasterize_stations)\n"
+        f"owned_euclidean={int((euclid_grid.reach_id != 0).sum())}\n"
+        f"owned_perp={int((perp_grid.reach_id != 0).sum())}\n"
+    )
+    assert euclid_png.is_file()
+    assert perp_png.is_file()
+    assert curve_note.is_file()

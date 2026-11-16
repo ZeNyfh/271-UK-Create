@@ -6,9 +6,11 @@ meet within half a cell, flow continues downstream, and order and half-width
 match. Junctions stay split.
 
 Ownership is an associative minimum of
-(dist_millicells, -strahler_order, reach_id, station_id). Rasterisation
-order does not change the winner. Water Y is computed once per station from
-the lower bank and stamped unchanged across that station's corridor.
+(|perp| millicells, -strahler_order, reach_id, station_id). Distance is the
+absolute cross-track offset from the station tangent, not Euclidean range to
+the station point. Rasterisation order does not change the winner. Water Y is
+computed once per station from the lower bank and stamped unchanged across
+that station's corridor.
 
 Reach ids are uint32. The minimum compares the full id, so ids above 65535
 do not alias and are never masked with 0xFFFF.
@@ -55,8 +57,8 @@ BANK_OFFSET_MIN = 2
 BANK_OFFSET_MAX = 6
 LONGITUDINAL_DELTAS = (-1, 0, 1)
 SMOOTH_RADIUS = 2
-# Half a spacing cell, plus half a cell so diagonal centres still meet a station.
-ALONG_LIMIT = 1.0
+# Half a spacing cell, plus a cell so neighboring stamps overlap on bends.
+ALONG_LIMIT = 1.5
 CROSS_PAD = 0.5
 MAX_UINT16 = 65535
 # Snap reach ends that land within half a cell. Shared hydro nodes survive
@@ -712,7 +714,7 @@ def _stamp_one(
     inside = (np.abs(along) <= ALONG_LIMIT + 1e-6) & (np.abs(perp) <= cross_lim + 1e-6)
     if not bool(inside.any()):
         return
-    dist_milli = np.floor(np.hypot(dx, dz) * 1000.0 + 0.5).astype(np.int64)
+    dist_milli = np.floor(np.abs(perp) * 1000.0 + 0.5).astype(np.int64)
     np.clip(dist_milli, 0, 0xFFFFFF, out=dist_milli)
     # hi holds distance above inverted order. lo holds the full uint32 reach
     # id above the uint16 station id. Compare hi, then lo. Both sentinels are

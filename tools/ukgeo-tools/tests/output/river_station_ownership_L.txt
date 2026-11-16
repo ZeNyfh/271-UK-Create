@@ -1,0 +1,4 @@
+L-shaped channel station ownership preview (cross-track |perp| ownership).
+artifact=/home/zenyfh/Documents/GitHub/mapcreator/tools/ukgeo-tools/tests/output/river_station_ownership_L.png
+owned_cells=336
+Colorized station_id palette, nearest-neighbor upscaled PNG via PIL.
