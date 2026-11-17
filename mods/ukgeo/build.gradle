@@ -81,7 +81,12 @@ dependencies {
     testRuntimeOnly 'com.google.code.gson:gson:2.10.1'
 }
 
+// ModDevGradle attaches the Minecraft/NeoForge compile dependencies to the
+// main source set. The Java plugin does not automatically expose those
+// dependencies to test sources, so mirror the main classpaths for tests.
+sourceSets.test.compileClasspath += sourceSets.main.compileClasspath
+sourceSets.test.runtimeClasspath += sourceSets.main.runtimeClasspath
+
 tasks.withType(Test).configureEach {
     useJUnitPlatform()
 }
-
