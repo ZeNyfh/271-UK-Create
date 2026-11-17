@@ -59,6 +59,25 @@ public final class UkGeoVegetationBiomeSource extends BiomeSource {
     private volatile RuntimeData runtimeData;
     private volatile boolean attemptedDataLoad;
 
+    // Hot-path caches: System property / Integer.getInteger / Double.parseDouble once at class init.
+    private static final int UNDERGROUND_BIOME_MAX_Y = Integer.getInteger("ukgeo.undergroundBiomeMaxY", 48);
+    private static final int DEEP_DARK_MAX_Y = Integer.getInteger("ukgeo.deepDarkMaxY", 8);
+    private static final int LUSH_CAVES_MAX_Y = Integer.getInteger("ukgeo.lushCavesMaxY", 40);
+    private static final int DRIPSTONE_CAVES_MAX_Y = Integer.getInteger("ukgeo.dripstoneCavesMaxY", 24);
+    private static final int SULFUR_CAVES_MAX_Y = Integer.getInteger("ukgeo.sulfurCavesMaxY", 40);
+    private static final double LUSH_CAVES_NOISE_THRESHOLD =
+        Double.parseDouble(System.getProperty("ukgeo.lushCavesNoiseThreshold", "0.68"));
+    private static final double DRIPSTONE_CAVES_NOISE_THRESHOLD =
+        Double.parseDouble(System.getProperty("ukgeo.dripstoneCavesNoiseThreshold", "-0.52"));
+    private static final Double SULFUR_NOISE_OVERRIDE = optionalDoubleProperty("ukgeo.sulfurCavesNoiseThreshold");
+    private static final int MOUNTAIN_BIOME_SOURCE_HEIGHT_DECIMETRES =
+        Integer.getInteger("ukgeo.mountainBiomeSourceHeightDecimetres", 4_200);
+
+    private static Double optionalDoubleProperty(String key) {
+        String raw = System.getProperty(key);
+        return raw == null ? null : Double.parseDouble(raw);
+    }
+
     public UkGeoVegetationBiomeSource(
         Holder<Biome> fallback,
         Holder<Biome> ocean,
@@ -150,17 +169,6 @@ public final class UkGeoVegetationBiomeSource extends BiomeSource {
             // select those chunks instead of falling back to a land biome.
             return ocean;
         }
-        Holder<Biome> underground = undergroundBiomeFor(blockYFromQuart(quartY), sourceHeightDecimetres, blockX, blockZ);
-        if (underground != null) {
-            return underground;
-        }
-        if (data.riverLayer != null && data.riverLayer.sampleOrDefault(blockX, blockZ, 0) > 0) {
-            return river;
-        }
-        if (isHighMountainSourceHeight(sourceHeightDecimetres)) {
-            return mountains;
-        }
-        int biomeClass = smoothedBiomeClass(data, blockX, blockZ);
         double easting = Double.NaN;
         double northing = Double.NaN;
         boolean haveBng = false;
@@ -172,6 +180,18 @@ public final class UkGeoVegetationBiomeSource extends BiomeSource {
                 haveBng = true;
             }
         }
+        Holder<Biome> underground = undergroundBiomeFor(
+            blockYFromQuart(quartY), sourceHeightDecimetres, blockX, blockZ, haveBng, easting, northing);
+        if (underground != null) {
+            return underground;
+        }
+        if (data.riverLayer != null && data.riverLayer.sampleOrDefault(blockX, blockZ, 0) > 0) {
+            return river;
+        }
+        if (isHighMountainSourceHeight(sourceHeightDecimetres)) {
+            return mountains;
+        }
+        int biomeClass = smoothedBiomeClass(data, blockX, blockZ);
         if (haveBng && VanillaBackportBiomeRegions.shouldExpandForest(easting, northing, biomeClass, 0L)) {
             biomeClass = VanillaBackportBiomeRegions.expandedWoodlandClass(easting, northing);
         }
@@ -229,38 +249,37 @@ public final class UkGeoVegetationBiomeSource extends BiomeSource {
         return best;
     }
 
-    private Holder<Biome> undergroundBiomeFor(int blockY, int sourceHeightDecimetres, int blockX, int blockZ) {
-        if (blockY >= Integer.getInteger("ukgeo.undergroundBiomeMaxY", 48)) {
+    private Holder<Biome> undergroundBiomeFor(
+        int blockY,
+        int sourceHeightDecimetres,
+        int blockX,
+        int blockZ,
+        boolean haveBng,
+        double easting,
+        double northing
+    ) {
+        if (blockY >= UNDERGROUND_BIOME_MAX_Y) {
             return null;
         }
         double caveNoise = valueNoise(blockX, blockZ, 0.0045, 0x4341564542494f4dL);
-        if (isHighMountainSourceHeight(sourceHeightDecimetres) && blockY <= Integer.getInteger("ukgeo.deepDarkMaxY", 8)) {
+        if (isHighMountainSourceHeight(sourceHeightDecimetres) && blockY <= DEEP_DARK_MAX_Y) {
             return deepDark;
         }
         // Sulfur before lush: Wales AABB + noise; Vale core easier than soft Wales.
         // Defaults: Vale 0.20, soft Wales 0.40 (override both via -Dukgeo.sulfurCavesNoiseThreshold).
-        if (sulfurCaves != null
-            && blockY <= Integer.getInteger("ukgeo.sulfurCavesMaxY", 40)
-            && data() != null
-            && data().reference != null) {
-            var bng = data().reference.minecraftToBng(blockX, blockZ);
-            if (bng.isPresent()) {
-                double e = bng.get().easting();
-                double n = bng.get().northing();
-                if (VanillaBackportBiomeRegions.inSulfurWales(e, n)) {
-                    double threshold = Double.parseDouble(System.getProperty(
-                        "ukgeo.sulfurCavesNoiseThreshold",
-                        Double.toString(VanillaBackportBiomeRegions.defaultSulfurNoiseThreshold(e, n))));
-                    if (caveNoise > threshold) {
-                        return sulfurCaves;
-                    }
-                }
+        if (sulfurCaves != null && blockY <= SULFUR_CAVES_MAX_Y && haveBng
+            && VanillaBackportBiomeRegions.inSulfurWales(easting, northing)) {
+            double threshold = SULFUR_NOISE_OVERRIDE != null
+                ? SULFUR_NOISE_OVERRIDE
+                : VanillaBackportBiomeRegions.defaultSulfurNoiseThreshold(easting, northing);
+            if (caveNoise > threshold) {
+                return sulfurCaves;
             }
         }
-        if (blockY <= Integer.getInteger("ukgeo.lushCavesMaxY", 40) && caveNoise > Double.parseDouble(System.getProperty("ukgeo.lushCavesNoiseThreshold", "0.68"))) {
+        if (blockY <= LUSH_CAVES_MAX_Y && caveNoise > LUSH_CAVES_NOISE_THRESHOLD) {
             return lushCaves;
         }
-        if (blockY <= Integer.getInteger("ukgeo.dripstoneCavesMaxY", 24) && caveNoise < Double.parseDouble(System.getProperty("ukgeo.dripstoneCavesNoiseThreshold", "-0.52"))) {
+        if (blockY <= DRIPSTONE_CAVES_MAX_Y && caveNoise < DRIPSTONE_CAVES_NOISE_THRESHOLD) {
             return dripstoneCaves;
         }
         return null;
@@ -309,8 +328,7 @@ public final class UkGeoVegetationBiomeSource extends BiomeSource {
          * the current UKGeo preset a source height around 420m maps to roughly Y=140+ after
          * sea level and height scaling. Make this threshold tunable for future presets.
          */
-        int threshold = Integer.getInteger("ukgeo.mountainBiomeSourceHeightDecimetres", 4_200);
-        return decimetres >= threshold;
+        return decimetres >= MOUNTAIN_BIOME_SOURCE_HEIGHT_DECIMETRES;
     }
 
     private Holder<Biome> biomeForVegetationClass(int vegetationClass) {

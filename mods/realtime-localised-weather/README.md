@@ -15,7 +15,7 @@ UKGeo is a required dependency. Serene Seasons is optional.
 ## What it does
 
 - The server converts active UKGeo regions from Minecraft block coordinates to British National Grid and then to WGS84 latitude/longitude.
-- The server batches active tile centres into asynchronous Open-Meteo requests.
+- In LIVE mode the server refreshes one national Open-Meteo multipoint grid over the UK/Ireland map, then samples weather tiles locally (avoids per-tile HTTP 429s).
 - The server owns authoritative regional precipitation, thunder eligibility, gameplay severity, cache state, overrides, and synchronisation.
 - Clients poll the server for the newest authoritative precipitation snapshots.
 - The client uses vanilla rain and snow textures with local interpolation, density, fog, and weather sound mixing.
@@ -57,6 +57,8 @@ With Serene installed, this mod can drive the season calendar from real wall-clo
 - Requests are performed only by the logical server.
 - Multiplayer clients do not contact Open-Meteo.
 - Multiplayer clients poll their Minecraft server for the latest cached tile snapshots and receive server-authoritative precipitation data.
+- LIVE mode uses one national multipoint forecast pass (default 8×10, ≤96 points) over the UKGeo WGS84 bbox; weather tiles bilinear-sample that grid instead of issuing per-tile HTTP calls.
+- If the national grid refresh fails, the server falls back to the legacy per-tile fetch path (still rate-limit aware).
 - Requests use Java 21 `HttpClient.sendAsync`.
 - Cached snapshots remain usable during upstream outages.
 - Expired or failed data are marked stale rather than crashing or freezing the server.

@@ -16,6 +16,9 @@ Primary controls:
 - `hard_cache_expiry_hours`
 - `maximum_concurrent_requests`
 - `max_tiles_per_refresh`
+- `national_grid_enabled`: one UK/Ireland multipoint Open-Meteo pass; tiles sample locally (default true; reduces 429s)
+- `national_grid_columns`: multipoint lattice columns (default 8; total points clamped to 96)
+- `national_grid_rows`: multipoint lattice rows (default 10; total points clamped to 96)
 - `zone_size_blocks`
 - `active_zone_radius`
 - `prefetch_zone_radius`
@@ -49,6 +52,7 @@ Operational guidance:
 
 - changing `zone_size_blocks` should be treated as a restart or world-reload setting
 - increasing `active_zone_radius` or `prefetch_zone_radius` raises request and cache pressure
+- with `national_grid_enabled`, LIVE mode refreshes one national multipoint grid then samples every stale weather tile locally (Minecraft-side equivalent of maps.open-meteo’s one spatial field); disable only to fall back to per-tile HTTP
 - `hard_cache_expiry_hours` is the limit after which old data should no longer be trusted
 
 ## Client: `config/realtime_localised_weather-client.toml`

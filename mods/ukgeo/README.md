@@ -145,7 +145,7 @@ Optional soft dep on [VanillaBackport](https://modrinth.com/mod/vanilla-backport
 - `minecraft:dappled_forest` — Scottish Highlands/islands, Pennines, Lake District, NI uplands
 - `minecraft:sulfur_caves` — underground in Wales (stronger in Vale of Glamorgan / S Wales sulfate core)
 
-Safe vegetal path (biome feature decoration stays off by default): pale oaks / poplars via `pale_garden_vegetation` / `trees_dappled_forest` (not birch+oak/taiga stand-ins). Woodlands stay dense; non-woodland UKGeo biomes get no tree features. Sulfur caves place `rooted_sulfur_spring` without biome check (missing from VB biome JSON), then spike/pool with biome check. Sulfur wins over lush in Wales (defaults: Vale noise >0.20, soft Wales >0.40). Disable with `-Dukgeo.disableSulfurCaveDecoration=true`.
+Safe vegetal path (biome feature decoration stays off by default): pale oaks / poplars via `pale_garden_vegetation` / `trees_dappled_forest` (not birch+oak/taiga stand-ins). Woodlands stay dense; non-woodland UKGeo biomes get no tree features. Sulfur features use throttled `ukgeo` placed_feature copies (spike ~8–16, cluster ~4–8, pool 12) to avoid VB’s multi-hundred counts killing chunkgen; all place without biome check once the chunk is gated by `sulfur_caves`. Sulfur wins over lush in Wales (defaults: Vale noise >0.20, soft Wales >0.40). Disable with `-Dukgeo.disableSulfurCaveDecoration=true`.
 
 Runtime forest expand (no tile rebuild) promotes vegetation classes 3–9 toward woodland in those priority boxes plus densest IE/NI belts. Nautiluses are disabled via instance `config/vanillabackport-common.toml` (`has_nautilus = false`), not a biome modifier.
 

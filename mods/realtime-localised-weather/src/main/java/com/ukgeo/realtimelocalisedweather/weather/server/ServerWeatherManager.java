@@ -16,6 +16,7 @@ import com.ukgeo.realtimelocalisedweather.network.WeatherPollRequestPayload;
 import com.ukgeo.realtimelocalisedweather.network.WeatherProtocolPayload;
 import com.ukgeo.realtimelocalisedweather.network.WeatherTileRemovePayload;
 import com.ukgeo.realtimelocalisedweather.network.WeatherTileUpdatePayload;
+import com.ukgeo.realtimelocalisedweather.openmeteo.NationalWeatherGrid;
 import com.ukgeo.realtimelocalisedweather.openmeteo.OpenMeteoClient;
 import com.ukgeo.realtimelocalisedweather.openmeteo.OpenMeteoResponse;
 import com.ukgeo.realtimelocalisedweather.weather.MeteorologicalPrecipitation;
@@ -443,10 +444,7 @@ public final class ServerWeatherManager implements RegionalWeatherAccess {
             return;
         }
         Duration staleAfter = Duration.ofHours(ServerWeatherConfig.STALE_CACHE_HOURS.get());
-        int maxTiles = Math.max(1, ServerWeatherConfig.safeInt(ServerWeatherConfig.MAX_TILES_PER_REFRESH, 12));
-        record StaleCandidate(WeatherTileKey key, Instant observedAt, boolean neverSucceeded) {}
         List<StaleCandidate> staleCandidates = new ArrayList<>();
-        int unmapped = 0;
         for (WeatherTileKey key : candidateTiles) {
             ManagedTile tile = state.tiles.get(key);
             boolean neverSucceeded = tile == null || tile.snapshot == null;
@@ -455,6 +453,9 @@ public final class ServerWeatherManager implements RegionalWeatherAccess {
                 Instant observed = neverSucceeded ? Instant.EPOCH : tile.snapshot.observedAt();
                 staleCandidates.add(new StaleCandidate(key, observed, neverSucceeded));
             }
+        }
+        if (staleCandidates.isEmpty()) {
+            return;
         }
         // Prefer refreshing already-known tiles that went stale; stagger cold-start tiles.
         staleCandidates.sort((left, right) -> {
@@ -468,6 +469,153 @@ public final class ServerWeatherManager implements RegionalWeatherAccess {
             int byX = Integer.compare(left.key().tileX(), right.key().tileX());
             return byX != 0 ? byX : Integer.compare(left.key().tileZ(), right.key().tileZ());
         });
+
+        if (ServerWeatherConfig.safeBoolean(ServerWeatherConfig.NATIONAL_GRID_ENABLED, true)) {
+            requestFetchesNational(level, state, force, priorityMissingTile, staleCandidates, now);
+            return;
+        }
+        requestFetchesPerTile(level, state, force, priorityMissingTile, staleCandidates, now);
+    }
+
+    private void requestFetchesNational(
+        ServerLevel level,
+        LevelState state,
+        boolean force,
+        boolean priorityMissingTile,
+        List<StaleCandidate> staleCandidates,
+        Instant now
+    ) {
+        List<WeatherTileKey> staleKeys = staleCandidates.stream().map(StaleCandidate::key).toList();
+        int columns = ServerWeatherConfig.safeInt(ServerWeatherConfig.NATIONAL_GRID_COLUMNS, 8);
+        int rows = ServerWeatherConfig.safeInt(ServerWeatherConfig.NATIONAL_GRID_ROWS, 10);
+        if (state.nationalGrid == null || !state.nationalGrid.matchesDimensions(columns, rows)) {
+            state.nationalGrid = NationalWeatherGrid.create(state.reference, columns, rows);
+        }
+        Duration gridFreshFor = Duration.ofMinutes(Math.max(1, ServerWeatherConfig.safeInt(ServerWeatherConfig.REFRESH_INTERVAL_MINUTES, 15)));
+        boolean gridFresh = !force && state.nationalGrid.isFresh(gridFreshFor);
+        if (gridFresh) {
+            int applied = applyNationalGridSamples(level, state, staleKeys);
+            if (applied > 0) {
+                state.nextFetchAllowed = now.plusSeconds(30);
+                RealtimeLocalisedWeatherMod.LOGGER.info(
+                    "Realtime weather sampled {} tile(s) from national grid ({}x{}, observedAt={})",
+                    applied,
+                    state.nationalGrid.columns(),
+                    state.nationalGrid.rows(),
+                    state.nationalGrid.observedAt()
+                );
+                syncPlayers(level, state, false);
+            }
+            return;
+        }
+        if (state.pendingNationalRefresh != null && !state.pendingNationalRefresh.isDone()) {
+            return;
+        }
+        state.nextFetchAllowed = now.plusSeconds(30);
+        RealtimeLocalisedWeatherMod.LOGGER.info(
+            "Realtime weather refreshing national grid {}x{} ({} point(s)) for {} stale tile(s) priority={} force={}",
+            state.nationalGrid.columns(),
+            state.nationalGrid.rows(),
+            state.nationalGrid.pointCount(),
+            staleKeys.size(),
+            priorityMissingTile,
+            force
+        );
+        CompletableFuture<Boolean> future = state.nationalGrid.refresh(openMeteoClient);
+        state.pendingNationalRefresh = future;
+        CompletableFuture<List<OpenMeteoResponse.LocationWeather>> pendingMarker = future.thenApply(ignored -> List.<OpenMeteoResponse.LocationWeather>of());
+        for (WeatherTileKey key : staleKeys) {
+            state.pendingFetches.put(key, pendingMarker);
+        }
+        future.whenComplete((ok, throwable) -> level.getServer().execute(() -> {
+            state.pendingNationalRefresh = null;
+            for (WeatherTileKey key : staleKeys) {
+                state.pendingFetches.remove(key);
+            }
+            if (throwable != null || !Boolean.TRUE.equals(ok)) {
+                Instant failureTime = Instant.now();
+                String message = throwable == null
+                    ? "national grid refresh returned false"
+                    : (throwable.getMessage() == null ? "" : throwable.getMessage());
+                boolean rateLimited = message.contains("429");
+                Duration backoff = state.fetchFailureBackoff.isZero() ? WEATHER_FETCH_FAILURE_INITIAL_BACKOFF : state.fetchFailureBackoff.multipliedBy(2);
+                if (rateLimited && backoff.compareTo(Duration.ofSeconds(120)) < 0) {
+                    backoff = Duration.ofSeconds(120);
+                }
+                if (backoff.compareTo(WEATHER_FETCH_FAILURE_MAX_BACKOFF) > 0) {
+                    backoff = WEATHER_FETCH_FAILURE_MAX_BACKOFF;
+                }
+                state.fetchFailureBackoff = backoff;
+                state.nextFetchAllowed = failureTime.plus(backoff);
+                if (!failureTime.isBefore(state.nextFetchFailureLogAllowed)) {
+                    RealtimeLocalisedWeatherMod.LOGGER.warn(
+                        "Realtime weather national grid refresh failed: {}; falling back to per-tile; backing off for {}s",
+                        message,
+                        backoff.toSeconds()
+                    );
+                    state.nextFetchFailureLogAllowed = failureTime.plus(WEATHER_FETCH_LOG_INTERVAL);
+                }
+                for (WeatherTileKey key : staleKeys) {
+                    ManagedTile existing = state.tiles.get(key);
+                    if (existing != null && existing.snapshot != null) {
+                        existing.snapshot = stale(existing.snapshot);
+                    }
+                }
+                if (!rateLimited) {
+                    state.nextFetchAllowed = Instant.EPOCH;
+                    requestFetchesPerTile(level, state, force, priorityMissingTile, staleCandidates, Instant.now());
+                }
+                return;
+            }
+            state.fetchFailureBackoff = Duration.ZERO;
+            state.nextFetchAllowed = Instant.now().plusSeconds(30);
+            int applied = applyNationalGridSamples(level, state, staleKeys);
+            RealtimeLocalisedWeatherMod.LOGGER.info(
+                "Realtime weather national grid ready; sampled {}/{} tile(s)",
+                applied,
+                staleKeys.size()
+            );
+            state.lastSuccessfulRefresh = Instant.now();
+            syncPlayers(level, state, false);
+        }));
+    }
+
+    private int applyNationalGridSamples(ServerLevel level, LevelState state, Collection<WeatherTileKey> keys) {
+        if (state.nationalGrid == null || !state.nationalGrid.hasData()) {
+            return 0;
+        }
+        int tileSize = ServerWeatherConfig.ZONE_SIZE_BLOCKS.get();
+        int applied = 0;
+        for (WeatherTileKey key : keys) {
+            double centerX = key.tileX() * tileSize + tileSize / 2.0D;
+            double centerZ = key.tileZ() * tileSize + tileSize / 2.0D;
+            Optional<Wgs84Coordinate> wgs84 = state.reference.minecraftToWgs84(centerX, centerZ);
+            if (wgs84.isEmpty()) {
+                continue;
+            }
+            Optional<OpenMeteoResponse.LocationWeather> sampled = state.nationalGrid.sample(wgs84.get().latitude(), wgs84.get().longitude());
+            if (sampled.isEmpty()) {
+                continue;
+            }
+            ManagedTile tile = state.tiles.computeIfAbsent(key, ignored -> new ManagedTile(null, 0L, System.currentTimeMillis(), randomSeed(key)));
+            tile.snapshot = buildSnapshot(level, state, key, sampled.get(), tile.revision + 1L);
+            tile.revision = tile.snapshot.revision();
+            tile.lastTouchedMillis = System.currentTimeMillis();
+            state.memoryCache.put(key, tile.snapshot, Instant.now());
+            applied++;
+        }
+        return applied;
+    }
+
+    private void requestFetchesPerTile(
+        ServerLevel level,
+        LevelState state,
+        boolean force,
+        boolean priorityMissingTile,
+        List<StaleCandidate> staleCandidates,
+        Instant now
+    ) {
+        int maxTiles = Math.max(1, ServerWeatherConfig.safeInt(ServerWeatherConfig.MAX_TILES_PER_REFRESH, 12));
         List<StaleCandidate> withData = staleCandidates.stream().filter(c -> !c.neverSucceeded()).toList();
         List<StaleCandidate> neverSucceeded = staleCandidates.stream().filter(StaleCandidate::neverSucceeded).toList();
         List<StaleCandidate> selected = new ArrayList<>();
@@ -493,6 +641,7 @@ public final class ServerWeatherManager implements RegionalWeatherAccess {
         }
         List<WeatherTileKey> required = new ArrayList<>();
         List<OpenMeteoResponse.LocationRequest> requests = new ArrayList<>();
+        int unmapped = 0;
         for (StaleCandidate candidate : selected) {
             WeatherTileKey key = candidate.key();
             int tileSize = ServerWeatherConfig.ZONE_SIZE_BLOCKS.get();
@@ -940,10 +1089,14 @@ public final class ServerWeatherManager implements RegionalWeatherAccess {
         );
     }
 
+    private record StaleCandidate(WeatherTileKey key, Instant observedAt, boolean neverSucceeded) {}
+
     private static final class LevelState {
         private final WeatherMemoryCache memoryCache = new WeatherMemoryCache();
         private final Map<WeatherTileKey, ManagedTile> tiles = new HashMap<>();
         private final Map<WeatherTileKey, CompletableFuture<List<OpenMeteoResponse.LocationWeather>>> pendingFetches = new HashMap<>();
+        private NationalWeatherGrid nationalGrid;
+        private CompletableFuture<Boolean> pendingNationalRefresh;
         private final Map<UUID, PlayerSyncState> playerSync = new HashMap<>();
         private final WeatherOverrideManager overrideManager = new WeatherOverrideManager();
         private final VisualOverrideManager visualOverrideManager = new VisualOverrideManager();

@@ -297,12 +297,12 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     private static final ResourceKey<PlacedFeature> ROOTED_SULFUR_SPRING = ResourceKey.create(
         Registries.PLACED_FEATURE, ResourceLocation.fromNamespaceAndPath("ukgeo", "rooted_sulfur_spring"));
     private static final ResourceKey<PlacedFeature> SULFUR_SPIKE_CLUSTER = ResourceKey.create(
-        Registries.PLACED_FEATURE, ResourceLocation.withDefaultNamespace("sulfur_spike_cluster"));
+        Registries.PLACED_FEATURE, ResourceLocation.fromNamespaceAndPath("ukgeo", "sulfur_spike_cluster"));
     private static final ResourceKey<PlacedFeature> SULFUR_SPIKE = ResourceKey.create(
-        Registries.PLACED_FEATURE, ResourceLocation.withDefaultNamespace("sulfur_spike"));
+        Registries.PLACED_FEATURE, ResourceLocation.fromNamespaceAndPath("ukgeo", "sulfur_spike"));
     private static final ResourceKey<PlacedFeature> SULFUR_POOL = ResourceKey.create(
-        Registries.PLACED_FEATURE, ResourceLocation.withDefaultNamespace("sulfur_pool"));
-    /** Spring first (force place), then spikes/pool (biome-checked). */
+        Registries.PLACED_FEATURE, ResourceLocation.fromNamespaceAndPath("ukgeo", "sulfur_pool"));
+    /** Throttled ukgeo placed_feature copies (no biome filter); chunk already gated by sulfur_caves. */
     private static final List<ResourceKey<PlacedFeature>> SULFUR_CAVE_FEATURES = List.of(
         ROOTED_SULFUR_SPRING,
         SULFUR_SPIKE_CLUSTER,
@@ -3800,12 +3800,8 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
             try {
                 level.setCurrentlyGenerating(generating);
                 random.setFeatureSeed(decorationSeed, featureIndex, GenerationStep.Decoration.UNDERGROUND_DECORATION.ordinal());
-                if (key == ROOTED_SULFUR_SPRING) {
-                    // Not listed in sulfur_caves biome JSON — force place without biome check.
-                    feature.place(level, this, random, origin);
-                } else {
-                    feature.placeWithBiomeCheck(level, this, random, origin);
-                }
+                // ukgeo placed_feature copies omit biome filters; chunk already gated by chunkHasSulfurCaves.
+                feature.place(level, this, random, origin);
             } catch (Exception exception) {
                 UkGeoMod.LOGGER.warn(
                     "UKGeo sulfur cave feature failed feature={} chunk={}: {}",

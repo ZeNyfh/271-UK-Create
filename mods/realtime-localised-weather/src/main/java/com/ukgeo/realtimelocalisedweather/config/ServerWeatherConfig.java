@@ -19,6 +19,9 @@ public final class ServerWeatherConfig {
     public static final ModConfigSpec.IntValue HARD_CACHE_EXPIRY_HOURS;
     public static final ModConfigSpec.IntValue MAXIMUM_CONCURRENT_REQUESTS;
     public static final ModConfigSpec.IntValue MAX_TILES_PER_REFRESH;
+    public static final ModConfigSpec.BooleanValue NATIONAL_GRID_ENABLED;
+    public static final ModConfigSpec.IntValue NATIONAL_GRID_COLUMNS;
+    public static final ModConfigSpec.IntValue NATIONAL_GRID_ROWS;
     public static final ModConfigSpec.IntValue ZONE_SIZE_BLOCKS;
     public static final ModConfigSpec.IntValue ACTIVE_ZONE_RADIUS;
     public static final ModConfigSpec.IntValue PREFETCH_ZONE_RADIUS;
@@ -67,6 +70,15 @@ public final class ServerWeatherConfig {
         HARD_CACHE_EXPIRY_HOURS = builder.defineInRange("hard_cache_expiry_hours", 24, 1, 24 * 30);
         MAXIMUM_CONCURRENT_REQUESTS = builder.defineInRange("maximum_concurrent_requests", 1, 1, 16);
         MAX_TILES_PER_REFRESH = builder.defineInRange("max_tiles_per_refresh", 12, 1, 128);
+        NATIONAL_GRID_ENABLED = builder
+            .comment("When true, LIVE mode refreshes one national Open-Meteo multipoint grid and samples weather tiles locally (reduces 429s).")
+            .define("national_grid_enabled", true);
+        NATIONAL_GRID_COLUMNS = builder
+            .comment("National multipoint grid columns (total points clamped to 96).")
+            .defineInRange("national_grid_columns", 8, 2, 32);
+        NATIONAL_GRID_ROWS = builder
+            .comment("National multipoint grid rows (total points clamped to 96).")
+            .defineInRange("national_grid_rows", 10, 2, 48);
         ZONE_SIZE_BLOCKS = builder.defineInRange("zone_size_blocks", 256, 32, 2048);
         ACTIVE_ZONE_RADIUS = builder.defineInRange("active_zone_radius", 2, 0, 12);
         PREFETCH_ZONE_RADIUS = builder.defineInRange("prefetch_zone_radius", 1, 0, 8);

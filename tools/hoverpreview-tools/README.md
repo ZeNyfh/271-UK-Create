@@ -104,7 +104,9 @@ full/cropped sample images where tile metadata is missing.
 By default the exporter also writes static metadata that the browser can use to
 fetch live Open-Meteo weather overlays:
 
-- `Rain / precipitation` (current Open-Meteo precipitation amount)
+- `Rain / precipitation` and `Snow / snowfall` via Open-Meteo OM spatial
+  (`openmeteo.s3.amazonaws.com/data_spatial`, domain `ukmo_uk_deterministic_2km`);
+  the forecast-point API is the fallback when OM spatial fails.
 
 The browser fetches those overlays at runtime using the exported UKGeo
 georeferencing-derived WGS84 query grid. The site remains static; weather does
