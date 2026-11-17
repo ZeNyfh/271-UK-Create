@@ -164,6 +164,42 @@ The rebuild script writes to a temporary sibling directory first, validates the 
 Use the same commands without overriding `--world-width` or `--world-depth`.
 The first height implementation uses a guarded in-memory output mosaic; for low-memory machines, generate smaller extents or replace the height path with a windowed VRT workflow.
 
+## River station junction corrections
+
+Station profiles are now constrained across directed reach junctions: downstream water cannot start above the incoming water. Only offending high profile values are lowered; lower downstream levels and genuine cascades remain. Station IDs, cross-track ownership, and per-reach smoothing are preserved. This fixes baked uphill slabs without restoring the runtime DEM clamp that caused river dips.
+
+For a diagnostic around the reported spawn-area sites, run from the repository root with a new, empty output directory:
+
+```bash
+tools/ukgeo-tools/.venv/bin/python tools/ukgeo-tools/scripts/rebuild_station_region.py \
+  --root tools/ukgeo-tools/uk_world_data_gb \
+  --rivers data/oprvrs_gpkg_gb_ie.gpkg \
+  --out /tmp/ukgeo-station-junction-review \
+  --bounds -440 220 -40 460
+python3 tools/ukgeo-tools/scripts/plot_river_qa.py \
+  --reports /tmp/ukgeo-station-junction-review
+```
+
+The regional script loads national topology to preserve reach IDs, samples the selected tiles plus their upstream closure, and writes four station layers, `junction.csv`, and `report.json`. The report checks reach-ID compatibility and changed outer edges. This output is **diagnostic only**: changes reach the boundaries of this four-tile example, so overlaying it on old tiles would create seams. The actual regional bake changes water Y from 77→71 at −252, 385 and 72→71 at −85, 256; −57, 185 remains at 71.
+
+For deployment preparation, rebuild the complete station layers into an isolated staging directory. The following commands use the checked-out GB manifest's existing `height` and `water/rivers` paths as input symlinks; only the copied manifest and new station layers are written. They do not rebuild terrain, geology, vegetation, river masks, river distance, or hover layers. This is a national **station-only** bake and can take substantial memory/time; it has not been run as part of the regional QA.
+
+```bash
+cd /home/zenyfh/Documents/GitHub/mapcreator
+UKGEO_STATION_SOURCE="$PWD/tools/ukgeo-tools/uk_world_data_gb"
+UKGEO_STATION_STAGE=$(mktemp -d /tmp/ukgeo-stations-XXXXXX)
+mkdir "$UKGEO_STATION_STAGE/water"
+cp "$UKGEO_STATION_SOURCE/manifest.json" "$UKGEO_STATION_STAGE/manifest.json"
+ln -s "$UKGEO_STATION_SOURCE/height" "$UKGEO_STATION_STAGE/height"
+ln -s "$UKGEO_STATION_SOURCE/water/rivers" "$UKGEO_STATION_STAGE/water/rivers"
+tools/ukgeo-tools/.venv/bin/ukgeo bake-river-stations \
+  --rivers data/oprvrs_gpkg_gb_ie.gpkg \
+  --manifest "$UKGEO_STATION_STAGE/manifest.json" \
+  --out "$UKGEO_STATION_STAGE"
+```
+
+Do not use `--resume-tiles` when correcting old station data: it skips completed tiles. The four outputs are `water/river_reach_id`, `water/river_station_id`, `water/river_water_y`, and `water/river_flow_azimuth`. The staging folder is a layer bundle, not a standalone runtime dataset. Review it against the matching source manifest before applying it to a separate test dataset/world. Changing existing worlds or installing these layers is a separate deployment step; the commands above do neither. Use [the mod's regression checks](../../mods/ukgeo/README.md#river-regression-checks-and-previews) and validate the result in newly generated test chunks.
+
 ## Validate, preview, sample
 
 ```bash

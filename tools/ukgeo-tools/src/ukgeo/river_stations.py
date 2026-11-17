@@ -15,6 +15,8 @@ hard corners do not leave triangular bank spikes. Rasterisation order does not
 change the winner. Water Y is computed once per station from the lower bank,
 gently stepped in integer Minecraft Y along the reach (cascades kept), then
 interpolated between adjacent stations across each station's corridor.
+Reach profiles are constrained by their incoming junction levels before stamping,
+so independent bank samples cannot introduce uphill water at a confluence.
 
 Reach ids are uint32. The minimum compares the full id, so ids above 65535
 do not alias and are never masked with 0xFFFF.
@@ -22,8 +24,8 @@ do not alias and are never masked with 0xFFFF.
 
 from __future__ import annotations
 
-from collections import OrderedDict, defaultdict
-from dataclasses import dataclass
+from collections import OrderedDict, defaultdict, deque
+from dataclasses import dataclass, replace
 from pathlib import Path
 import gc
 import math
@@ -623,10 +625,59 @@ def build_stations(
     if processes <= 1:
         if lookup_factory is not None:
             height_at, mask_at = lookup_factory()
-        return _collect_stations(numbered, height_at, mask_at, params)
-    if lookup_factory is None and _shares_tile_cache(height_at, mask_at):
-        raise RuntimeError("refusing to share mutable tile caches across station build workers")
-    return _build_stations_parallel(numbered, height_at, mask_at, params, processes, lookup_factory)
+        stations = _collect_stations(numbered, height_at, mask_at, params)
+    else:
+        if lookup_factory is None and _shares_tile_cache(height_at, mask_at):
+            raise RuntimeError("refusing to share mutable tile caches across station build workers")
+        stations = _build_stations_parallel(numbered, height_at, mask_at, params, processes, lookup_factory)
+    return _align_junction_water(ordered, stations)
+
+
+def _align_junction_water(reaches: Sequence[CellReach], stations: list[Station]) -> list[Station]:
+    """Downstream reaches cannot start above the water arriving at their junction.
+
+    Independent bank samples can create an uphill slab at a reach's first stations
+    (e.g. Y=77 joining inflows at Y=71). Propagate a ceiling along the directed
+    network, lowering only offending prefixes. Lower profiles and genuine drops
+    survive. Local DEM columns never participate in this correction.
+    """
+    groups: dict[int, list[int]] = defaultdict(list)
+    for index, station in enumerate(stations):
+        groups[station.reach_id].append(index)
+    valid = [(rid, reach) for rid, reach in enumerate(reaches, 1) if rid in groups and len(reach.points) >= 2]
+    if not valid:
+        return stations
+    roots = _endpoint_roots([reach for _, reach in valid], MERGE_ENDPOINT_CELLS)
+    incoming: dict[int, list[int]] = defaultdict(list)
+    outgoing: dict[int, list[int]] = defaultdict(list)
+    ends: dict[int, tuple[int, int]] = {}
+    for i, (rid, _) in enumerate(valid):
+        groups[rid].sort(key=lambda index: stations[index].station_id)
+        start, end = roots[i * 2:i * 2 + 2]
+        ends[rid] = start, end
+        outgoing[start].append(rid)
+        incoming[end].append(rid)
+    result = list(stations)
+    queue = deque(sorted(ends))
+    pending = set(queue)
+    while queue:
+        rid = queue.popleft()
+        pending.remove(rid)
+        start, end = ends[rid]
+        inflows = incoming[start]
+        if not inflows:
+            continue
+        ceiling = min(result[groups[upstream][-1]].water_y for upstream in inflows)
+        old_end = result[groups[rid][-1]].water_y
+        for index in groups[rid]:
+            if result[index].water_y > ceiling:
+                result[index] = replace(result[index], water_y=ceiling)
+        if result[groups[rid][-1]].water_y < old_end:
+            for downstream in outgoing[end]:
+                if downstream not in pending:
+                    queue.append(downstream)
+                    pending.add(downstream)
+    return result
 
 
 def _worker_station_lookups(ctx: dict[str, Any]) -> tuple[HeightFn, MaskFn]:
@@ -1496,6 +1547,7 @@ def _write_station_tiles(
     *,
     skip_existing: bool = False,
     default_workers: int = STATION_BAKE_WORKERS,
+    tile_coords: set[tuple[int, int]] | None = None,
 ) -> None:
     global _STATION_BAKE
     tile_size = int(manifest["tile_size"])
@@ -1515,6 +1567,8 @@ def _write_station_tiles(
         folder.mkdir(parents=True, exist_ok=True)
     for tile_z in tqdm(range(tiles_z), desc="river station empty tiles"):
         for tile_x in range(tiles_x):
+            if tile_coords is not None and (tile_x, tile_z) not in tile_coords:
+                continue
             if (tile_x, tile_z) in buckets:
                 continue
             _clear_tile(reach_root / tile_filename(tile_x, tile_z, reach_ext))
@@ -1524,7 +1578,7 @@ def _write_station_tiles(
     tasks = [
         (tx, tz, indexes)
         for (tx, tz), indexes in buckets.items()
-        if 0 <= tx < tiles_x and 0 <= tz < tiles_z
+        if 0 <= tx < tiles_x and 0 <= tz < tiles_z and (tile_coords is None or (tx, tz) in tile_coords)
     ]
     if skip_existing and tasks:
         pending: list[tuple[int, int, list[int]]] = []

@@ -10,6 +10,7 @@ TARGET="${1:-all}" # all | client | server | start | stop | status
 DO_BUILD="${DO_BUILD:-1}"
 DO_DATA="${DO_DATA:-1}"
 DO_START="${DO_START:-0}"
+ONLY_UKGEO="${ONLY_UKGEO:-0}" # JAR-only update; preserve configs, other mods, and baked data.
 
 LOCAL_JAVA="${JAVA_DIR:-$HOME/.jdks/temurin-21.0.11}"
 if [[ -x "$LOCAL_JAVA/bin/java" ]]; then
@@ -116,6 +117,54 @@ install_project_mods_into() {
   done
 }
 
+update_ukgeo_jar() {
+  local destination="$1" jar jar_name stamp checksum
+  jar="$(latest_mod_jar "$ROOT_DIR/mods/ukgeo")"
+  [[ -f "$jar" ]] || { echo "Build UKGeo before deploying" >&2; return 1; }
+  jar_name="$(basename "$jar")"
+  stamp="$(date -u +%Y%m%dT%H%M%S.%NZ)"
+  if [[ "$destination" == "client" ]]; then
+    require_dir "$MOD_DIR"
+    local backup="$INSTANCE_DIR/backups/ukgeo-jar-$stamp" old
+    mkdir -p "$backup"
+    cp "$jar" "$MOD_DIR/.ukgeo-update-$stamp"
+    for old in "$MOD_DIR"/ukgeo-[0-9]*.jar; do
+      if [[ -f "$old" ]]; then cp -p "$old" "$backup/"; fi
+    done
+    mv -f "$MOD_DIR/.ukgeo-update-$stamp" "$MOD_DIR/$jar_name"
+    for old in "$MOD_DIR"/ukgeo-[0-9]*.jar; do
+      [[ "$(basename "$old")" == "$jar_name" ]] || rm -f "$old"
+    done
+    log "installed $jar_name -> $MOD_DIR; backup: $backup"
+  else
+    # Upload away from mods, then check shutdown before replacing any JAR.
+    checksum="$(sha256sum "$jar")"
+    checksum="${checksum%% *}"
+    scp -q "$jar" "$SERVER_SSH_HOST:$SERVER_REMOTE_DIR/.ukgeo-update-$stamp"
+    ssh "$SERVER_SSH_HOST" bash -s -- "$SERVER_REMOTE_DIR" "$stamp" "$jar_name" "$checksum" <<'REMOTE'
+set -euo pipefail
+root="$1"; stamp="$2"; jar_name="$3"
+printf '%s  %s\n' "$4" "$root/.ukgeo-update-$stamp" | sha256sum -c -
+for pid in $(pgrep -x java || true); do
+  if [[ "$(readlink -f "/proc/$pid/cwd" 2>/dev/null || true)" == "$root" ]]; then
+    echo "Minecraft is running; stop it before installing UKGeo" >&2
+    exit 1
+  fi
+done
+backup="$root/backups/ukgeo-jar-$stamp"
+mkdir -p "$backup"
+for old in "$root"/mods/ukgeo-[0-9]*.jar; do
+  if [[ -f "$old" ]]; then cp -p "$old" "$backup/"; fi
+done
+mv -f "$root/.ukgeo-update-$stamp" "$root/mods/$jar_name"
+for old in "$root"/mods/ukgeo-[0-9]*.jar; do
+  [[ "$(basename "$old")" == "$jar_name" ]] || rm -f "$old"
+done
+printf '[remote] installed %s; backup: %s\n' "$jar_name" "$backup"
+REMOTE
+  fi
+}
+
 sync_kubejs_into() {
   local dest="$1"
   if [[ -d "$ROOT_DIR/mods/kubejs" ]]; then
@@ -162,11 +211,19 @@ sync_world_data_into() {
 }
 
 build_mods() {
+  if [[ "$ONLY_UKGEO" == "1" ]]; then
+    "$ROOT_DIR/mods/ukgeo/gradlew" -p "$ROOT_DIR/mods/ukgeo" build
+    return
+  fi
   log "building all mods"
   "$ROOT_DIR/buildall.sh"
 }
 
 update_client() {
+  if [[ "$ONLY_UKGEO" == "1" ]]; then
+    update_ukgeo_jar client
+    return
+  fi
   require_dir "$INSTANCE_DIR"
   require_dir "$MOD_DIR"
   install_project_mods_into "$MOD_DIR"
@@ -310,6 +367,10 @@ REMOTE
 
 
 update_server() {
+  if [[ "$ONLY_UKGEO" == "1" ]]; then
+    update_ukgeo_jar server
+    return
+  fi
   require_dir "$INSTANCE_DIR"
   require_dir "$MOD_DIR"
   ensure_remote_server_install
@@ -434,6 +495,10 @@ case "$TARGET" in
   all)
     [[ "$DO_BUILD" == "1" ]] && build_mods
     update_client
+    if [[ "$ONLY_UKGEO" == "1" ]]; then
+      update_server
+      exit 0
+    fi
     DO_START=1 update_server
     # force start after sync
     start_server

@@ -1,0 +1,627 @@
+{
+  "format": "uk-raster-tiles-v1",
+  "tile_size": 512,
+  "world": {
+    "width": 68462,
+    "depth": 100000,
+    "padded_width": 68608,
+    "padded_depth": 100352,
+    "minecraft_min_x": -52100,
+    "minecraft_min_z": -73850,
+    "minecraft_max_x": 16361,
+    "minecraft_max_z": 26149
+  },
+  "georeferencing": {
+    "crs": "EPSG:27700",
+    "bng_min_easting": -220000.0,
+    "bng_min_northing": 0.0,
+    "bng_max_easting": 670000.0,
+    "bng_max_northing": 1300000.0,
+    "note": "Final map cells are Minecraft x/z blocks resampled from the source GIS extent."
+  },
+  "axis_scale": {
+    "x": 2.0,
+    "z": 2.0,
+    "note": "Multipliers applied to the historic UKGeo horizontal and vertical block scales before raster resampling."
+  },
+  "height": {
+    "path": "height",
+    "extension": ".r16",
+    "dtype": "int16_le",
+    "unit": "decimetres",
+    "scale_to_metres": 0.1,
+    "nodata": -32768,
+    "sea_level_y": 64,
+    "storage": "regions",
+    "region_path": "height/regions",
+    "region_extension": ".r16rg",
+    "region_tiles": 8,
+    "missing_tile": -32768
+  },
+  "ore_layers": {
+    "coal": {
+      "path": "ores/coal",
+      "extension": ".u8",
+      "dtype": "uint8",
+      "min": 0,
+      "max": 255,
+      "storage": "regions",
+      "region_path": "ores/coal/regions",
+      "region_extension": ".u8rg",
+      "region_tiles": 8,
+      "missing_tile": 0
+    },
+    "iron": {
+      "path": "ores/iron",
+      "extension": ".u8",
+      "dtype": "uint8",
+      "min": 0,
+      "max": 255,
+      "storage": "regions",
+      "region_path": "ores/iron/regions",
+      "region_extension": ".u8rg",
+      "region_tiles": 8,
+      "missing_tile": 0
+    },
+    "copper": {
+      "path": "ores/copper",
+      "extension": ".u8",
+      "dtype": "uint8",
+      "min": 0,
+      "max": 255,
+      "storage": "regions",
+      "region_path": "ores/copper/regions",
+      "region_extension": ".u8rg",
+      "region_tiles": 8,
+      "missing_tile": 0
+    },
+    "zinc": {
+      "path": "ores/zinc",
+      "extension": ".u8",
+      "dtype": "uint8",
+      "min": 0,
+      "max": 255,
+      "storage": "regions",
+      "region_path": "ores/zinc/regions",
+      "region_extension": ".u8rg",
+      "region_tiles": 8,
+      "missing_tile": 0
+    },
+    "gold": {
+      "path": "ores/gold",
+      "extension": ".u8",
+      "dtype": "uint8",
+      "min": 0,
+      "max": 255,
+      "storage": "regions",
+      "region_path": "ores/gold/regions",
+      "region_extension": ".u8rg",
+      "region_tiles": 8,
+      "missing_tile": 0
+    },
+    "andesite": {
+      "path": "ores/andesite",
+      "extension": ".u8",
+      "dtype": "uint8",
+      "min": 0,
+      "max": 255,
+      "storage": "regions",
+      "region_path": "ores/andesite/regions",
+      "region_extension": ".u8rg",
+      "region_tiles": 8,
+      "missing_tile": 0
+    },
+    "diorite": {
+      "path": "ores/diorite",
+      "extension": ".u8",
+      "dtype": "uint8",
+      "min": 0,
+      "max": 255,
+      "storage": "regions",
+      "region_path": "ores/diorite/regions",
+      "region_extension": ".u8rg",
+      "region_tiles": 8,
+      "missing_tile": 0
+    },
+    "granite": {
+      "path": "ores/granite",
+      "extension": ".u8",
+      "dtype": "uint8",
+      "min": 0,
+      "max": 255,
+      "storage": "regions",
+      "region_path": "ores/granite/regions",
+      "region_extension": ".u8rg",
+      "region_tiles": 8,
+      "missing_tile": 0
+    },
+    "ochrum": {
+      "path": "ores/ochrum",
+      "extension": ".u8",
+      "dtype": "uint8",
+      "min": 0,
+      "max": 255,
+      "storage": "regions",
+      "region_path": "ores/ochrum/regions",
+      "region_extension": ".u8rg",
+      "region_tiles": 8,
+      "missing_tile": 0
+    },
+    "calcite": {
+      "path": "ores/calcite",
+      "extension": ".u8",
+      "dtype": "uint8",
+      "min": 0,
+      "max": 255,
+      "storage": "regions",
+      "region_path": "ores/calcite/regions",
+      "region_extension": ".u8rg",
+      "region_tiles": 8,
+      "missing_tile": 0
+    },
+    "scoria": {
+      "path": "ores/scoria",
+      "extension": ".u8",
+      "dtype": "uint8",
+      "min": 0,
+      "max": 255,
+      "storage": "regions",
+      "region_path": "ores/scoria/regions",
+      "region_extension": ".u8rg",
+      "region_tiles": 8,
+      "missing_tile": 0
+    },
+    "tuff": {
+      "path": "ores/tuff",
+      "extension": ".u8",
+      "dtype": "uint8",
+      "min": 0,
+      "max": 255,
+      "storage": "regions",
+      "region_path": "ores/tuff/regions",
+      "region_extension": ".u8rg",
+      "region_tiles": 8,
+      "missing_tile": 0
+    },
+    "crimsite": {
+      "path": "ores/crimsite",
+      "extension": ".u8",
+      "dtype": "uint8",
+      "min": 0,
+      "max": 255,
+      "storage": "regions",
+      "region_path": "ores/crimsite/regions",
+      "region_extension": ".u8rg",
+      "region_tiles": 8,
+      "missing_tile": 0
+    },
+    "limestone": {
+      "path": "ores/limestone",
+      "extension": ".u8",
+      "dtype": "uint8",
+      "min": 0,
+      "max": 255,
+      "storage": "regions",
+      "region_path": "ores/limestone/regions",
+      "region_extension": ".u8rg",
+      "region_tiles": 8,
+      "missing_tile": 0
+    },
+    "asurine": {
+      "path": "ores/asurine",
+      "extension": ".u8",
+      "dtype": "uint8",
+      "min": 0,
+      "max": 255,
+      "storage": "regions",
+      "region_path": "ores/asurine/regions",
+      "region_extension": ".u8rg",
+      "region_tiles": 8,
+      "missing_tile": 0
+    },
+    "veridium": {
+      "path": "ores/veridium",
+      "extension": ".u8",
+      "dtype": "uint8",
+      "min": 0,
+      "max": 255,
+      "storage": "regions",
+      "region_path": "ores/veridium/regions",
+      "region_extension": ".u8rg",
+      "region_tiles": 8,
+      "missing_tile": 0
+    },
+    "smooth_basalt": {
+      "path": "ores/smooth_basalt",
+      "extension": ".u8",
+      "dtype": "uint8",
+      "min": 0,
+      "max": 255,
+      "storage": "regions",
+      "region_path": "ores/smooth_basalt/regions",
+      "region_extension": ".u8rg",
+      "region_tiles": 8,
+      "missing_tile": 0
+    }
+  },
+  "height_processing": {
+    "source": "OS Terrain 50",
+    "resampling": "bilinear",
+    "smoothing": "light",
+    "deterrace": true
+  },
+  "height_cleanup": {
+    "bgs_land_mask": {
+      "source": "../../data/BGS_Geology_625k_bedrock_gpkg.zip",
+      "layers": [
+        "625k_V5_BEDROCK_Geology",
+        "625k_V5_SUPERFICIAL_Geology"
+      ],
+      "buffer_metres": 0.0,
+      "max_height_metres": 30.0,
+      "preserve_height_overlays": true,
+      "preserved_overlay_cells": 0,
+      "removed_cells": 321436225,
+      "note": "Near-sea-level cells outside BGS land polygons were converted to height nodata/ocean."
+    }
+  },
+  "height_overlays": [
+    {
+      "source": "Copernicus DEM COP30 GeoTIFF",
+      "archive": "rasters_COP30.tar.gz",
+      "target": "ireland-iom",
+      "resampling": "bilinear",
+      "smoothing": "light",
+      "deterrace": true,
+      "protect_mainland_gb": true,
+      "minecraft_y_offset": 0.0,
+      "minecraft_height_scale": 0.18,
+      "height_offset_decimetres": 0
+    }
+  ],
+  "ore_image_overlays": [
+    {
+      "ore": "iron",
+      "source": "../../data/uk_iron_ore_reference_overlay.svg",
+      "score": 180,
+      "red_min": 180,
+      "green_max": 120,
+      "blue_max": 120,
+      "fit": "outline",
+      "svg_raster_scale": 4,
+      "placement": {
+        "mode": "control_points",
+        "matrix": [
+          [
+            16.695552085128238,
+            -1.121076145055913,
+            15189.015468333255
+          ],
+          [
+            0.7872721334959563,
+            17.945375268736164,
+            23731.48011111098
+          ]
+        ],
+        "inverse_matrix": [
+          [
+            0.05972026706365427,
+            0.0037308201014927167,
+            -995.6299432395451
+          ],
+          [
+            -0.002619956471239767,
+            0.0555609907493023,
+            -1278.749987552668
+          ]
+        ]
+      },
+      "note": "Image red shapes were max-merged into the existing ore score tiles."
+    }
+  ],
+  "surface_geology": {
+    "path": "geology/surface",
+    "extension": ".u8",
+    "dtype": "uint8",
+    "classes": {
+      "0": {
+        "name": "default",
+        "block": "minecraft:stone",
+        "fallback_block": "minecraft:stone",
+        "color": "#5f625d"
+      },
+      "1": {
+        "name": "chalk",
+        "block": "minecraft:calcite",
+        "fallback_block": "minecraft:calcite",
+        "color": "#eee8cf"
+      },
+      "2": {
+        "name": "limestone",
+        "block": "create:limestone",
+        "fallback_block": "minecraft:calcite",
+        "color": "#bdb895"
+      },
+      "3": {
+        "name": "granite",
+        "block": "minecraft:granite",
+        "fallback_block": "minecraft:granite",
+        "color": "#b17e6a"
+      },
+      "4": {
+        "name": "basalt",
+        "block": "minecraft:smooth_basalt",
+        "fallback_block": "minecraft:deepslate",
+        "color": "#383c42"
+      },
+      "5": {
+        "name": "andesite",
+        "block": "minecraft:andesite",
+        "fallback_block": "minecraft:andesite",
+        "color": "#7a7e7b"
+      },
+      "6": {
+        "name": "diorite",
+        "block": "minecraft:diorite",
+        "fallback_block": "minecraft:diorite",
+        "color": "#d2d0c8"
+      },
+      "7": {
+        "name": "tuff",
+        "block": "minecraft:tuff",
+        "fallback_block": "minecraft:tuff",
+        "color": "#687062"
+      },
+      "8": {
+        "name": "sandstone",
+        "block": "minecraft:sandstone",
+        "fallback_block": "minecraft:sandstone",
+        "color": "#c6ad68"
+      },
+      "9": {
+        "name": "slate",
+        "block": "minecraft:deepslate",
+        "fallback_block": "minecraft:deepslate",
+        "color": "#4d5660"
+      }
+    },
+    "storage": "regions",
+    "region_path": "geology/surface/regions",
+    "region_extension": ".u8rg",
+    "region_tiles": 8,
+    "missing_tile": 0
+  },
+  "rivers": {
+    "path": "water/rivers",
+    "extension": ".u8",
+    "dtype": "uint8",
+    "min": 0,
+    "max": 255,
+    "order_path": "water/river_order",
+    "half_width_path": "water/river_half_width",
+    "preview_radius_path": "water/river_preview_radius",
+    "max_half_width": 20,
+    "note": "255 marks cells inside variable-width river/watercourse vectors. Widths follow OpenRiverNetwork Strahler order 1\u20137 survival half-widths (order 1\u20132 thin brooks; 3 creek; 4\u20135 small/mid; 6\u20137 large/arterial), from source ORDER_ where present or computed Strahler otherwise, then scaled by RIVER_OUTPUT_WIDTH_FACTOR for in-world readability. Runtime no longer floors channels with river_widen_radius. Station schema 1 bakes canonical reach_id, station_id, water_y, and flow_azimuth from directed edges with associative min ownership.",
+    "distance_path": "water/river_distance",
+    "nearest_half_width_path": "water/river_nearest_half_width",
+    "distance_search_radius": 32,
+    "distance_units": "half_blocks",
+    "station_schema_version": 1,
+    "reach_id_path": "water/river_reach_id",
+    "reach_id_extension": ".u32",
+    "reach_id_dtype": "uint32_le",
+    "station_id_path": "water/river_station_id",
+    "station_id_extension": ".u16",
+    "station_id_dtype": "uint16_le",
+    "water_y_path": "water/river_water_y",
+    "water_y_extension": ".r16",
+    "water_y_dtype": "int16_le",
+    "water_y_nodata": -32768,
+    "flow_azimuth_path": "water/river_flow_azimuth",
+    "flow_azimuth_extension": ".u8",
+    "flow_azimuth_dtype": "uint8",
+    "station_count": 21243650
+  },
+  "vegetation": {
+    "path": "vegetation",
+    "extension": ".u8",
+    "dtype": "uint8",
+    "cell_blocks": 4,
+    "cell_metres": 50.0,
+    "width_cells": 17116,
+    "depth_cells": 25000,
+    "source": "https://image.discomap.eea.europa.eu/arcgis/services/Corine/CLC2018_WM/MapServer/WMSServer",
+    "source_layer": "12",
+    "source_scheme": "CORINE Land Cover 2018 WMS colors",
+    "classes": {
+      "0": {
+        "name": "none/ocean",
+        "color": "#101820"
+      },
+      "1": {
+        "name": "broadleaf woodland",
+        "color": "#1f6f3a"
+      },
+      "2": {
+        "name": "conifer woodland",
+        "color": "#174c34"
+      },
+      "3": {
+        "name": "arable and horticulture",
+        "color": "#d9c66a"
+      },
+      "4": {
+        "name": "improved grassland",
+        "color": "#78b957"
+      },
+      "5": {
+        "name": "neutral grassland",
+        "color": "#9ccc66"
+      },
+      "6": {
+        "name": "calcareous grassland",
+        "color": "#c8d78a"
+      },
+      "7": {
+        "name": "acid grassland",
+        "color": "#8aa84f"
+      },
+      "8": {
+        "name": "wetland/bog/fen",
+        "color": "#4c8f8a"
+      },
+      "9": {
+        "name": "heath/heather",
+        "color": "#8c5a99"
+      },
+      "10": {
+        "name": "freshwater",
+        "color": "#3b82c4"
+      },
+      "11": {
+        "name": "urban/suburban",
+        "color": "#777777"
+      },
+      "12": {
+        "name": "rocky",
+        "color": "#b9b0a2"
+      }
+    },
+    "source_classes": {
+      "111": "CLC 111",
+      "112": "CLC 112",
+      "121": "CLC 121",
+      "122": "CLC 122",
+      "123": "CLC 123",
+      "124": "CLC 124",
+      "131": "CLC 131",
+      "132": "CLC 132",
+      "133": "CLC 133",
+      "141": "CLC 141",
+      "142": "CLC 142",
+      "211": "CLC 211",
+      "212": "CLC 212",
+      "213": "CLC 213",
+      "221": "CLC 221",
+      "222": "CLC 222",
+      "223": "CLC 223",
+      "231": "CLC 231",
+      "241": "CLC 241",
+      "242": "CLC 242",
+      "243": "CLC 243",
+      "244": "CLC 244",
+      "311": "CLC 311",
+      "312": "CLC 312",
+      "313": "CLC 313",
+      "321": "CLC 321",
+      "322": "CLC 322",
+      "323": "CLC 323",
+      "324": "CLC 324",
+      "331": "CLC 331",
+      "332": "CLC 332",
+      "333": "CLC 333",
+      "334": "CLC 334",
+      "335": "CLC 335",
+      "411": "CLC 411",
+      "412": "CLC 412",
+      "421": "CLC 421",
+      "422": "CLC 422",
+      "423": "CLC 423",
+      "511": "CLC 511",
+      "512": "CLC 512",
+      "521": "CLC 521",
+      "522": "CLC 522",
+      "523": "CLC 523"
+    },
+    "storage": "regions",
+    "region_path": "vegetation/regions",
+    "region_extension": ".u8rg",
+    "region_tiles": 8,
+    "missing_tile": 0
+  },
+  "biome_regions": {
+    "path": "biome_regions",
+    "extension": ".u8",
+    "dtype": "uint8",
+    "cell_blocks": 32,
+    "source_cell_blocks": 4,
+    "region_factor": 8,
+    "width_cells": 2140,
+    "depth_cells": 3125,
+    "source": "vegetation",
+    "classes": {
+      "0": {
+        "name": "ocean",
+        "color": "#1f4f7a"
+      },
+      "1": {
+        "name": "broadleaf woodland",
+        "color": "#1f6f3a"
+      },
+      "2": {
+        "name": "conifer woodland",
+        "color": "#174c34"
+      },
+      "3": {
+        "name": "arable and horticulture",
+        "color": "#d9c66a"
+      },
+      "4": {
+        "name": "improved grassland",
+        "color": "#78b957"
+      },
+      "5": {
+        "name": "neutral grassland",
+        "color": "#9ccc66"
+      },
+      "6": {
+        "name": "calcareous grassland",
+        "color": "#c8d78a"
+      },
+      "7": {
+        "name": "acid grassland",
+        "color": "#8aa84f"
+      },
+      "8": {
+        "name": "wetland/bog/fen",
+        "color": "#4c8f8a"
+      },
+      "9": {
+        "name": "heath/heather",
+        "color": "#8c5a99"
+      },
+      "10": {
+        "name": "freshwater",
+        "color": "#2b8fc6"
+      },
+      "11": {
+        "name": "urban/suburban",
+        "color": "#777777"
+      },
+      "12": {
+        "name": "rocky",
+        "color": "#b9b0a2"
+      }
+    },
+    "generation": {
+      "method": "clc_wms_coarsened_group_majority_component_cleanup",
+      "smoothing_passes": 2,
+      "min_area_cells": 3,
+      "hard_classes": [
+        0,
+        10
+      ]
+    },
+    "storage": "regions",
+    "region_path": "biome_regions/regions",
+    "region_extension": ".u8rg",
+    "region_tiles": 8,
+    "missing_tile": 0
+  },
+  "tile_storage": {
+    "format": "ukgeo-region-tiles-v1",
+    "region_tiles": 8,
+    "sparse_zero_u8": true,
+    "missing_height": "nodata"
+  }
+}
