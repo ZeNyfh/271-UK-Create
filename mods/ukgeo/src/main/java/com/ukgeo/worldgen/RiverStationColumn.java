@@ -3,8 +3,7 @@ package com.ukgeo.worldgen;
 import java.util.List;
 import java.util.OptionalInt;
 
-/**
- * Canonical river-station decisions. Water Y comes only from the baked int16 layer.
+/** Canonical river-station decisions. Water Y comes only from the baked int16 layer.
  * A disabled schema, nodata water, or a zero reach drops the column with no DEM fallback.
  */
 final class RiverStationColumn {
@@ -65,31 +64,31 @@ final class RiverStationColumn {
         if (baked.isEmpty()) {
             return Shape.none(originalSurfaceY);
         }
-        int water = clampWaterToLocalSurface(baked.getAsInt(), originalSurfaceY);
+        int water = baked.getAsInt();
         boolean inChannel = distanceFound && blocks <= waterRadius;
         if (inChannel) {
-            // Mountain stamps: DEM→bed ≤ MOUNTAIN_TOTAL_INCISION (depth included).
-            // Valleys keep absolute baked water Y (clamped above).
+            // The station layer owns the channel's water elevation. Do not clamp it
+            // to each column's raw DEM: small DEM depressions would otherwise become
+            // repeated, artificial pools with both water and bed stepping down.
             int plane = RiverBankFit.cappedPlane(originalSurfaceY, water, depth);
             int bed = RiverWaterPlane.bedUnderPlane(plane, depth, minBuildY);
             return new Shape(true, true, bed, plane);
         }
+        // Outside the wet channel, retain the DEM safety clamp so bank columns
+        // cannot carry unsupported water planes above their local surface.
+        water = clampWaterToLocalSurface(water, originalSurfaceY);
         double dOut = distanceFound ? Math.max(0.5, blocks - waterRadius) : 1.0;
-        // Banks: carve is DEM-capped; reference water Y stays baked (clamped).
         int terrain = RiverWaterPlane.conformBankTop(originalSurfaceY, water, dOut, RiverBankFit.BANK_CARVE_REACH);
         terrain = Math.max(minBuildY + 1, terrain);
         return new Shape(false, true, terrain, water);
     }
 
     /**
-     * Baked water Y is authoritative along a reach, but must not float as a
-     * protrusion above the local DEM (bad station samples / false cascades).
-     * Cascades remain intact because they lower water below the DEM.
+     * Clamp a baked reference plane to local terrain for dry bank columns only.
+     * Channel water must remain on the baked station plane so DEM depressions do not
+     * create artificial water-level steps along an otherwise level river.
      */
     static int clampWaterToLocalSurface(int waterY, int originalSurfaceY) {
-        // Never float a water plane above the local DEM. Bank raise is handled
-        // by conformBankTop on dry columns; baked spikes / false cascades must
-        // not create unsupported surface water above the land surface.
         if (waterY > originalSurfaceY) {
             return originalSurfaceY;
         }
