@@ -136,11 +136,23 @@ class RiverStationColumnTest {
     }
 
     @Test
-    void spawnStyleFloatingWaterIsClampedToDem() {
-        RiverStationColumn.Shape shape = RiverStationColumn.resolve(true, 255901, 77, true, 0, 10, 71, 3, -64);
-        assertTrue(shape.hasWater());
-        assertTrue(shape.waterY() <= 71, "waterY=" + shape.waterY());
-        assertTrue(shape.terrainY() < shape.waterY());
+    void channelWaterKeepsBakedLevelAcrossLocalDemDepressions() {
+        int bakedWater = 77;
+        int[] localDem = {71, 69, 72, 68, 71};
+        for (int dem : localDem) {
+            RiverStationColumn.Shape shape = RiverStationColumn.resolve(true, 255901, bakedWater, true, 0, 10, dem, 3, -64);
+            assertTrue(shape.hasWater());
+            assertEquals(bakedWater, shape.waterY(), "local DEM=" + dem);
+            assertEquals(bakedWater - 3, shape.terrainY(), "local DEM=" + dem);
+        }
+    }
+
+    @Test
+    void dryBankWaterRemainsClampedToLocalDem() {
+        RiverStationColumn.Shape bank = RiverStationColumn.resolve(true, 255901, 77, true, 11, 10, 71, 3, -64);
+        assertFalse(bank.hasWater());
+        assertEquals(71, bank.waterY());
+        assertEquals(71, RiverStationColumn.clampWaterToLocalSurface(77, 71));
     }
 
     @Test
