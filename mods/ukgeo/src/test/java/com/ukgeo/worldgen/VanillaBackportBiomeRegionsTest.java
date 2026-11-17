@@ -3,6 +3,7 @@ package com.ukgeo.worldgen;
 import static org.junit.jupiter.api.Assertions.*;
 
 import com.ukgeo.worldgen.VanillaBackportBiomeRegions.RegionKind;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class VanillaBackportBiomeRegionsTest {
@@ -74,5 +75,38 @@ class VanillaBackportBiomeRegionsTest {
         assertEquals(2, VanillaBackportBiomeRegions.expandedWoodlandClass(385_000, 465_000)); // Pennines
         assertEquals(1, VanillaBackportBiomeRegions.expandedWoodlandClass(275_000, 70_000)); // Dartmoor pale
         assertEquals(1, VanillaBackportBiomeRegions.expandedWoodlandClass(-50_000, 100_000)); // expand-only IE → broadleaf
+    }
+
+    @Test
+    void sulfurNoiseThresholdDefaultsPreferValeOverSoftWales() {
+        assertEquals(0.20, VanillaBackportBiomeRegions.SULFUR_NOISE_THRESHOLD_VALE_CORE);
+        assertEquals(0.40, VanillaBackportBiomeRegions.SULFUR_NOISE_THRESHOLD_SOFT_WALES);
+        assertEquals(0.20, VanillaBackportBiomeRegions.defaultSulfurNoiseThreshold(305_000, 185_000)); // Vale
+        assertEquals(0.40, VanillaBackportBiomeRegions.defaultSulfurNoiseThreshold(200_000, 300_000)); // soft Wales
+        // Soft threshold stays below lush default (0.68) so sulfur can win first in Wales.
+        assertTrue(VanillaBackportBiomeRegions.SULFUR_NOISE_THRESHOLD_SOFT_WALES < 0.68);
+    }
+
+    @Test
+    void safeVegetalMappingUsesVbTreesAndSkipsGrassland() {
+        assertEquals(List.of("pale_garden_vegetation", "pale_moss_patch"),
+            SafeVegetalFeatureMapping.featurePathsForBiome("pale_garden"));
+        assertEquals(List.of("trees_dappled_forest"),
+            SafeVegetalFeatureMapping.featurePathsForBiome("dappled_forest"));
+        assertEquals(List.of("trees_birch_and_oak", "trees_sparse_jungle"),
+            SafeVegetalFeatureMapping.featurePathsForBiome("broadleaf_woodland"));
+        assertEquals(List.of("trees_taiga"),
+            SafeVegetalFeatureMapping.featurePathsForBiome("conifer_woodland"));
+        assertEquals(List.of(), SafeVegetalFeatureMapping.featurePathsForBiome("arable"));
+        assertEquals(List.of(), SafeVegetalFeatureMapping.featurePathsForBiome("improved_grassland"));
+        assertEquals(List.of(), SafeVegetalFeatureMapping.featurePathsForBiome("neutral_grassland"));
+        assertEquals(List.of(), SafeVegetalFeatureMapping.featurePathsForBiome("calcareous_grassland"));
+        assertEquals(List.of(), SafeVegetalFeatureMapping.featurePathsForBiome("acid_grassland"));
+        assertEquals(List.of(), SafeVegetalFeatureMapping.featurePathsForBiome("heath"));
+        assertEquals(List.of(), SafeVegetalFeatureMapping.featurePathsForBiome("urban"));
+        assertEquals(List.of("trees_swamp", "trees_sparse_jungle"),
+            SafeVegetalFeatureMapping.featurePathsForBiome("wetland"));
+        assertEquals(List.of("trees_windswept_hills"),
+            SafeVegetalFeatureMapping.featurePathsForBiome("mountains"));
     }
 }

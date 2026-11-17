@@ -75,6 +75,17 @@ public final class VanillaBackportBiomeRegions {
         return inBox(easting, northing, SULFUR_VALE_CORE);
     }
 
+    /** Default cave-noise threshold for Vale sulfate core (lower = more sulfur). */
+    public static final double SULFUR_NOISE_THRESHOLD_VALE_CORE = 0.20;
+    /** Default cave-noise threshold for soft Wales AABB outside Vale core. */
+    public static final double SULFUR_NOISE_THRESHOLD_SOFT_WALES = 0.40;
+
+    public static double defaultSulfurNoiseThreshold(double easting, double northing) {
+        return inSulfurValeCore(easting, northing)
+            ? SULFUR_NOISE_THRESHOLD_VALE_CORE
+            : SULFUR_NOISE_THRESHOLD_SOFT_WALES;
+    }
+
     /**
      * Runtime-only forest expand: promote vegetation classes 3–9 toward woodland in priority
      * AABBs (pale ∪ dappled ∪ densest IE/NI belts). Leaves 0/10/11 alone; rocky (12) never.

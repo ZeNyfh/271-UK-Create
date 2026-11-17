@@ -237,12 +237,8 @@ public final class UkGeoVegetationBiomeSource extends BiomeSource {
         if (isHighMountainSourceHeight(sourceHeightDecimetres) && blockY <= Integer.getInteger("ukgeo.deepDarkMaxY", 8)) {
             return deepDark;
         }
-        if (blockY <= Integer.getInteger("ukgeo.lushCavesMaxY", 40) && caveNoise > Double.parseDouble(System.getProperty("ukgeo.lushCavesNoiseThreshold", "0.68"))) {
-            return lushCaves;
-        }
-        if (blockY <= Integer.getInteger("ukgeo.dripstoneCavesMaxY", 24) && caveNoise < Double.parseDouble(System.getProperty("ukgeo.dripstoneCavesNoiseThreshold", "-0.52"))) {
-            return dripstoneCaves;
-        }
+        // Sulfur before lush: Wales AABB + noise; Vale core easier than soft Wales.
+        // Defaults: Vale 0.20, soft Wales 0.40 (override both via -Dukgeo.sulfurCavesNoiseThreshold).
         if (sulfurCaves != null
             && blockY <= Integer.getInteger("ukgeo.sulfurCavesMaxY", 40)
             && data() != null
@@ -254,13 +250,18 @@ public final class UkGeoVegetationBiomeSource extends BiomeSource {
                 if (VanillaBackportBiomeRegions.inSulfurWales(e, n)) {
                     double threshold = Double.parseDouble(System.getProperty(
                         "ukgeo.sulfurCavesNoiseThreshold",
-                        VanillaBackportBiomeRegions.inSulfurValeCore(e, n) ? "0.35" : "0.62"));
-                    // Soft Wales: require stronger noise than Vale sulfate core.
+                        Double.toString(VanillaBackportBiomeRegions.defaultSulfurNoiseThreshold(e, n))));
                     if (caveNoise > threshold) {
                         return sulfurCaves;
                     }
                 }
             }
+        }
+        if (blockY <= Integer.getInteger("ukgeo.lushCavesMaxY", 40) && caveNoise > Double.parseDouble(System.getProperty("ukgeo.lushCavesNoiseThreshold", "0.68"))) {
+            return lushCaves;
+        }
+        if (blockY <= Integer.getInteger("ukgeo.dripstoneCavesMaxY", 24) && caveNoise < Double.parseDouble(System.getProperty("ukgeo.dripstoneCavesNoiseThreshold", "-0.52"))) {
+            return dripstoneCaves;
         }
         return null;
     }

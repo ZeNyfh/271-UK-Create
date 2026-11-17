@@ -285,8 +285,30 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     private static final double LUSH_CAVE_MARKER_CHUNK_CHANCE = Double.parseDouble(System.getProperty("ukgeo.lushCaveMarkerChunkChance", "0.08"));
     private static final double LUSH_CAVE_MARKER_NOISE_THRESHOLD = Double.parseDouble(System.getProperty("ukgeo.lushCavesNoiseThreshold", "0.68"));
     private static final boolean ENABLE_LUSH_CAVE_DECORATION = !Boolean.getBoolean("ukgeo.disableLushCaveDecoration");
+    private static final boolean ENABLE_SULFUR_CAVE_DECORATION = !Boolean.getBoolean("ukgeo.disableSulfurCaveDecoration");
     private static final int LUSH_CAVE_MAX_BLOCK_EDITS_PER_CHUNK = Integer.getInteger("ukgeo.lushCaveMaxBlockEditsPerChunk", 1600);
     private static final int LUSH_CAVE_MAX_AXOLOTLS_PER_CHUNK = Integer.getInteger("ukgeo.lushCaveMaxAxolotlsPerChunk", 2);
+    private static final ResourceKey<PlacedFeature> PALE_GARDEN_VEGETATION = ResourceKey.create(
+        Registries.PLACED_FEATURE, ResourceLocation.withDefaultNamespace("pale_garden_vegetation"));
+    private static final ResourceKey<PlacedFeature> TREES_DAPPLED_FOREST = ResourceKey.create(
+        Registries.PLACED_FEATURE, ResourceLocation.withDefaultNamespace("trees_dappled_forest"));
+    private static final ResourceKey<PlacedFeature> PALE_MOSS_PATCH = ResourceKey.create(
+        Registries.PLACED_FEATURE, ResourceLocation.withDefaultNamespace("pale_moss_patch"));
+    private static final ResourceKey<PlacedFeature> ROOTED_SULFUR_SPRING = ResourceKey.create(
+        Registries.PLACED_FEATURE, ResourceLocation.fromNamespaceAndPath("ukgeo", "rooted_sulfur_spring"));
+    private static final ResourceKey<PlacedFeature> SULFUR_SPIKE_CLUSTER = ResourceKey.create(
+        Registries.PLACED_FEATURE, ResourceLocation.withDefaultNamespace("sulfur_spike_cluster"));
+    private static final ResourceKey<PlacedFeature> SULFUR_SPIKE = ResourceKey.create(
+        Registries.PLACED_FEATURE, ResourceLocation.withDefaultNamespace("sulfur_spike"));
+    private static final ResourceKey<PlacedFeature> SULFUR_POOL = ResourceKey.create(
+        Registries.PLACED_FEATURE, ResourceLocation.withDefaultNamespace("sulfur_pool"));
+    /** Spring first (force place), then spikes/pool (biome-checked). */
+    private static final List<ResourceKey<PlacedFeature>> SULFUR_CAVE_FEATURES = List.of(
+        ROOTED_SULFUR_SPRING,
+        SULFUR_SPIKE_CLUSTER,
+        SULFUR_SPIKE,
+        SULFUR_POOL
+    );
     private static final boolean DEBUG_FLORA_TIMINGS = Boolean.getBoolean("ukgeo.debugFloraTimings");
     private static final boolean DEBUG_ORE_PLACEMENT = Boolean.getBoolean("ukgeo.debugOrePlacement");
     private static final boolean DEBUG_HEIGHT_BOUNDS = Boolean.getBoolean("ukgeo.debugHeightBounds");
@@ -346,7 +368,10 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         VegetationPlacements.TREES_WINDSWEPT_HILLS,
         VegetationPlacements.TREES_SWAMP,
         VegetationPlacements.TREES_SPARSE_JUNGLE,
-        VegetationPlacements.TREES_WINDSWEPT_SAVANNA
+        VegetationPlacements.TREES_WINDSWEPT_SAVANNA,
+        PALE_GARDEN_VEGETATION,
+        TREES_DAPPLED_FOREST,
+        PALE_MOSS_PATCH
     );
 
     public static final MapCodec<UkGeoChunkGenerator> CODEC = RecordCodecBuilder.mapCodec(instance -> instance.group(
@@ -3496,6 +3521,7 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         long treeStartNanos = System.nanoTime();
         placeSafeVanillaTrees(level, chunk);
         placeLushCaveFeatures(level, chunk);
+        placeSulfurCaveFeatures(level, chunk);
         placeAzaleaMarkersAboveLushCaves(chunk, plan);
         logTiming("placeSafeVanillaTreesAndAzaleaMarkers", chunk.getPos(), treeStartNanos);
 
@@ -3752,6 +3778,68 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         }
     }
 
+    private void placeSulfurCaveFeatures(WorldGenLevel level, ChunkAccess chunk) {
+        if (!ENABLE_SULFUR_CAVE_DECORATION || !chunkHasSulfurCaves(chunk)) {
+            return;
+        }
+        Registry<PlacedFeature> registry = level.registryAccess().registryOrThrow(Registries.PLACED_FEATURE);
+        ChunkPos chunkPos = chunk.getPos();
+        SectionPos sectionPos = SectionPos.of(chunkPos, level.getMinSection());
+        BlockPos origin = sectionPos.origin();
+        WorldgenRandom random = new WorldgenRandom(new XoroshiroRandomSource(RandomSupport.generateUniqueSeed()));
+        long decorationSeed = random.setDecorationSeed(level.getSeed(), origin.getX(), origin.getZ());
+        int featureIndex = 0;
+        for (ResourceKey<PlacedFeature> key : SULFUR_CAVE_FEATURES) {
+            PlacedFeature feature = registry.get(key);
+            if (feature == null) {
+                // VanillaBackport absent or feature not registered — skip silently.
+                featureIndex++;
+                continue;
+            }
+            Supplier<String> generating = () -> key.location().toString();
+            try {
+                level.setCurrentlyGenerating(generating);
+                random.setFeatureSeed(decorationSeed, featureIndex, GenerationStep.Decoration.UNDERGROUND_DECORATION.ordinal());
+                if (key == ROOTED_SULFUR_SPRING) {
+                    // Not listed in sulfur_caves biome JSON — force place without biome check.
+                    feature.place(level, this, random, origin);
+                } else {
+                    feature.placeWithBiomeCheck(level, this, random, origin);
+                }
+            } catch (Exception exception) {
+                UkGeoMod.LOGGER.warn(
+                    "UKGeo sulfur cave feature failed feature={} chunk={}: {}",
+                    key.location(),
+                    chunkPos,
+                    exception.toString());
+            } finally {
+                level.setCurrentlyGenerating(null);
+            }
+            featureIndex++;
+        }
+    }
+
+    private static boolean chunkHasSulfurCaves(ChunkAccess chunk) {
+        boolean[] found = {false};
+        for (var section : chunk.getSections()) {
+            if (found[0]) {
+                break;
+            }
+            section.getBiomes().getAll(biome -> {
+                if (found[0]) {
+                    return;
+                }
+                biome.unwrapKey().ifPresent(key -> {
+                    String path = key.location().getPath();
+                    if (path.equals("sulfur_caves") || path.contains("sulfur_caves")) {
+                        found[0] = true;
+                    }
+                });
+            });
+        }
+        return found[0];
+    }
+
 
     private void cleanupBuriedAncientCityAir(ChunkAccess chunk) {
         if (!ENABLE_ANCIENT_CITY_AIR_CLEANUP) {
@@ -3969,32 +4057,8 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
 
     private static void addVanillaTreeFeaturesForBiome(Set<ResourceKey<PlacedFeature>> features, Holder<Biome> biome) {
         biome.unwrapKey().ifPresent(key -> {
-            ResourceLocation id = key.location();
-            String path = id.getPath();
-            switch (path) {
-                case "plains", "arable", "improved_grassland", "urban" -> features.add(VegetationPlacements.TREES_PLAINS);
-                case "forest", "pale_garden" -> features.add(VegetationPlacements.TREES_BIRCH_AND_OAK);
-                case "broadleaf_woodland" -> {
-                    features.add(VegetationPlacements.TREES_BIRCH_AND_OAK);
-                    features.add(VegetationPlacements.TREES_SPARSE_JUNGLE);
-                }
-                case "dappled_forest" -> {
-                    features.add(VegetationPlacements.TREES_TAIGA);
-                    features.add(VegetationPlacements.TREES_BIRCH_AND_OAK);
-                }
-                case "taiga", "conifer_woodland" -> features.add(VegetationPlacements.TREES_TAIGA);
-                case "meadow", "neutral_grassland" -> features.add(VegetationPlacements.TREES_MEADOW);
-                case "flower_forest", "calcareous_grassland" -> features.add(VegetationPlacements.TREES_FLOWER_FOREST);
-                case "windswept_hills", "acid_grassland" -> features.add(VegetationPlacements.TREES_WINDSWEPT_HILLS);
-                case "swamp" -> features.add(VegetationPlacements.TREES_SWAMP);
-                case "wetland" -> {
-                    features.add(VegetationPlacements.TREES_SWAMP);
-                    features.add(VegetationPlacements.TREES_SPARSE_JUNGLE);
-                }
-                case "windswept_savanna", "heath" -> features.add(VegetationPlacements.TREES_WINDSWEPT_SAVANNA);
-                case "mountains" -> features.add(VegetationPlacements.TREES_WINDSWEPT_HILLS);
-                default -> {
-                }
+            for (String featurePath : SafeVegetalFeatureMapping.featurePathsForBiome(key.location().getPath())) {
+                features.add(ResourceKey.create(Registries.PLACED_FEATURE, ResourceLocation.withDefaultNamespace(featurePath)));
             }
         });
     }
