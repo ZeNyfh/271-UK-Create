@@ -2476,7 +2476,7 @@ final class ChunkTerrainPlanner {
             return exposedSurfaceRock;
         }
         if (steep && y >= surfaceY - 4) {
-            return exposedSurfaceRock.is(Blocks.GRASS_BLOCK) ? surfaceRock : exposedSurfaceRock;
+            return steepSubsurfaceState(y, surfaceY, exposedSurfaceRock);
         }
         if (y == surfaceY) {
             // Rare coherent mineral patches may break the grass cover; otherwise grass.
@@ -2493,6 +2493,23 @@ final class ChunkTerrainPlanner {
             return surfaceRock;
         }
         return y < 0 ? Blocks.DEEPSLATE.defaultBlockState() : Blocks.STONE.defaultBlockState();
+    }
+
+    /**
+     * Resolve the shallow subsurface transition on steep terrain.
+     *
+     * A grass result from exposedSurfaceRock means a restricted geological
+     * material was deliberately rejected at this position. Falling back to
+     * the original surfaceRock here bypasses that decision and exposes the
+     * restricted material in a four-block band below the surface.
+     */
+    static BlockState steepSubsurfaceState(int y, int surfaceY, BlockState exposedSurfaceRock) {
+        if (!exposedSurfaceRock.is(Blocks.GRASS_BLOCK)) {
+            return exposedSurfaceRock;
+        }
+        return y >= surfaceY - 3
+            ? Blocks.DIRT.defaultBlockState()
+            : (y < 0 ? Blocks.DEEPSLATE.defaultBlockState() : Blocks.STONE.defaultBlockState());
     }
 
     static BlockState exposedSurfaceRock(int worldX, int worldZ, BlockState surfaceRock) {
