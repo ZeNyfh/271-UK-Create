@@ -189,17 +189,29 @@ def flow_azimuth_u8(tx: float, tz: float) -> int:
     return int(math.floor(angle * 256.0 / (2.0 * math.pi))) & 255
 
 
-def ownership_hi_lo(dist_millicells: int, order: int, reach_id: int, station_id: int) -> tuple[np.uint64, np.uint64]:
-    """Lexicographic key (dist, inverted order, full reach id, station id).
+def ownership_hi_lo(
+    dist_millicells: int,
+    order: int,
+    reach_id: int,
+    station_id: int,
+    along_millicells: int = 0,
+) -> tuple[np.uint64, np.uint64]:
+    """Lexicographic key (cross-track, -order, reach, along-track, station).
 
-    Two uint64s so a uint32 reach id is not truncated into 16 bits. The
-    smaller pair wins. Pair minimum is associative, so stamp order does not
-    matter.
+    Cross-track ownership remains the primary geometric criterion. Within the
+    same reach, the closest longitudinal station wins instead of the earliest
+    station id owning every overlapping stamp. The low key packs a full uint32
+    reach id, uint16 along distance, and uint16 station id.
     """
     dist = min(0xFFFFFF, max(0, int(dist_millicells)))
     order_key = 255 - (int(order) & 255)
+    along = min(0xFFFF, max(0, int(along_millicells)))
     hi = (np.uint64(dist) << np.uint64(8)) | np.uint64(order_key)
-    lo = (np.uint64(int(reach_id) & 0xFFFFFFFF) << np.uint64(16)) | np.uint64(int(station_id) & 0xFFFF)
+    lo = (
+        (np.uint64(int(reach_id) & 0xFFFFFFFF) << np.uint64(32))
+        | (np.uint64(along) << np.uint64(16))
+        | np.uint64(int(station_id) & 0xFFFF)
+    )
     return hi, lo
 
 
@@ -736,9 +748,25 @@ def _stamp_stations(
     origin_z: int,
 ) -> None:
     depth, width = reach.shape
+    by_reach: dict[int, list[Station]] = defaultdict(list)
+    for station in stations:
+        if math.isfinite(station.water_metres):
+            by_reach[int(station.reach_id)].append(station)
+    neighbours: dict[tuple[int, int], tuple[Station | None, Station | None]] = {}
+    for reach_id, group in by_reach.items():
+        group.sort(key=lambda item: int(item.station_id))
+        for index, station in enumerate(group):
+            previous = group[index - 1] if index > 0 else None
+            following = group[index + 1] if index + 1 < len(group) else None
+            neighbours[(reach_id, int(station.station_id))] = (previous, following)
+
     for station in stations:
         if not math.isfinite(station.water_metres):
             continue
+        previous, following = neighbours.get((int(station.reach_id), int(station.station_id)), (None, None))
+        tx, tz = _unit_tangent(station.tx, station.tz)
+        previous_spacing = 0.0 if previous is None else -((previous.x - station.x) * tx + (previous.z - station.z) * tz)
+        next_spacing = 0.0 if following is None else ((following.x - station.x) * tx + (following.z - station.z) * tz)
         _stamp_one(
             station.x,
             station.z,
@@ -760,6 +788,10 @@ def _stamp_stations(
             origin_z=origin_z,
             width=width,
             depth=depth,
+            previous_water_y=None if previous is None else int(previous.water_y),
+            previous_spacing=previous_spacing,
+            next_water_y=None if following is None else int(following.water_y),
+            next_spacing=next_spacing,
         )
 
 
@@ -792,6 +824,10 @@ def _stamp_one(
     origin_z: int,
     width: int,
     depth: int,
+    previous_water_y: int | None = None,
+    previous_spacing: float = 0.0,
+    next_water_y: int | None = None,
+    next_spacing: float = 0.0,
 ) -> None:
     tx, tz = _unit_tangent(tx, tz)
     cross_lim = float(max(0, half_width) + BANK_CARVE_REACH) + CROSS_PAD
@@ -824,8 +860,15 @@ def _stamp_one(
     # hi holds distance above inverted order. lo holds the full uint32 reach
     # id above the uint16 station id. Compare hi, then lo. Both sentinels are
     # the uint64 maximum, so any real pair is smaller and the min is associative.
-    order_hi, keys_lo = ownership_hi_lo(0, order, reach_id, station_id)
+    along_milli = np.floor(abs_along * 1000.0 + 0.5).astype(np.int64)
+    np.clip(along_milli, 0, 0xFFFF, out=along_milli)
+    order_hi, _ = ownership_hi_lo(0, order, reach_id, station_id)
     keys_hi = (dist_milli.astype(np.uint64) << np.uint64(8)) | order_hi
+    keys_lo = (
+        (np.uint64(int(reach_id) & 0xFFFFFFFF) << np.uint64(32))
+        | (along_milli.astype(np.uint64) << np.uint64(16))
+        | np.uint64(int(station_id) & 0xFFFF)
+    )
     lz0 = z0 - origin_z
     lx0 = x0 - origin_x
     hh = z1 - z0
@@ -843,7 +886,19 @@ def _stamp_one(
     azimuth_view = azimuth[lz0 : lz0 + hh, lx0 : lx0 + ww]
     reach_view[better] = np.uint32(int(reach_id) & 0xFFFFFFFF)
     station_view[better] = np.uint16(int(station_id) & 0xFFFF)
-    water_view[better] = np.int16(water_y)
+    # Interpolate station water levels along the reach. Without this,
+    # each overlapping stamp paints a constant-height slab and ownership seams
+    # create a repeating sequence of shallow pools/steps downstream.
+    interpolated_water = np.full(along.shape, float(water_y), dtype=np.float64)
+    if next_water_y is not None and next_spacing > 1e-6:
+        mask = along > 0.0
+        t = np.clip(along[mask] / next_spacing, 0.0, 1.0)
+        interpolated_water[mask] = float(water_y) + (float(next_water_y) - float(water_y)) * t
+    if previous_water_y is not None and previous_spacing > 1e-6:
+        mask = along < 0.0
+        t = np.clip(-along[mask] / previous_spacing, 0.0, 1.0)
+        interpolated_water[mask] = float(water_y) + (float(previous_water_y) - float(water_y)) * t
+    water_view[better] = np.rint(interpolated_water[better]).astype(np.int16)
     azimuth_view[better] = np.uint8(azimuth_value)
 
 
