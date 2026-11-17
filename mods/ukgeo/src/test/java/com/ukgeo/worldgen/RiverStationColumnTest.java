@@ -74,25 +74,39 @@ class RiverStationColumnTest {
         assertEquals(-40, shape.waterY());
         assertTrue(shape.terrainY() < shape.waterY());
         RiverStationColumn.Shape almost = RiverStationColumn.resolve(true, 2, -32767, true, 0, 3, 0, 2, -64);
-        assertEquals(-32767, almost.waterY());
+        assertFalse(almost.hasWater(), "no room for water below the build floor");
     }
 
 
     @Test
-    void mountainChannelIncisionIsCapped() {
-        // DEM 160, baked water 100 → shallow notch (≤3 total incl. bed), not a gorge.
+    void mountainCorridorBelowIncisionBudgetStaysDryWithoutRaisingWater() {
         RiverStationColumn.Shape shape = RiverStationColumn.resolve(true, 3, 100, true, 0, 3, 160, 3, -64);
-        assertTrue(shape.hasWater());
-        assertTrue(shape.terrainY() < shape.waterY(), "bed=" + shape.terrainY());
-        int totalIncision = 160 - shape.terrainY();
-        assertTrue(totalIncision <= RiverBankFit.MOUNTAIN_TOTAL_INCISION,
-            "total DEM→bed incision=" + totalIncision);
-        assertTrue(totalIncision >= 1);
-        assertTrue(shape.waterY() - shape.terrainY() >= 1);
+        assertFalse(shape.hasWater());
+        assertFalse(shape.influenced());
+        assertEquals(160, shape.terrainY());
         // Established lowland valley stays on absolute baked water Y.
         RiverStationColumn.Shape valley = RiverStationColumn.resolve(true, 3, 100, true, 0, 3, 120, 3, -64);
         assertEquals(100, valley.waterY());
         assertEquals(97, valley.terrainY());
+    }
+
+    @Test
+    void shallowMountainChannelLosesDepthBeforeChangingWater() {
+        RiverStationColumn.Shape shape = RiverStationColumn.resolve(true, 3, 159, true, 0, 3, 160, 4, -64);
+        assertTrue(shape.hasWater());
+        assertEquals(159, shape.waterY());
+        assertEquals(157, shape.terrainY());
+        assertEquals(2, shape.waterY() - shape.terrainY());
+    }
+
+    @Test
+    void cascadeKeepsBakedDropsWhereTerrainAllowsWater() {
+        for (int water : new int[] {150, 150, 144, 143, 143}) {
+            RiverStationColumn.Shape shape = RiverStationColumn.resolve(true, 3, water, true, 0, 3, water + 1, 2, -64);
+            assertTrue(shape.hasWater());
+            assertEquals(water, shape.waterY());
+            assertEquals(water - 2, shape.terrainY());
+        }
     }
 
     @Test
@@ -163,20 +177,17 @@ class RiverStationColumnTest {
     }
 
     @Test
-    void diagonalMountainChannelRespectsIncisionBudget() {
-        int dem = 150;
-        int baked = 100;
-        int prevBed = Integer.MIN_VALUE;
-        for (int i = 0; i < 12; i++) {
-            double blocks = Math.abs(i * 0.7 - 4.0);
-            RiverStationColumn.Shape shape = RiverStationColumn.resolve(true, 9, baked, true, blocks, 3, dem, 2, -64);
-            if (shape.hasWater()) {
-                int incision = dem - shape.terrainY();
-                assertTrue(incision <= RiverBankFit.MOUNTAIN_TOTAL_INCISION, "incision=" + incision);
-                if (prevBed != Integer.MIN_VALUE) {
-                    assertTrue(Math.abs(shape.terrainY() - prevBed) <= 2);
+    void diagonalMountainChannelKeepsBakedWaterAcrossSlopingTerrain() {
+        for (int dem = 146; dem <= 160; dem++) {
+            for (int depth = 1; depth <= 5; depth++) {
+                RiverStationColumn.Shape shape = RiverStationColumn.resolve(true, 9, 150, true, 1.5, 3, dem, depth, -64);
+                if (shape.hasWater()) {
+                    assertEquals(150, shape.waterY());
+                    assertTrue(dem - shape.terrainY() <= RiverBankFit.MOUNTAIN_TOTAL_INCISION);
+                    assertTrue(shape.terrainY() < shape.waterY());
+                } else {
+                    assertEquals(dem, shape.terrainY());
                 }
-                prevBed = shape.terrainY();
             }
         }
     }

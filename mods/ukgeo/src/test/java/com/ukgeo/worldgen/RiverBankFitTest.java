@@ -7,6 +7,20 @@ import org.junit.jupiter.api.Test;
 
 class RiverBankFitTest {
     @Test
+    void smoothingPreservesRiverValleysAndFadesIntoHillsides() {
+        double raw = 611.8;
+        double average = 635.364;
+        assertEquals(raw, RiverBankFit.preserveValleyMetres(raw, average, 0, 2));
+        assertEquals(raw, RiverBankFit.preserveValleyMetres(raw, average, 2.5, 2));
+        assertEquals((raw + average) / 2,
+            RiverBankFit.preserveValleyMetres(raw, average, 6.5, 2), 1e-10);
+        assertEquals(average, RiverBankFit.preserveValleyMetres(raw, average, 10.5, 2));
+        assertEquals(average, RiverBankFit.preserveValleyMetres(raw, average, 100, 2));
+        // Smoothing that lowers a ridge still applies; this guard only prevents valley fill.
+        assertEquals(600, RiverBankFit.preserveValleyMetres(raw, 600, 0, 2));
+    }
+
+    @Test
     void flushWaterStaysAtBank() {
         assertEquals(100, RiverBankFit.resolveWaterSurface(100, 100));
     }
@@ -83,32 +97,14 @@ class RiverBankFitTest {
     }
 
     @Test
-    void cappedPlaneLiftsHighlandMountainStampOnly() {
-        // Lowland / modest DEM: keep absolute baked water even when deep.
-        assertEquals(100, RiverBankFit.cappedPlane(105, 100, 3));
-        assertEquals(100, RiverBankFit.cappedPlane(120, 100, 3));
-        assertEquals(-40, RiverBankFit.cappedPlane(10, -40, 3));
-        // Highland with deep stamp: lift so DEM→bed ≤ MOUNTAIN_TOTAL_INCISION.
-        int plane = RiverBankFit.cappedPlane(160, 100, 3);
-        assertEquals(160, plane);
-        int bed = RiverBankFit.bedForWater(plane, 3, -64);
-        assertTrue(160 - bed <= RiverBankFit.MOUNTAIN_TOTAL_INCISION);
-        assertTrue(160 - bed >= 1);
-        // Depth is included in the total cap (depth 2 still ≤ 3 total).
-        int plane2 = RiverBankFit.cappedPlane(160, 100, 2);
-        int bed2 = RiverBankFit.bedForWater(plane2, 2, -64);
-        assertTrue(160 - bed2 <= RiverBankFit.MOUNTAIN_TOTAL_INCISION);
-    }
-
-    @Test
-    void mountainTotalIncisionIncludesBedDepth() {
-        for (int depth = 1; depth <= 4; depth++) {
-            int plane = RiverBankFit.cappedPlane(180, 90, depth);
-            int bed = RiverBankFit.bedForWater(plane, depth, -64);
-            assertTrue(180 - bed <= RiverBankFit.MOUNTAIN_TOTAL_INCISION,
-                "depth=" + depth + " incision=" + (180 - bed));
-            assertTrue(plane - bed >= 1);
-        }
+    void bedCapPreservesLowlandValleysAndLimitsHighlandIncision() {
+        assertEquals(97, RiverBankFit.capBedIncision(120, 97));
+        assertEquals(-43, RiverBankFit.capBedIncision(10, -43));
+        assertEquals(157, RiverBankFit.capBedIncision(160, 97));
+        assertEquals(157, RiverBankFit.capBedIncision(160, 158 - 4));
+        assertEquals(159, RiverBankFit.capBedIncision(160, 159));
+        assertEquals(125, RiverBankFit.capBedIncision(128, 120));
+        assertEquals(120, RiverBankFit.capBedIncision(127, 120));
     }
 
     @Test
