@@ -1,0 +1,1682 @@
+FFF..F....F..FF..FF..FF                                                  [100%]
+=================================== FAILURES ===================================
+_________________ test_reverse_reach_order_identical_ownership _________________
+
+    def test_reverse_reach_order_identical_ownership():
+        # Closer station beats a higher-order neighbour.
+>       nearer = _assert_order_independent(
+            [
+                _station(reach_id=5, order=1, water_y=70, azimuth=3),
+                _station(reach_id=1, order=9, z=9.2, water_y=99, azimuth=9),
+            ]
+        )
+
+tests/test_river_stations.py:84: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_river_stations.py:73: in _assert_order_independent
+    forward = rasterize_stations(stations, depth, width)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/ukgeo/river_stations.py:703: in rasterize_stations
+    _stamp_stations(stations, reach, station_id, water, azimuth, best_hi, best_lo, origin_x=0, origin_z=0)
+src/ukgeo/river_stations.py:771: in _stamp_stations
+    _stamp_one(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+sx = 8.5, sz = 8.5, tx = 1.0, tz = 0.0, half_width = 2, order = 1, reach_id = 5
+station_id = 0, water_y = 70, azimuth_value = 3
+reach = array([[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+       [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    ..., 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+       [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]], dtype=uint32)
+station_out = array([[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+       [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    ..., 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+       [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]], dtype=uint16)
+water = array([[-32768, -32768, -32768, -32768, -32768, -32768, -32768, -32768,
+        -32768, -32768, -32768, -32768, -32768...8, -32768, -32768, -32768,
+        -32768, -32768, -32768, -32768, -32768, -32768, -32768, -32768]],
+      dtype=int16)
+azimuth = array([[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+       [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    ...0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+       [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]], dtype=uint8)
+best_hi = array([[18446744073709551615, 18446744073709551615, 18446744073709551615,
+        18446744073709551615, 18446744073709...        18446744073709551615, 18446744073709551615, 18446744073709551615,
+        18446744073709551615]], dtype=uint64)
+best_lo = array([[18446744073709551615, 18446744073709551615, 18446744073709551615,
+        18446744073709551615, 18446744073709...        18446744073709551615, 18446744073709551615, 18446744073709551615,
+        18446744073709551615]], dtype=uint64)
+origin_x = 0, origin_z = 0, width = 16, depth = 16, previous_water_y = None
+previous_spacing = 0.0, next_water_y = None, next_spacing = 0.0
+
+    def _stamp_one(
+        sx: float,
+        sz: float,
+        tx: float,
+        tz: float,
+        half_width: int,
+        order: int,
+        reach_id: int,
+        station_id: int,
+        water_y: int,
+        azimuth_value: int,
+        reach: np.ndarray,
+        station_out: np.ndarray,
+        water: np.ndarray,
+        azimuth: np.ndarray,
+        best_hi: np.ndarray,
+        best_lo: np.ndarray,
+        *,
+        origin_x: int,
+        origin_z: int,
+        width: int,
+        depth: int,
+        previous_water_y: int | None = None,
+        previous_spacing: float = 0.0,
+        next_water_y: int | None = None,
+        next_spacing: float = 0.0,
+    ) -> None:
+        tx, tz = _unit_tangent(tx, tz)
+        cross_lim = float(max(0, half_width) + BANK_CARVE_REACH) + CROSS_PAD
+        x0 = max(origin_x, int(math.floor(sx - cross_lim - 1.0)))
+        x1 = min(origin_x + width, int(math.ceil(sx + cross_lim + 1.0)))
+        z0 = max(origin_z, int(math.floor(sz - cross_lim - 1.0)))
+        z1 = min(origin_z + depth, int(math.ceil(sz + cross_lim + 1.0)))
+        if x0 >= x1 or z0 >= z1:
+            return
+        xs = np.arange(x0, x1, dtype=np.float64) + 0.5
+        zs = np.arange(z0, z1, dtype=np.float64) + 0.5
+        dx = xs[None, :] - sx
+        dz = zs[:, None] - sz
+        along = dx * tx + dz * tz
+        perp = dx * (-tz) + dz * tx
+        # Rounded-rectangle eligibility: hard rect corners become quarter-circles so
+        # neighbouring stamps with different tangents do not leave triangular spikes.
+        abs_along = np.abs(along)
+        abs_perp = np.abs(perp)
+        corner = (np.maximum(0.0, abs_along - ALONG_LIMIT) ** 2) + (
+            np.maximum(0.0, abs_perp - (cross_lim - CROSS_PAD)) ** 2
+        )
+        inside = (abs_along <= ALONG_LIMIT + CROSS_PAD + 1e-6) & (abs_perp <= cross_lim + 1e-6) & (
+            corner <= (CROSS_PAD + 1e-6) ** 2
+        )
+        if not bool(inside.any()):
+            return
+        dist_milli = np.floor(np.abs(perp) * 1000.0 + 0.5).astype(np.int64)
+        np.clip(dist_milli, 0, 0xFFFFFF, out=dist_milli)
+        # hi holds distance above inverted order. lo holds the full uint32 reach
+        # id above the uint16 station id. Compare hi, then lo. Both sentinels are
+        # the uint64 maximum, so any real pair is smaller and the min is associative.
+        along_milli = np.floor(abs_along * 1000.0 + 0.5).astype(np.int64)
+        np.clip(along_milli, 0, 0xFFFF, out=along_milli)
+        order_hi, _ = ownership_hi_lo(0, order, reach_id, station_id)
+        keys_hi = (dist_milli.astype(np.uint64) << np.uint64(8)) | order_hi
+        keys_lo = (
+            (np.uint64(int(reach_id) & 0xFFFFFFFF) << np.uint64(32))
+            | (along_milli.astype(np.uint64) << np.uint64(16))
+            | np.uint64(int(station_id) & 0xFFFF)
+        )
+        lz0 = z0 - origin_z
+        lx0 = x0 - origin_x
+        hh = z1 - z0
+        ww = x1 - x0
+        best_hi_view = best_hi[lz0 : lz0 + hh, lx0 : lx0 + ww]
+        best_lo_view = best_lo[lz0 : lz0 + hh, lx0 : lx0 + ww]
+        better = inside & ((keys_hi < best_hi_view) | ((keys_hi == best_hi_view) & (keys_lo < best_lo_view)))
+        if not bool(better.any()):
+            return
+        best_hi_view[better] = keys_hi[better]
+>       best_lo_view[better] = keys_lo
+        ^^^^^^^^^^^^^^^^^^^^
+E       TypeError: NumPy boolean array indexing assignment requires a 0 or 1-dimensional input, input has 2 dimensions
+
+src/ukgeo/river_stations.py:883: TypeError
+________________ test_lower_bank_wins_and_profile_keeps_cascade ________________
+
+    def test_lower_bank_wins_and_profile_keeps_cascade():
+        raw = np.array([50, 50, 55, 50, 50, 46, 45], dtype=np.float64)
+        profile = smooth_longitudinal_profile(raw)
+        assert np.all(profile <= raw + 1e-9)
+        assert np.all(np.diff(profile) <= 1e-9)
+        assert profile[2] <= 50 + 1e-9
+        assert profile[4] == pytest.approx(50)
+        assert profile[4] - profile[5] >= 2.5 - 1e-9
+    
+        depth, width = 40, 40
+        height = np.full((depth, width), HEIGHT_NODATA, dtype=np.int16)
+        height[19:23, :] = 800  # left bank, 80 m
+        height[10:14, :] = 500  # right bank, 50 m
+        height[10:14, 8:16] = 550  # downstream rise that water must not follow
+        height[10:14, 24:] = 460  # 4 m cascade
+        height[15:18, :] = 100  # channel; masked so it cannot win
+        mask = np.zeros((depth, width), dtype=np.uint8)
+        mask[15:18, :] = 255
+>       baked = bake_cell_reaches([CellReach(((2.0, 16.5), (36.0, 16.5)), order=4, half_width=1)], height, mask)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_river_stations.py:198: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/ukgeo/river_stations.py:735: in bake_cell_reaches
+    grid = rasterize_stations(stations, depth, width)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/ukgeo/river_stations.py:703: in rasterize_stations
+    _stamp_stations(stations, reach, station_id, water, azimuth, best_hi, best_lo, origin_x=0, origin_z=0)
+src/ukgeo/river_stations.py:771: in _stamp_stations
+    _stamp_one(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+sx = 2.5, sz = 16.5, tx = 1.0, tz = 0.0, half_width = 1, order = 4, reach_id = 1
+station_id = 0, water_y = 79, azimuth_value = 0
+reach = array([[0, 0, 0, ..., 0, 0, 0],
+       [0, 0, 0, ..., 0, 0, 0],
+       [0, 0, 0, ..., 0, 0, 0],
+       ...,
+       [0, 0, 0, ..., 0, 0, 0],
+       [0, 0, 0, ..., 0, 0, 0],
+       [0, 0, 0, ..., 0, 0, 0]], shape=(40, 40), dtype=uint32)
+station_out = array([[0, 0, 0, ..., 0, 0, 0],
+       [0, 0, 0, ..., 0, 0, 0],
+       [0, 0, 0, ..., 0, 0, 0],
+       ...,
+       [0, 0, 0, ..., 0, 0, 0],
+       [0, 0, 0, ..., 0, 0, 0],
+       [0, 0, 0, ..., 0, 0, 0]], shape=(40, 40), dtype=uint16)
+water = array([[-32768, -32768, -32768, ..., -32768, -32768, -32768],
+       [-32768, -32768, -32768, ..., -32768, -32768, -32...768, -32768, -32768],
+       [-32768, -32768, -32768, ..., -32768, -32768, -32768]],
+      shape=(40, 40), dtype=int16)
+azimuth = array([[0, 0, 0, ..., 0, 0, 0],
+       [0, 0, 0, ..., 0, 0, 0],
+       [0, 0, 0, ..., 0, 0, 0],
+       ...,
+       [0, 0, 0, ..., 0, 0, 0],
+       [0, 0, 0, ..., 0, 0, 0],
+       [0, 0, 0, ..., 0, 0, 0]], shape=(40, 40), dtype=uint8)
+best_hi = array([[18446744073709551615, 18446744073709551615, 18446744073709551615,
+        ..., 18446744073709551615, 184467440...
+        ..., 18446744073709551615, 18446744073709551615,
+        18446744073709551615]], shape=(40, 40), dtype=uint64)
+best_lo = array([[18446744073709551615, 18446744073709551615, 18446744073709551615,
+        ..., 18446744073709551615, 184467440...
+        ..., 18446744073709551615, 18446744073709551615,
+        18446744073709551615]], shape=(40, 40), dtype=uint64)
+origin_x = 0, origin_z = 0, width = 40, depth = 40, previous_water_y = None
+previous_spacing = 0.0, next_water_y = 79, next_spacing = 1.0
+
+    def _stamp_one(
+        sx: float,
+        sz: float,
+        tx: float,
+        tz: float,
+        half_width: int,
+        order: int,
+        reach_id: int,
+        station_id: int,
+        water_y: int,
+        azimuth_value: int,
+        reach: np.ndarray,
+        station_out: np.ndarray,
+        water: np.ndarray,
+        azimuth: np.ndarray,
+        best_hi: np.ndarray,
+        best_lo: np.ndarray,
+        *,
+        origin_x: int,
+        origin_z: int,
+        width: int,
+        depth: int,
+        previous_water_y: int | None = None,
+        previous_spacing: float = 0.0,
+        next_water_y: int | None = None,
+        next_spacing: float = 0.0,
+    ) -> None:
+        tx, tz = _unit_tangent(tx, tz)
+        cross_lim = float(max(0, half_width) + BANK_CARVE_REACH) + CROSS_PAD
+        x0 = max(origin_x, int(math.floor(sx - cross_lim - 1.0)))
+        x1 = min(origin_x + width, int(math.ceil(sx + cross_lim + 1.0)))
+        z0 = max(origin_z, int(math.floor(sz - cross_lim - 1.0)))
+        z1 = min(origin_z + depth, int(math.ceil(sz + cross_lim + 1.0)))
+        if x0 >= x1 or z0 >= z1:
+            return
+        xs = np.arange(x0, x1, dtype=np.float64) + 0.5
+        zs = np.arange(z0, z1, dtype=np.float64) + 0.5
+        dx = xs[None, :] - sx
+        dz = zs[:, None] - sz
+        along = dx * tx + dz * tz
+        perp = dx * (-tz) + dz * tx
+        # Rounded-rectangle eligibility: hard rect corners become quarter-circles so
+        # neighbouring stamps with different tangents do not leave triangular spikes.
+        abs_along = np.abs(along)
+        abs_perp = np.abs(perp)
+        corner = (np.maximum(0.0, abs_along - ALONG_LIMIT) ** 2) + (
+            np.maximum(0.0, abs_perp - (cross_lim - CROSS_PAD)) ** 2
+        )
+        inside = (abs_along <= ALONG_LIMIT + CROSS_PAD + 1e-6) & (abs_perp <= cross_lim + 1e-6) & (
+            corner <= (CROSS_PAD + 1e-6) ** 2
+        )
+        if not bool(inside.any()):
+            return
+        dist_milli = np.floor(np.abs(perp) * 1000.0 + 0.5).astype(np.int64)
+        np.clip(dist_milli, 0, 0xFFFFFF, out=dist_milli)
+        # hi holds distance above inverted order. lo holds the full uint32 reach
+        # id above the uint16 station id. Compare hi, then lo. Both sentinels are
+        # the uint64 maximum, so any real pair is smaller and the min is associative.
+        along_milli = np.floor(abs_along * 1000.0 + 0.5).astype(np.int64)
+        np.clip(along_milli, 0, 0xFFFF, out=along_milli)
+        order_hi, _ = ownership_hi_lo(0, order, reach_id, station_id)
+        keys_hi = (dist_milli.astype(np.uint64) << np.uint64(8)) | order_hi
+        keys_lo = (
+            (np.uint64(int(reach_id) & 0xFFFFFFFF) << np.uint64(32))
+            | (along_milli.astype(np.uint64) << np.uint64(16))
+            | np.uint64(int(station_id) & 0xFFFF)
+        )
+        lz0 = z0 - origin_z
+        lx0 = x0 - origin_x
+        hh = z1 - z0
+        ww = x1 - x0
+        best_hi_view = best_hi[lz0 : lz0 + hh, lx0 : lx0 + ww]
+        best_lo_view = best_lo[lz0 : lz0 + hh, lx0 : lx0 + ww]
+        better = inside & ((keys_hi < best_hi_view) | ((keys_hi == best_hi_view) & (keys_lo < best_lo_view)))
+        if not bool(better.any()):
+            return
+        best_hi_view[better] = keys_hi[better]
+>       best_lo_view[better] = keys_lo
+        ^^^^^^^^^^^^^^^^^^^^
+E       TypeError: NumPy boolean array indexing assignment requires a 0 or 1-dimensional input, input has 2 dimensions
+
+src/ukgeo/river_stations.py:883: TypeError
+____________________ test_same_station_water_y_across_width ____________________
+
+    def test_same_station_water_y_across_width():
+        depth, width = 40, 40
+        height = np.full((depth, width), HEIGHT_NODATA, dtype=np.int16)
+        height[:, 10:14] = 800  # left bank
+        height[:, 19:23] = 500  # right bank, 50 m
+        height[20:, 19:23] = 300  # downstream cascade to 30 m
+        height[:, 15:18] = 100
+        mask = np.zeros((depth, width), dtype=np.uint8)
+        mask[:, 15:18] = 255
+>       baked = bake_cell_reaches([CellReach(((16.5, 2.0), (16.5, 34.0)), order=5, half_width=1)], height, mask)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_river_stations.py:232: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/ukgeo/river_stations.py:735: in bake_cell_reaches
+    grid = rasterize_stations(stations, depth, width)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/ukgeo/river_stations.py:703: in rasterize_stations
+    _stamp_stations(stations, reach, station_id, water, azimuth, best_hi, best_lo, origin_x=0, origin_z=0)
+src/ukgeo/river_stations.py:771: in _stamp_stations
+    _stamp_one(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+sx = 16.5, sz = 2.5, tx = 0.0, tz = 1.0, half_width = 1, order = 5, reach_id = 1
+station_id = 0, water_y = 79, azimuth_value = 64
+reach = array([[0, 0, 0, ..., 0, 0, 0],
+       [0, 0, 0, ..., 0, 0, 0],
+       [0, 0, 0, ..., 0, 0, 0],
+       ...,
+       [0, 0, 0, ..., 0, 0, 0],
+       [0, 0, 0, ..., 0, 0, 0],
+       [0, 0, 0, ..., 0, 0, 0]], shape=(40, 40), dtype=uint32)
+station_out = array([[0, 0, 0, ..., 0, 0, 0],
+       [0, 0, 0, ..., 0, 0, 0],
+       [0, 0, 0, ..., 0, 0, 0],
+       ...,
+       [0, 0, 0, ..., 0, 0, 0],
+       [0, 0, 0, ..., 0, 0, 0],
+       [0, 0, 0, ..., 0, 0, 0]], shape=(40, 40), dtype=uint16)
+water = array([[-32768, -32768, -32768, ..., -32768, -32768, -32768],
+       [-32768, -32768, -32768, ..., -32768, -32768, -32...768, -32768, -32768],
+       [-32768, -32768, -32768, ..., -32768, -32768, -32768]],
+      shape=(40, 40), dtype=int16)
+azimuth = array([[0, 0, 0, ..., 0, 0, 0],
+       [0, 0, 0, ..., 0, 0, 0],
+       [0, 0, 0, ..., 0, 0, 0],
+       ...,
+       [0, 0, 0, ..., 0, 0, 0],
+       [0, 0, 0, ..., 0, 0, 0],
+       [0, 0, 0, ..., 0, 0, 0]], shape=(40, 40), dtype=uint8)
+best_hi = array([[18446744073709551615, 18446744073709551615, 18446744073709551615,
+        ..., 18446744073709551615, 184467440...
+        ..., 18446744073709551615, 18446744073709551615,
+        18446744073709551615]], shape=(40, 40), dtype=uint64)
+best_lo = array([[18446744073709551615, 18446744073709551615, 18446744073709551615,
+        ..., 18446744073709551615, 184467440...
+        ..., 18446744073709551615, 18446744073709551615,
+        18446744073709551615]], shape=(40, 40), dtype=uint64)
+origin_x = 0, origin_z = 0, width = 40, depth = 40, previous_water_y = None
+previous_spacing = 0.0, next_water_y = 79, next_spacing = 1.0
+
+    def _stamp_one(
+        sx: float,
+        sz: float,
+        tx: float,
+        tz: float,
+        half_width: int,
+        order: int,
+        reach_id: int,
+        station_id: int,
+        water_y: int,
+        azimuth_value: int,
+        reach: np.ndarray,
+        station_out: np.ndarray,
+        water: np.ndarray,
+        azimuth: np.ndarray,
+        best_hi: np.ndarray,
+        best_lo: np.ndarray,
+        *,
+        origin_x: int,
+        origin_z: int,
+        width: int,
+        depth: int,
+        previous_water_y: int | None = None,
+        previous_spacing: float = 0.0,
+        next_water_y: int | None = None,
+        next_spacing: float = 0.0,
+    ) -> None:
+        tx, tz = _unit_tangent(tx, tz)
+        cross_lim = float(max(0, half_width) + BANK_CARVE_REACH) + CROSS_PAD
+        x0 = max(origin_x, int(math.floor(sx - cross_lim - 1.0)))
+        x1 = min(origin_x + width, int(math.ceil(sx + cross_lim + 1.0)))
+        z0 = max(origin_z, int(math.floor(sz - cross_lim - 1.0)))
+        z1 = min(origin_z + depth, int(math.ceil(sz + cross_lim + 1.0)))
+        if x0 >= x1 or z0 >= z1:
+            return
+        xs = np.arange(x0, x1, dtype=np.float64) + 0.5
+        zs = np.arange(z0, z1, dtype=np.float64) + 0.5
+        dx = xs[None, :] - sx
+        dz = zs[:, None] - sz
+        along = dx * tx + dz * tz
+        perp = dx * (-tz) + dz * tx
+        # Rounded-rectangle eligibility: hard rect corners become quarter-circles so
+        # neighbouring stamps with different tangents do not leave triangular spikes.
+        abs_along = np.abs(along)
+        abs_perp = np.abs(perp)
+        corner = (np.maximum(0.0, abs_along - ALONG_LIMIT) ** 2) + (
+            np.maximum(0.0, abs_perp - (cross_lim - CROSS_PAD)) ** 2
+        )
+        inside = (abs_along <= ALONG_LIMIT + CROSS_PAD + 1e-6) & (abs_perp <= cross_lim + 1e-6) & (
+            corner <= (CROSS_PAD + 1e-6) ** 2
+        )
+        if not bool(inside.any()):
+            return
+        dist_milli = np.floor(np.abs(perp) * 1000.0 + 0.5).astype(np.int64)
+        np.clip(dist_milli, 0, 0xFFFFFF, out=dist_milli)
+        # hi holds distance above inverted order. lo holds the full uint32 reach
+        # id above the uint16 station id. Compare hi, then lo. Both sentinels are
+        # the uint64 maximum, so any real pair is smaller and the min is associative.
+        along_milli = np.floor(abs_along * 1000.0 + 0.5).astype(np.int64)
+        np.clip(along_milli, 0, 0xFFFF, out=along_milli)
+        order_hi, _ = ownership_hi_lo(0, order, reach_id, station_id)
+        keys_hi = (dist_milli.astype(np.uint64) << np.uint64(8)) | order_hi
+        keys_lo = (
+            (np.uint64(int(reach_id) & 0xFFFFFFFF) << np.uint64(32))
+            | (along_milli.astype(np.uint64) << np.uint64(16))
+            | np.uint64(int(station_id) & 0xFFFF)
+        )
+        lz0 = z0 - origin_z
+        lx0 = x0 - origin_x
+        hh = z1 - z0
+        ww = x1 - x0
+        best_hi_view = best_hi[lz0 : lz0 + hh, lx0 : lx0 + ww]
+        best_lo_view = best_lo[lz0 : lz0 + hh, lx0 : lx0 + ww]
+        better = inside & ((keys_hi < best_hi_view) | ((keys_hi == best_hi_view) & (keys_lo < best_lo_view)))
+        if not bool(better.any()):
+            return
+        best_hi_view[better] = keys_hi[better]
+>       best_lo_view[better] = keys_lo
+        ^^^^^^^^^^^^^^^^^^^^
+E       TypeError: NumPy boolean array indexing assignment requires a 0 or 1-dimensional input, input has 2 dimensions
+
+src/ukgeo/river_stations.py:883: TypeError
+_______________ test_bake_river_stations_writes_schema_and_tiles _______________
+
+tmp_path = PosixPath('/tmp/pytest-of-zenyfh/pytest-1/test_bake_river_stations_write0')
+
+    def test_bake_river_stations_writes_schema_and_tiles(tmp_path: Path):
+        tile_size = 32
+        height = np.full((tile_size, tile_size), 400, dtype=np.int16)
+        write_r16_tile(tmp_path / "height" / f"000_000{r16_extension()}", height, tile_size)
+        manifest = {
+            "format": "uk-raster-tiles-v1",
+            "tile_size": tile_size,
+            "world": {
+                "width": tile_size,
+                "depth": tile_size,
+                "padded_width": tile_size,
+                "padded_depth": tile_size,
+                "minecraft_min_x": 0,
+                "minecraft_min_z": 0,
+            },
+            "georeferencing": {
+                "bng_min_easting": 0.0,
+                "bng_min_northing": 0.0,
+                "bng_max_easting": float(tile_size),
+                "bng_max_northing": float(tile_size),
+            },
+            "height": {
+                "path": "height",
+                "extension": r16_extension(),
+                "dtype": "int16_le",
+                "nodata": HEIGHT_NODATA,
+                "sea_level_y": 64,
+            },
+            "rivers": {"path": "water/rivers", "dtype": "uint8"},
+        }
+        manifest_path = tmp_path / "manifest.json"
+        write_manifest(manifest_path, manifest)
+        edge = _Edge([(4.0, 15.5), (28.0, 15.5)], order=3, half_width=1)
+>       bake_river_stations(
+            tmp_path,
+            manifest_path=manifest_path,
+            edges=[edge],
+            river_mask=np.zeros((tile_size, tile_size), dtype=np.uint8),
+        )
+
+tests/test_river_stations.py:331: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/ukgeo/river_stations.py:1429: in bake_river_stations
+    _bake_stations(
+src/ukgeo/river_stations.py:1405: in _bake_stations
+    _write_station_tiles(
+src/ukgeo/river_stations.py:1570: in _write_station_tiles
+    for _ in pool.imap(
+src/ukgeo/river_stations.py:1286: in imap
+    yield fn(task)
+          ^^^^^^^^
+src/ukgeo/river_stations.py:1316: in _bake_one_station_tile
+    _stamp_stations(
+src/ukgeo/river_stations.py:771: in _stamp_stations
+    _stamp_one(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+sx = 4.5, sz = 16.5, tx = 1.0, tz = 0.0, half_width = 1, order = 3, reach_id = 1
+station_id = 0, water_y = 76, azimuth_value = 0
+reach = array([[0, 0, 0, ..., 0, 0, 0],
+       [0, 0, 0, ..., 0, 0, 0],
+       [0, 0, 0, ..., 0, 0, 0],
+       ...,
+       [0, 0, 0, ..., 0, 0, 0],
+       [0, 0, 0, ..., 0, 0, 0],
+       [0, 0, 0, ..., 0, 0, 0]], shape=(32, 32), dtype=uint32)
+station_out = array([[0, 0, 0, ..., 0, 0, 0],
+       [0, 0, 0, ..., 0, 0, 0],
+       [0, 0, 0, ..., 0, 0, 0],
+       ...,
+       [0, 0, 0, ..., 0, 0, 0],
+       [0, 0, 0, ..., 0, 0, 0],
+       [0, 0, 0, ..., 0, 0, 0]], shape=(32, 32), dtype=uint16)
+water = array([[-32768, -32768, -32768, ..., -32768, -32768, -32768],
+       [-32768, -32768, -32768, ..., -32768, -32768, -32...768, -32768, -32768],
+       [-32768, -32768, -32768, ..., -32768, -32768, -32768]],
+      shape=(32, 32), dtype=int16)
+azimuth = array([[0, 0, 0, ..., 0, 0, 0],
+       [0, 0, 0, ..., 0, 0, 0],
+       [0, 0, 0, ..., 0, 0, 0],
+       ...,
+       [0, 0, 0, ..., 0, 0, 0],
+       [0, 0, 0, ..., 0, 0, 0],
+       [0, 0, 0, ..., 0, 0, 0]], shape=(32, 32), dtype=uint8)
+best_hi = array([[18446744073709551615, 18446744073709551615, 18446744073709551615,
+        ..., 18446744073709551615, 184467440...
+        ..., 18446744073709551615, 18446744073709551615,
+        18446744073709551615]], shape=(32, 32), dtype=uint64)
+best_lo = array([[18446744073709551615, 18446744073709551615, 18446744073709551615,
+        ..., 18446744073709551615, 184467440...
+        ..., 18446744073709551615, 18446744073709551615,
+        18446744073709551615]], shape=(32, 32), dtype=uint64)
+origin_x = 0, origin_z = 0, width = 32, depth = 32, previous_water_y = None
+previous_spacing = 0.0, next_water_y = 76, next_spacing = 1.0
+
+    def _stamp_one(
+        sx: float,
+        sz: float,
+        tx: float,
+        tz: float,
+        half_width: int,
+        order: int,
+        reach_id: int,
+        station_id: int,
+        water_y: int,
+        azimuth_value: int,
+        reach: np.ndarray,
+        station_out: np.ndarray,
+        water: np.ndarray,
+        azimuth: np.ndarray,
+        best_hi: np.ndarray,
+        best_lo: np.ndarray,
+        *,
+        origin_x: int,
+        origin_z: int,
+        width: int,
+        depth: int,
+        previous_water_y: int | None = None,
+        previous_spacing: float = 0.0,
+        next_water_y: int | None = None,
+        next_spacing: float = 0.0,
+    ) -> None:
+        tx, tz = _unit_tangent(tx, tz)
+        cross_lim = float(max(0, half_width) + BANK_CARVE_REACH) + CROSS_PAD
+        x0 = max(origin_x, int(math.floor(sx - cross_lim - 1.0)))
+        x1 = min(origin_x + width, int(math.ceil(sx + cross_lim + 1.0)))
+        z0 = max(origin_z, int(math.floor(sz - cross_lim - 1.0)))
+        z1 = min(origin_z + depth, int(math.ceil(sz + cross_lim + 1.0)))
+        if x0 >= x1 or z0 >= z1:
+            return
+        xs = np.arange(x0, x1, dtype=np.float64) + 0.5
+        zs = np.arange(z0, z1, dtype=np.float64) + 0.5
+        dx = xs[None, :] - sx
+        dz = zs[:, None] - sz
+        along = dx * tx + dz * tz
+        perp = dx * (-tz) + dz * tx
+        # Rounded-rectangle eligibility: hard rect corners become quarter-circles so
+        # neighbouring stamps with different tangents do not leave triangular spikes.
+        abs_along = np.abs(along)
+        abs_perp = np.abs(perp)
+        corner = (np.maximum(0.0, abs_along - ALONG_LIMIT) ** 2) + (
+            np.maximum(0.0, abs_perp - (cross_lim - CROSS_PAD)) ** 2
+        )
+        inside = (abs_along <= ALONG_LIMIT + CROSS_PAD + 1e-6) & (abs_perp <= cross_lim + 1e-6) & (
+            corner <= (CROSS_PAD + 1e-6) ** 2
+        )
+        if not bool(inside.any()):
+            return
+        dist_milli = np.floor(np.abs(perp) * 1000.0 + 0.5).astype(np.int64)
+        np.clip(dist_milli, 0, 0xFFFFFF, out=dist_milli)
+        # hi holds distance above inverted order. lo holds the full uint32 reach
+        # id above the uint16 station id. Compare hi, then lo. Both sentinels are
+        # the uint64 maximum, so any real pair is smaller and the min is associative.
+        along_milli = np.floor(abs_along * 1000.0 + 0.5).astype(np.int64)
+        np.clip(along_milli, 0, 0xFFFF, out=along_milli)
+        order_hi, _ = ownership_hi_lo(0, order, reach_id, station_id)
+        keys_hi = (dist_milli.astype(np.uint64) << np.uint64(8)) | order_hi
+        keys_lo = (
+            (np.uint64(int(reach_id) & 0xFFFFFFFF) << np.uint64(32))
+            | (along_milli.astype(np.uint64) << np.uint64(16))
+            | np.uint64(int(station_id) & 0xFFFF)
+        )
+        lz0 = z0 - origin_z
+        lx0 = x0 - origin_x
+        hh = z1 - z0
+        ww = x1 - x0
+        best_hi_view = best_hi[lz0 : lz0 + hh, lx0 : lx0 + ww]
+        best_lo_view = best_lo[lz0 : lz0 + hh, lx0 : lx0 + ww]
+        better = inside & ((keys_hi < best_hi_view) | ((keys_hi == best_hi_view) & (keys_lo < best_lo_view)))
+        if not bool(better.any()):
+            return
+        best_hi_view[better] = keys_hi[better]
+>       best_lo_view[better] = keys_lo
+        ^^^^^^^^^^^^^^^^^^^^
+E       TypeError: NumPy boolean array indexing assignment requires a 0 or 1-dimensional input, input has 2 dimensions
+
+src/ukgeo/river_stations.py:883: TypeError
+----------------------------- Captured stdout call -----------------------------
+Confluence reaches vector_edges=1 reaches=1
+----------------------------- Captured stderr call -----------------------------
+river station empty tiles:   0%|          | 0/1 [00:00<?, ?it/s]river station empty tiles: 100%|██████████| 1/1 [00:00<00:00, 45590.26it/s]
+river station tiles:   0%|          | 0/1 [00:00<?, ?it/s]river station tiles:   0%|          | 0/1 [00:00<?, ?it/s]
+_______________ test_skip_existing_keeps_prewritten_station_tile _______________
+
+tmp_path = PosixPath('/tmp/pytest-of-zenyfh/pytest-1/test_skip_existing_keeps_prewr0')
+
+    def test_skip_existing_keeps_prewritten_station_tile(tmp_path: Path):
+        tile_size = 32
+        height = np.full((tile_size, tile_size), 400, dtype=np.int16)
+        write_r16_tile(tmp_path / "height" / f"000_000{r16_extension()}", height, tile_size)
+        manifest = {
+            "format": "uk-raster-tiles-v1",
+            "tile_size": tile_size,
+            "world": {
+                "width": tile_size,
+                "depth": tile_size,
+                "padded_width": tile_size,
+                "padded_depth": tile_size,
+                "minecraft_min_x": 0,
+                "minecraft_min_z": 0,
+            },
+            "georeferencing": {
+                "bng_min_easting": 0.0,
+                "bng_min_northing": 0.0,
+                "bng_max_easting": float(tile_size),
+                "bng_max_northing": float(tile_size),
+            },
+            "height": {
+                "path": "height",
+                "extension": r16_extension(),
+                "dtype": "int16_le",
+                "nodata": HEIGHT_NODATA,
+                "sea_level_y": 64,
+            },
+            "rivers": {"path": "water/rivers", "extension": u8_extension(), "dtype": "uint8"},
+        }
+        manifest_path = tmp_path / "manifest.json"
+        write_manifest(manifest_path, manifest)
+        # Southbound so flow_azimuth is non-zero. An eastbound reach stamps azimuth 0,
+        # and write_u8_tile omits an all-zero tile, which must not count as complete.
+        edge = _Edge([(16.0, 4.0), (16.0, 28.0)], order=3, half_width=1)
+>       bake_river_stations(
+            tmp_path,
+            manifest_path=manifest_path,
+            edges=[edge],
+            river_mask=np.zeros((tile_size, tile_size), dtype=np.uint8),
+        )
+
+tests/test_river_stations.py:557: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/ukgeo/river_stations.py:1429: in bake_river_stations
+    _bake_stations(
+src/ukgeo/river_stations.py:1405: in _bake_stations
+    _write_station_tiles(
+src/ukgeo/river_stations.py:1570: in _write_station_tiles
+    for _ in pool.imap(
+src/ukgeo/river_stations.py:1286: in imap
+    yield fn(task)
+          ^^^^^^^^
+src/ukgeo/river_stations.py:1316: in _bake_one_station_tile
+    _stamp_stations(
+src/ukgeo/river_stations.py:771: in _stamp_stations
+    _stamp_one(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+sx = 16.0, sz = 27.5, tx = 0.0, tz = -1.0, half_width = 1, order = 3
+reach_id = 1, station_id = 0, water_y = 76, azimuth_value = 192
+reach = array([[0, 0, 0, ..., 0, 0, 0],
+       [0, 0, 0, ..., 0, 0, 0],
+       [0, 0, 0, ..., 0, 0, 0],
+       ...,
+       [0, 0, 0, ..., 0, 0, 0],
+       [0, 0, 0, ..., 0, 0, 0],
+       [0, 0, 0, ..., 0, 0, 0]], shape=(32, 32), dtype=uint32)
+station_out = array([[0, 0, 0, ..., 0, 0, 0],
+       [0, 0, 0, ..., 0, 0, 0],
+       [0, 0, 0, ..., 0, 0, 0],
+       ...,
+       [0, 0, 0, ..., 0, 0, 0],
+       [0, 0, 0, ..., 0, 0, 0],
+       [0, 0, 0, ..., 0, 0, 0]], shape=(32, 32), dtype=uint16)
+water = array([[-32768, -32768, -32768, ..., -32768, -32768, -32768],
+       [-32768, -32768, -32768, ..., -32768, -32768, -32...768, -32768, -32768],
+       [-32768, -32768, -32768, ..., -32768, -32768, -32768]],
+      shape=(32, 32), dtype=int16)
+azimuth = array([[0, 0, 0, ..., 0, 0, 0],
+       [0, 0, 0, ..., 0, 0, 0],
+       [0, 0, 0, ..., 0, 0, 0],
+       ...,
+       [0, 0, 0, ..., 0, 0, 0],
+       [0, 0, 0, ..., 0, 0, 0],
+       [0, 0, 0, ..., 0, 0, 0]], shape=(32, 32), dtype=uint8)
+best_hi = array([[18446744073709551615, 18446744073709551615, 18446744073709551615,
+        ..., 18446744073709551615, 184467440...
+        ..., 18446744073709551615, 18446744073709551615,
+        18446744073709551615]], shape=(32, 32), dtype=uint64)
+best_lo = array([[18446744073709551615, 18446744073709551615, 18446744073709551615,
+        ..., 18446744073709551615, 184467440...
+        ..., 18446744073709551615, 18446744073709551615,
+        18446744073709551615]], shape=(32, 32), dtype=uint64)
+origin_x = 0, origin_z = 0, width = 32, depth = 32, previous_water_y = None
+previous_spacing = 0.0, next_water_y = 76, next_spacing = 1.0
+
+    def _stamp_one(
+        sx: float,
+        sz: float,
+        tx: float,
+        tz: float,
+        half_width: int,
+        order: int,
+        reach_id: int,
+        station_id: int,
+        water_y: int,
+        azimuth_value: int,
+        reach: np.ndarray,
+        station_out: np.ndarray,
+        water: np.ndarray,
+        azimuth: np.ndarray,
+        best_hi: np.ndarray,
+        best_lo: np.ndarray,
+        *,
+        origin_x: int,
+        origin_z: int,
+        width: int,
+        depth: int,
+        previous_water_y: int | None = None,
+        previous_spacing: float = 0.0,
+        next_water_y: int | None = None,
+        next_spacing: float = 0.0,
+    ) -> None:
+        tx, tz = _unit_tangent(tx, tz)
+        cross_lim = float(max(0, half_width) + BANK_CARVE_REACH) + CROSS_PAD
+        x0 = max(origin_x, int(math.floor(sx - cross_lim - 1.0)))
+        x1 = min(origin_x + width, int(math.ceil(sx + cross_lim + 1.0)))
+        z0 = max(origin_z, int(math.floor(sz - cross_lim - 1.0)))
+        z1 = min(origin_z + depth, int(math.ceil(sz + cross_lim + 1.0)))
+        if x0 >= x1 or z0 >= z1:
+            return
+        xs = np.arange(x0, x1, dtype=np.float64) + 0.5
+        zs = np.arange(z0, z1, dtype=np.float64) + 0.5
+        dx = xs[None, :] - sx
+        dz = zs[:, None] - sz
+        along = dx * tx + dz * tz
+        perp = dx * (-tz) + dz * tx
+        # Rounded-rectangle eligibility: hard rect corners become quarter-circles so
+        # neighbouring stamps with different tangents do not leave triangular spikes.
+        abs_along = np.abs(along)
+        abs_perp = np.abs(perp)
+        corner = (np.maximum(0.0, abs_along - ALONG_LIMIT) ** 2) + (
+            np.maximum(0.0, abs_perp - (cross_lim - CROSS_PAD)) ** 2
+        )
+        inside = (abs_along <= ALONG_LIMIT + CROSS_PAD + 1e-6) & (abs_perp <= cross_lim + 1e-6) & (
+            corner <= (CROSS_PAD + 1e-6) ** 2
+        )
+        if not bool(inside.any()):
+            return
+        dist_milli = np.floor(np.abs(perp) * 1000.0 + 0.5).astype(np.int64)
+        np.clip(dist_milli, 0, 0xFFFFFF, out=dist_milli)
+        # hi holds distance above inverted order. lo holds the full uint32 reach
+        # id above the uint16 station id. Compare hi, then lo. Both sentinels are
+        # the uint64 maximum, so any real pair is smaller and the min is associative.
+        along_milli = np.floor(abs_along * 1000.0 + 0.5).astype(np.int64)
+        np.clip(along_milli, 0, 0xFFFF, out=along_milli)
+        order_hi, _ = ownership_hi_lo(0, order, reach_id, station_id)
+        keys_hi = (dist_milli.astype(np.uint64) << np.uint64(8)) | order_hi
+        keys_lo = (
+            (np.uint64(int(reach_id) & 0xFFFFFFFF) << np.uint64(32))
+            | (along_milli.astype(np.uint64) << np.uint64(16))
+            | np.uint64(int(station_id) & 0xFFFF)
+        )
+        lz0 = z0 - origin_z
+        lx0 = x0 - origin_x
+        hh = z1 - z0
+        ww = x1 - x0
+        best_hi_view = best_hi[lz0 : lz0 + hh, lx0 : lx0 + ww]
+        best_lo_view = best_lo[lz0 : lz0 + hh, lx0 : lx0 + ww]
+        better = inside & ((keys_hi < best_hi_view) | ((keys_hi == best_hi_view) & (keys_lo < best_lo_view)))
+        if not bool(better.any()):
+            return
+        best_hi_view[better] = keys_hi[better]
+>       best_lo_view[better] = keys_lo
+        ^^^^^^^^^^^^^^^^^^^^
+E       TypeError: NumPy boolean array indexing assignment requires a 0 or 1-dimensional input, input has 2 dimensions
+
+src/ukgeo/river_stations.py:883: TypeError
+----------------------------- Captured stdout call -----------------------------
+Confluence reaches vector_edges=1 reaches=1
+----------------------------- Captured stderr call -----------------------------
+river station empty tiles:   0%|          | 0/1 [00:00<?, ?it/s]river station empty tiles: 100%|██████████| 1/1 [00:00<00:00, 51781.53it/s]
+river station tiles:   0%|          | 0/1 [00:00<?, ?it/s]river station tiles:   0%|          | 0/1 [00:00<?, ?it/s]
+________________ test_cross_track_ownership_on_bend_not_radial _________________
+
+    def test_cross_track_ownership_on_bend_not_radial():
+        """Perpendicular corner stations: |perp| splits axes; Euclidean would tie and let order fan."""
+        east = _station(
+            reach_id=1,
+            station_id=0,
+            order=9,
+            x=10.5,
+            z=10.5,
+            tx=1.0,
+            tz=0.0,
+            half_width=2,
+            water_y=70,
+            azimuth=0,
+        )
+        north = _station(
+            reach_id=2,
+            station_id=0,
+            order=1,
+            x=10.5,
+            z=10.5,
+            tx=0.0,
+            tz=1.0,
+            half_width=2,
+            water_y=80,
+            azimuth=64,
+        )
+>       grid = _assert_order_independent([east, north], depth=24, width=24)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_river_stations.py:667: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_river_stations.py:73: in _assert_order_independent
+    forward = rasterize_stations(stations, depth, width)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/ukgeo/river_stations.py:703: in rasterize_stations
+    _stamp_stations(stations, reach, station_id, water, azimuth, best_hi, best_lo, origin_x=0, origin_z=0)
+src/ukgeo/river_stations.py:771: in _stamp_stations
+    _stamp_one(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+sx = 10.5, sz = 10.5, tx = 1.0, tz = 0.0, half_width = 2, order = 9
+reach_id = 1, station_id = 0, water_y = 70, azimuth_value = 0
+reach = array([[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0],
+       [0, 0, 0, 0, 0, 0, 0, ...
+        0, 0],
+       [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0]], dtype=uint32)
+station_out = array([[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0],
+       [0, 0, 0, 0, 0, 0, 0, ...
+        0, 0],
+       [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0]], dtype=uint16)
+water = array([[-32768, -32768, -32768, -32768, -32768, -32768, -32768, -32768,
+        -32768, -32768, -32768, -32768, -32768...8, -32768, -32768, -32768,
+        -32768, -32768, -32768, -32768, -32768, -32768, -32768, -32768]],
+      dtype=int16)
+azimuth = array([[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0],
+       [0, 0, 0, 0, 0, 0, 0, ...,
+        0, 0],
+       [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0]], dtype=uint8)
+best_hi = array([[18446744073709551615, 18446744073709551615, 18446744073709551615,
+        18446744073709551615, 18446744073709..., 18446744073709551615,
+        18446744073709551615, 18446744073709551615, 18446744073709551615]],
+      dtype=uint64)
+best_lo = array([[18446744073709551615, 18446744073709551615, 18446744073709551615,
+        18446744073709551615, 18446744073709..., 18446744073709551615,
+        18446744073709551615, 18446744073709551615, 18446744073709551615]],
+      dtype=uint64)
+origin_x = 0, origin_z = 0, width = 24, depth = 24, previous_water_y = None
+previous_spacing = 0.0, next_water_y = None, next_spacing = 0.0
+
+    def _stamp_one(
+        sx: float,
+        sz: float,
+        tx: float,
+        tz: float,
+        half_width: int,
+        order: int,
+        reach_id: int,
+        station_id: int,
+        water_y: int,
+        azimuth_value: int,
+        reach: np.ndarray,
+        station_out: np.ndarray,
+        water: np.ndarray,
+        azimuth: np.ndarray,
+        best_hi: np.ndarray,
+        best_lo: np.ndarray,
+        *,
+        origin_x: int,
+        origin_z: int,
+        width: int,
+        depth: int,
+        previous_water_y: int | None = None,
+        previous_spacing: float = 0.0,
+        next_water_y: int | None = None,
+        next_spacing: float = 0.0,
+    ) -> None:
+        tx, tz = _unit_tangent(tx, tz)
+        cross_lim = float(max(0, half_width) + BANK_CARVE_REACH) + CROSS_PAD
+        x0 = max(origin_x, int(math.floor(sx - cross_lim - 1.0)))
+        x1 = min(origin_x + width, int(math.ceil(sx + cross_lim + 1.0)))
+        z0 = max(origin_z, int(math.floor(sz - cross_lim - 1.0)))
+        z1 = min(origin_z + depth, int(math.ceil(sz + cross_lim + 1.0)))
+        if x0 >= x1 or z0 >= z1:
+            return
+        xs = np.arange(x0, x1, dtype=np.float64) + 0.5
+        zs = np.arange(z0, z1, dtype=np.float64) + 0.5
+        dx = xs[None, :] - sx
+        dz = zs[:, None] - sz
+        along = dx * tx + dz * tz
+        perp = dx * (-tz) + dz * tx
+        # Rounded-rectangle eligibility: hard rect corners become quarter-circles so
+        # neighbouring stamps with different tangents do not leave triangular spikes.
+        abs_along = np.abs(along)
+        abs_perp = np.abs(perp)
+        corner = (np.maximum(0.0, abs_along - ALONG_LIMIT) ** 2) + (
+            np.maximum(0.0, abs_perp - (cross_lim - CROSS_PAD)) ** 2
+        )
+        inside = (abs_along <= ALONG_LIMIT + CROSS_PAD + 1e-6) & (abs_perp <= cross_lim + 1e-6) & (
+            corner <= (CROSS_PAD + 1e-6) ** 2
+        )
+        if not bool(inside.any()):
+            return
+        dist_milli = np.floor(np.abs(perp) * 1000.0 + 0.5).astype(np.int64)
+        np.clip(dist_milli, 0, 0xFFFFFF, out=dist_milli)
+        # hi holds distance above inverted order. lo holds the full uint32 reach
+        # id above the uint16 station id. Compare hi, then lo. Both sentinels are
+        # the uint64 maximum, so any real pair is smaller and the min is associative.
+        along_milli = np.floor(abs_along * 1000.0 + 0.5).astype(np.int64)
+        np.clip(along_milli, 0, 0xFFFF, out=along_milli)
+        order_hi, _ = ownership_hi_lo(0, order, reach_id, station_id)
+        keys_hi = (dist_milli.astype(np.uint64) << np.uint64(8)) | order_hi
+        keys_lo = (
+            (np.uint64(int(reach_id) & 0xFFFFFFFF) << np.uint64(32))
+            | (along_milli.astype(np.uint64) << np.uint64(16))
+            | np.uint64(int(station_id) & 0xFFFF)
+        )
+        lz0 = z0 - origin_z
+        lx0 = x0 - origin_x
+        hh = z1 - z0
+        ww = x1 - x0
+        best_hi_view = best_hi[lz0 : lz0 + hh, lx0 : lx0 + ww]
+        best_lo_view = best_lo[lz0 : lz0 + hh, lx0 : lx0 + ww]
+        better = inside & ((keys_hi < best_hi_view) | ((keys_hi == best_hi_view) & (keys_lo < best_lo_view)))
+        if not bool(better.any()):
+            return
+        best_hi_view[better] = keys_hi[better]
+>       best_lo_view[better] = keys_lo
+        ^^^^^^^^^^^^^^^^^^^^
+E       TypeError: NumPy boolean array indexing assignment requires a 0 or 1-dimensional input, input has 2 dimensions
+
+src/ukgeo/river_stations.py:883: TypeError
+_________________ test_write_curved_channel_ownership_preview __________________
+
+tmp_path = PosixPath('/tmp/pytest-of-zenyfh/pytest-1/test_write_curved_channel_owne0')
+
+    def test_write_curved_channel_ownership_preview(tmp_path: Path):
+        """Write PIL RGB previews: L channel plus Euclidean vs |perp| on a smooth curve."""
+        out_dir = Path(__file__).resolve().parent / "output"
+        out_dir.mkdir(parents=True, exist_ok=True)
+    
+        l_stations = _l_channel_stations()
+>       l_grid = rasterize_stations(l_stations, depth=24, width=24)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_river_stations.py:956: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/ukgeo/river_stations.py:703: in rasterize_stations
+    _stamp_stations(stations, reach, station_id, water, azimuth, best_hi, best_lo, origin_x=0, origin_z=0)
+src/ukgeo/river_stations.py:771: in _stamp_stations
+    _stamp_one(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+sx = 4.5, sz = 10.5, tx = 1.0, tz = 0.0, half_width = 2, order = 3, reach_id = 1
+station_id = 0, water_y = 70, azimuth_value = 0
+reach = array([[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0],
+       [0, 0, 0, 0, 0, 0, 0, ...
+        0, 0],
+       [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0]], dtype=uint32)
+station_out = array([[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0],
+       [0, 0, 0, 0, 0, 0, 0, ...
+        0, 0],
+       [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0]], dtype=uint16)
+water = array([[-32768, -32768, -32768, -32768, -32768, -32768, -32768, -32768,
+        -32768, -32768, -32768, -32768, -32768...8, -32768, -32768, -32768,
+        -32768, -32768, -32768, -32768, -32768, -32768, -32768, -32768]],
+      dtype=int16)
+azimuth = array([[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0],
+       [0, 0, 0, 0, 0, 0, 0, ...,
+        0, 0],
+       [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0]], dtype=uint8)
+best_hi = array([[18446744073709551615, 18446744073709551615,              2560252,
+                     2560252,              2..., 18446744073709551615,
+        18446744073709551615, 18446744073709551615, 18446744073709551615]],
+      dtype=uint64)
+best_lo = array([[18446744073709551615, 18446744073709551615, 18446744073709551615,
+        18446744073709551615, 18446744073709..., 18446744073709551615,
+        18446744073709551615, 18446744073709551615, 18446744073709551615]],
+      dtype=uint64)
+origin_x = 0, origin_z = 0, width = 24, depth = 24, previous_water_y = None
+previous_spacing = 0.0, next_water_y = 71, next_spacing = 1.0
+
+    def _stamp_one(
+        sx: float,
+        sz: float,
+        tx: float,
+        tz: float,
+        half_width: int,
+        order: int,
+        reach_id: int,
+        station_id: int,
+        water_y: int,
+        azimuth_value: int,
+        reach: np.ndarray,
+        station_out: np.ndarray,
+        water: np.ndarray,
+        azimuth: np.ndarray,
+        best_hi: np.ndarray,
+        best_lo: np.ndarray,
+        *,
+        origin_x: int,
+        origin_z: int,
+        width: int,
+        depth: int,
+        previous_water_y: int | None = None,
+        previous_spacing: float = 0.0,
+        next_water_y: int | None = None,
+        next_spacing: float = 0.0,
+    ) -> None:
+        tx, tz = _unit_tangent(tx, tz)
+        cross_lim = float(max(0, half_width) + BANK_CARVE_REACH) + CROSS_PAD
+        x0 = max(origin_x, int(math.floor(sx - cross_lim - 1.0)))
+        x1 = min(origin_x + width, int(math.ceil(sx + cross_lim + 1.0)))
+        z0 = max(origin_z, int(math.floor(sz - cross_lim - 1.0)))
+        z1 = min(origin_z + depth, int(math.ceil(sz + cross_lim + 1.0)))
+        if x0 >= x1 or z0 >= z1:
+            return
+        xs = np.arange(x0, x1, dtype=np.float64) + 0.5
+        zs = np.arange(z0, z1, dtype=np.float64) + 0.5
+        dx = xs[None, :] - sx
+        dz = zs[:, None] - sz
+        along = dx * tx + dz * tz
+        perp = dx * (-tz) + dz * tx
+        # Rounded-rectangle eligibility: hard rect corners become quarter-circles so
+        # neighbouring stamps with different tangents do not leave triangular spikes.
+        abs_along = np.abs(along)
+        abs_perp = np.abs(perp)
+        corner = (np.maximum(0.0, abs_along - ALONG_LIMIT) ** 2) + (
+            np.maximum(0.0, abs_perp - (cross_lim - CROSS_PAD)) ** 2
+        )
+        inside = (abs_along <= ALONG_LIMIT + CROSS_PAD + 1e-6) & (abs_perp <= cross_lim + 1e-6) & (
+            corner <= (CROSS_PAD + 1e-6) ** 2
+        )
+        if not bool(inside.any()):
+            return
+        dist_milli = np.floor(np.abs(perp) * 1000.0 + 0.5).astype(np.int64)
+        np.clip(dist_milli, 0, 0xFFFFFF, out=dist_milli)
+        # hi holds distance above inverted order. lo holds the full uint32 reach
+        # id above the uint16 station id. Compare hi, then lo. Both sentinels are
+        # the uint64 maximum, so any real pair is smaller and the min is associative.
+        along_milli = np.floor(abs_along * 1000.0 + 0.5).astype(np.int64)
+        np.clip(along_milli, 0, 0xFFFF, out=along_milli)
+        order_hi, _ = ownership_hi_lo(0, order, reach_id, station_id)
+        keys_hi = (dist_milli.astype(np.uint64) << np.uint64(8)) | order_hi
+        keys_lo = (
+            (np.uint64(int(reach_id) & 0xFFFFFFFF) << np.uint64(32))
+            | (along_milli.astype(np.uint64) << np.uint64(16))
+            | np.uint64(int(station_id) & 0xFFFF)
+        )
+        lz0 = z0 - origin_z
+        lx0 = x0 - origin_x
+        hh = z1 - z0
+        ww = x1 - x0
+        best_hi_view = best_hi[lz0 : lz0 + hh, lx0 : lx0 + ww]
+        best_lo_view = best_lo[lz0 : lz0 + hh, lx0 : lx0 + ww]
+        better = inside & ((keys_hi < best_hi_view) | ((keys_hi == best_hi_view) & (keys_lo < best_lo_view)))
+        if not bool(better.any()):
+            return
+        best_hi_view[better] = keys_hi[better]
+>       best_lo_view[better] = keys_lo
+        ^^^^^^^^^^^^^^^^^^^^
+E       TypeError: NumPy boolean array indexing assignment requires a 0 or 1-dimensional input, input has 2 dimensions
+
+src/ukgeo/river_stations.py:883: TypeError
+_____________ test_rounded_stamp_eligibility_rejects_sharp_corner ______________
+
+    def test_rounded_stamp_eligibility_rejects_sharp_corner():
+        # Outer corner of the hard rectangle lies outside the rounded stamp.
+        half_width = 1
+        cross_lim = float(half_width + BANK_CARVE_REACH) + CROSS_PAD
+        along = ALONG_LIMIT + CROSS_PAD
+        perp = cross_lim
+        corner = (max(0.0, along - ALONG_LIMIT) ** 2) + (max(0.0, perp - (cross_lim - CROSS_PAD)) ** 2)
+        assert corner > (CROSS_PAD + 1e-6) ** 2
+        depth, width = 32, 32
+        reach = np.zeros((depth, width), dtype="<u4")
+        station_id = np.zeros((depth, width), dtype="<u2")
+        water = np.full((depth, width), HEIGHT_NODATA, dtype=np.int16)
+        azimuth = np.zeros((depth, width), dtype=np.uint8)
+        best_hi = np.full((depth, width), _river_stations._EMPTY_KEY, dtype=np.uint64)
+        best_lo = np.full((depth, width), _river_stations._EMPTY_KEY, dtype=np.uint64)
+>       _river_stations._stamp_one(
+            16.0, 16.0, 1.0, 0.0, half_width, 5, 1, 0, 70, 0,
+            reach, station_id, water, azimuth, best_hi, best_lo,
+            origin_x=0, origin_z=0, width=width, depth=depth,
+        )
+
+tests/test_river_stations.py:1030: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+sx = 16.0, sz = 16.0, tx = 1.0, tz = 0.0, half_width = 1, order = 5
+reach_id = 1, station_id = 0, water_y = 70, azimuth_value = 0
+reach = array([[0, 0, 0, ..., 0, 0, 0],
+       [0, 0, 0, ..., 0, 0, 0],
+       [0, 0, 0, ..., 0, 0, 0],
+       ...,
+       [0, 0, 0, ..., 0, 0, 0],
+       [0, 0, 0, ..., 0, 0, 0],
+       [0, 0, 0, ..., 0, 0, 0]], shape=(32, 32), dtype=uint32)
+station_out = array([[0, 0, 0, ..., 0, 0, 0],
+       [0, 0, 0, ..., 0, 0, 0],
+       [0, 0, 0, ..., 0, 0, 0],
+       ...,
+       [0, 0, 0, ..., 0, 0, 0],
+       [0, 0, 0, ..., 0, 0, 0],
+       [0, 0, 0, ..., 0, 0, 0]], shape=(32, 32), dtype=uint16)
+water = array([[-32768, -32768, -32768, ..., -32768, -32768, -32768],
+       [-32768, -32768, -32768, ..., -32768, -32768, -32...768, -32768, -32768],
+       [-32768, -32768, -32768, ..., -32768, -32768, -32768]],
+      shape=(32, 32), dtype=int16)
+azimuth = array([[0, 0, 0, ..., 0, 0, 0],
+       [0, 0, 0, ..., 0, 0, 0],
+       [0, 0, 0, ..., 0, 0, 0],
+       ...,
+       [0, 0, 0, ..., 0, 0, 0],
+       [0, 0, 0, ..., 0, 0, 0],
+       [0, 0, 0, ..., 0, 0, 0]], shape=(32, 32), dtype=uint8)
+best_hi = array([[18446744073709551615, 18446744073709551615, 18446744073709551615,
+        ..., 18446744073709551615, 184467440...
+        ..., 18446744073709551615, 18446744073709551615,
+        18446744073709551615]], shape=(32, 32), dtype=uint64)
+best_lo = array([[18446744073709551615, 18446744073709551615, 18446744073709551615,
+        ..., 18446744073709551615, 184467440...
+        ..., 18446744073709551615, 18446744073709551615,
+        18446744073709551615]], shape=(32, 32), dtype=uint64)
+origin_x = 0, origin_z = 0, width = 32, depth = 32, previous_water_y = None
+previous_spacing = 0.0, next_water_y = None, next_spacing = 0.0
+
+    def _stamp_one(
+        sx: float,
+        sz: float,
+        tx: float,
+        tz: float,
+        half_width: int,
+        order: int,
+        reach_id: int,
+        station_id: int,
+        water_y: int,
+        azimuth_value: int,
+        reach: np.ndarray,
+        station_out: np.ndarray,
+        water: np.ndarray,
+        azimuth: np.ndarray,
+        best_hi: np.ndarray,
+        best_lo: np.ndarray,
+        *,
+        origin_x: int,
+        origin_z: int,
+        width: int,
+        depth: int,
+        previous_water_y: int | None = None,
+        previous_spacing: float = 0.0,
+        next_water_y: int | None = None,
+        next_spacing: float = 0.0,
+    ) -> None:
+        tx, tz = _unit_tangent(tx, tz)
+        cross_lim = float(max(0, half_width) + BANK_CARVE_REACH) + CROSS_PAD
+        x0 = max(origin_x, int(math.floor(sx - cross_lim - 1.0)))
+        x1 = min(origin_x + width, int(math.ceil(sx + cross_lim + 1.0)))
+        z0 = max(origin_z, int(math.floor(sz - cross_lim - 1.0)))
+        z1 = min(origin_z + depth, int(math.ceil(sz + cross_lim + 1.0)))
+        if x0 >= x1 or z0 >= z1:
+            return
+        xs = np.arange(x0, x1, dtype=np.float64) + 0.5
+        zs = np.arange(z0, z1, dtype=np.float64) + 0.5
+        dx = xs[None, :] - sx
+        dz = zs[:, None] - sz
+        along = dx * tx + dz * tz
+        perp = dx * (-tz) + dz * tx
+        # Rounded-rectangle eligibility: hard rect corners become quarter-circles so
+        # neighbouring stamps with different tangents do not leave triangular spikes.
+        abs_along = np.abs(along)
+        abs_perp = np.abs(perp)
+        corner = (np.maximum(0.0, abs_along - ALONG_LIMIT) ** 2) + (
+            np.maximum(0.0, abs_perp - (cross_lim - CROSS_PAD)) ** 2
+        )
+        inside = (abs_along <= ALONG_LIMIT + CROSS_PAD + 1e-6) & (abs_perp <= cross_lim + 1e-6) & (
+            corner <= (CROSS_PAD + 1e-6) ** 2
+        )
+        if not bool(inside.any()):
+            return
+        dist_milli = np.floor(np.abs(perp) * 1000.0 + 0.5).astype(np.int64)
+        np.clip(dist_milli, 0, 0xFFFFFF, out=dist_milli)
+        # hi holds distance above inverted order. lo holds the full uint32 reach
+        # id above the uint16 station id. Compare hi, then lo. Both sentinels are
+        # the uint64 maximum, so any real pair is smaller and the min is associative.
+        along_milli = np.floor(abs_along * 1000.0 + 0.5).astype(np.int64)
+        np.clip(along_milli, 0, 0xFFFF, out=along_milli)
+        order_hi, _ = ownership_hi_lo(0, order, reach_id, station_id)
+        keys_hi = (dist_milli.astype(np.uint64) << np.uint64(8)) | order_hi
+        keys_lo = (
+            (np.uint64(int(reach_id) & 0xFFFFFFFF) << np.uint64(32))
+            | (along_milli.astype(np.uint64) << np.uint64(16))
+            | np.uint64(int(station_id) & 0xFFFF)
+        )
+        lz0 = z0 - origin_z
+        lx0 = x0 - origin_x
+        hh = z1 - z0
+        ww = x1 - x0
+        best_hi_view = best_hi[lz0 : lz0 + hh, lx0 : lx0 + ww]
+        best_lo_view = best_lo[lz0 : lz0 + hh, lx0 : lx0 + ww]
+        better = inside & ((keys_hi < best_hi_view) | ((keys_hi == best_hi_view) & (keys_lo < best_lo_view)))
+        if not bool(better.any()):
+            return
+        best_hi_view[better] = keys_hi[better]
+>       best_lo_view[better] = keys_lo
+        ^^^^^^^^^^^^^^^^^^^^
+E       TypeError: NumPy boolean array indexing assignment requires a 0 or 1-dimensional input, input has 2 dimensions
+
+src/ukgeo/river_stations.py:883: TypeError
+________ test_station_water_is_interpolated_between_neighbouring_stamps ________
+
+    def test_station_water_is_interpolated_between_neighbouring_stamps():
+        stations = [
+            _station(
+                reach_id=7, station_id=0, order=4,
+                x=8.5, z=12.5, tx=1.0, tz=0.0,
+                water_y=70, azimuth=0,
+            ),
+            _station(
+                reach_id=7, station_id=1, order=4,
+                x=10.5, z=12.5, tx=1.0, tz=0.0,
+                water_y=66, azimuth=0,
+            ),
+        ]
+    
+>       grid = _assert_order_independent(stations, depth=24, width=24)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_river_stations.py:1055: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_river_stations.py:73: in _assert_order_independent
+    forward = rasterize_stations(stations, depth, width)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/ukgeo/river_stations.py:703: in rasterize_stations
+    _stamp_stations(stations, reach, station_id, water, azimuth, best_hi, best_lo, origin_x=0, origin_z=0)
+src/ukgeo/river_stations.py:771: in _stamp_stations
+    _stamp_one(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+sx = 8.5, sz = 12.5, tx = 1.0, tz = 0.0, half_width = 2, order = 4, reach_id = 7
+station_id = 0, water_y = 70, azimuth_value = 0
+reach = array([[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0],
+       [0, 0, 0, 0, 0, 0, 0, ...
+        0, 0],
+       [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0]], dtype=uint32)
+station_out = array([[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0],
+       [0, 0, 0, 0, 0, 0, 0, ...
+        0, 0],
+       [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0]], dtype=uint16)
+water = array([[-32768, -32768, -32768, -32768, -32768, -32768, -32768, -32768,
+        -32768, -32768, -32768, -32768, -32768...8, -32768, -32768, -32768,
+        -32768, -32768, -32768, -32768, -32768, -32768, -32768, -32768]],
+      dtype=int16)
+azimuth = array([[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0],
+       [0, 0, 0, 0, 0, 0, 0, ...,
+        0, 0],
+       [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0]], dtype=uint8)
+best_hi = array([[18446744073709551615, 18446744073709551615, 18446744073709551615,
+        18446744073709551615, 18446744073709..., 18446744073709551615,
+        18446744073709551615, 18446744073709551615, 18446744073709551615]],
+      dtype=uint64)
+best_lo = array([[18446744073709551615, 18446744073709551615, 18446744073709551615,
+        18446744073709551615, 18446744073709..., 18446744073709551615,
+        18446744073709551615, 18446744073709551615, 18446744073709551615]],
+      dtype=uint64)
+origin_x = 0, origin_z = 0, width = 24, depth = 24, previous_water_y = None
+previous_spacing = 0.0, next_water_y = 66, next_spacing = 2.0
+
+    def _stamp_one(
+        sx: float,
+        sz: float,
+        tx: float,
+        tz: float,
+        half_width: int,
+        order: int,
+        reach_id: int,
+        station_id: int,
+        water_y: int,
+        azimuth_value: int,
+        reach: np.ndarray,
+        station_out: np.ndarray,
+        water: np.ndarray,
+        azimuth: np.ndarray,
+        best_hi: np.ndarray,
+        best_lo: np.ndarray,
+        *,
+        origin_x: int,
+        origin_z: int,
+        width: int,
+        depth: int,
+        previous_water_y: int | None = None,
+        previous_spacing: float = 0.0,
+        next_water_y: int | None = None,
+        next_spacing: float = 0.0,
+    ) -> None:
+        tx, tz = _unit_tangent(tx, tz)
+        cross_lim = float(max(0, half_width) + BANK_CARVE_REACH) + CROSS_PAD
+        x0 = max(origin_x, int(math.floor(sx - cross_lim - 1.0)))
+        x1 = min(origin_x + width, int(math.ceil(sx + cross_lim + 1.0)))
+        z0 = max(origin_z, int(math.floor(sz - cross_lim - 1.0)))
+        z1 = min(origin_z + depth, int(math.ceil(sz + cross_lim + 1.0)))
+        if x0 >= x1 or z0 >= z1:
+            return
+        xs = np.arange(x0, x1, dtype=np.float64) + 0.5
+        zs = np.arange(z0, z1, dtype=np.float64) + 0.5
+        dx = xs[None, :] - sx
+        dz = zs[:, None] - sz
+        along = dx * tx + dz * tz
+        perp = dx * (-tz) + dz * tx
+        # Rounded-rectangle eligibility: hard rect corners become quarter-circles so
+        # neighbouring stamps with different tangents do not leave triangular spikes.
+        abs_along = np.abs(along)
+        abs_perp = np.abs(perp)
+        corner = (np.maximum(0.0, abs_along - ALONG_LIMIT) ** 2) + (
+            np.maximum(0.0, abs_perp - (cross_lim - CROSS_PAD)) ** 2
+        )
+        inside = (abs_along <= ALONG_LIMIT + CROSS_PAD + 1e-6) & (abs_perp <= cross_lim + 1e-6) & (
+            corner <= (CROSS_PAD + 1e-6) ** 2
+        )
+        if not bool(inside.any()):
+            return
+        dist_milli = np.floor(np.abs(perp) * 1000.0 + 0.5).astype(np.int64)
+        np.clip(dist_milli, 0, 0xFFFFFF, out=dist_milli)
+        # hi holds distance above inverted order. lo holds the full uint32 reach
+        # id above the uint16 station id. Compare hi, then lo. Both sentinels are
+        # the uint64 maximum, so any real pair is smaller and the min is associative.
+        along_milli = np.floor(abs_along * 1000.0 + 0.5).astype(np.int64)
+        np.clip(along_milli, 0, 0xFFFF, out=along_milli)
+        order_hi, _ = ownership_hi_lo(0, order, reach_id, station_id)
+        keys_hi = (dist_milli.astype(np.uint64) << np.uint64(8)) | order_hi
+        keys_lo = (
+            (np.uint64(int(reach_id) & 0xFFFFFFFF) << np.uint64(32))
+            | (along_milli.astype(np.uint64) << np.uint64(16))
+            | np.uint64(int(station_id) & 0xFFFF)
+        )
+        lz0 = z0 - origin_z
+        lx0 = x0 - origin_x
+        hh = z1 - z0
+        ww = x1 - x0
+        best_hi_view = best_hi[lz0 : lz0 + hh, lx0 : lx0 + ww]
+        best_lo_view = best_lo[lz0 : lz0 + hh, lx0 : lx0 + ww]
+        better = inside & ((keys_hi < best_hi_view) | ((keys_hi == best_hi_view) & (keys_lo < best_lo_view)))
+        if not bool(better.any()):
+            return
+        best_hi_view[better] = keys_hi[better]
+>       best_lo_view[better] = keys_lo
+        ^^^^^^^^^^^^^^^^^^^^
+E       TypeError: NumPy boolean array indexing assignment requires a 0 or 1-dimensional input, input has 2 dimensions
+
+src/ukgeo/river_stations.py:883: TypeError
+__________ test_ownership_still_order_independent_with_rounded_stamps __________
+
+    def test_ownership_still_order_independent_with_rounded_stamps():
+        stations = [
+            _station(reach_id=1, station_id=0, order=4, x=10.0, z=10.0, tx=1.0, tz=0.0, water_y=70, azimuth=0),
+            _station(reach_id=1, station_id=1, order=4, x=12.0, z=10.0, tx=0.7, tz=0.7, water_y=69, azimuth=32),
+            _station(reach_id=1, station_id=2, order=4, x=14.0, z=12.0, tx=0.0, tz=1.0, water_y=68, azimuth=64),
+        ]
+>       _assert_order_independent(stations, depth=24, width=24)
+
+tests/test_river_stations.py:1114: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_river_stations.py:73: in _assert_order_independent
+    forward = rasterize_stations(stations, depth, width)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/ukgeo/river_stations.py:703: in rasterize_stations
+    _stamp_stations(stations, reach, station_id, water, azimuth, best_hi, best_lo, origin_x=0, origin_z=0)
+src/ukgeo/river_stations.py:771: in _stamp_stations
+    _stamp_one(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+sx = 10.0, sz = 10.0, tx = 1.0, tz = 0.0, half_width = 2, order = 4
+reach_id = 1, station_id = 0, water_y = 70, azimuth_value = 0
+reach = array([[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0],
+       [0, 0, 0, 0, 0, 0, 0, ...
+        0, 0],
+       [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0]], dtype=uint32)
+station_out = array([[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0],
+       [0, 0, 0, 0, 0, 0, 0, ...
+        0, 0],
+       [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0]], dtype=uint16)
+water = array([[-32768, -32768, -32768, -32768, -32768, -32768, -32768, -32768,
+        -32768, -32768, -32768, -32768, -32768...8, -32768, -32768, -32768,
+        -32768, -32768, -32768, -32768, -32768, -32768, -32768, -32768]],
+      dtype=int16)
+azimuth = array([[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0],
+       [0, 0, 0, 0, 0, 0, 0, ...,
+        0, 0],
+       [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0]], dtype=uint8)
+best_hi = array([[18446744073709551615, 18446744073709551615, 18446744073709551615,
+        18446744073709551615, 18446744073709..., 18446744073709551615,
+        18446744073709551615, 18446744073709551615, 18446744073709551615]],
+      dtype=uint64)
+best_lo = array([[18446744073709551615, 18446744073709551615, 18446744073709551615,
+        18446744073709551615, 18446744073709..., 18446744073709551615,
+        18446744073709551615, 18446744073709551615, 18446744073709551615]],
+      dtype=uint64)
+origin_x = 0, origin_z = 0, width = 24, depth = 24, previous_water_y = None
+previous_spacing = 0.0, next_water_y = 69, next_spacing = 2.0
+
+    def _stamp_one(
+        sx: float,
+        sz: float,
+        tx: float,
+        tz: float,
+        half_width: int,
+        order: int,
+        reach_id: int,
+        station_id: int,
+        water_y: int,
+        azimuth_value: int,
+        reach: np.ndarray,
+        station_out: np.ndarray,
+        water: np.ndarray,
+        azimuth: np.ndarray,
+        best_hi: np.ndarray,
+        best_lo: np.ndarray,
+        *,
+        origin_x: int,
+        origin_z: int,
+        width: int,
+        depth: int,
+        previous_water_y: int | None = None,
+        previous_spacing: float = 0.0,
+        next_water_y: int | None = None,
+        next_spacing: float = 0.0,
+    ) -> None:
+        tx, tz = _unit_tangent(tx, tz)
+        cross_lim = float(max(0, half_width) + BANK_CARVE_REACH) + CROSS_PAD
+        x0 = max(origin_x, int(math.floor(sx - cross_lim - 1.0)))
+        x1 = min(origin_x + width, int(math.ceil(sx + cross_lim + 1.0)))
+        z0 = max(origin_z, int(math.floor(sz - cross_lim - 1.0)))
+        z1 = min(origin_z + depth, int(math.ceil(sz + cross_lim + 1.0)))
+        if x0 >= x1 or z0 >= z1:
+            return
+        xs = np.arange(x0, x1, dtype=np.float64) + 0.5
+        zs = np.arange(z0, z1, dtype=np.float64) + 0.5
+        dx = xs[None, :] - sx
+        dz = zs[:, None] - sz
+        along = dx * tx + dz * tz
+        perp = dx * (-tz) + dz * tx
+        # Rounded-rectangle eligibility: hard rect corners become quarter-circles so
+        # neighbouring stamps with different tangents do not leave triangular spikes.
+        abs_along = np.abs(along)
+        abs_perp = np.abs(perp)
+        corner = (np.maximum(0.0, abs_along - ALONG_LIMIT) ** 2) + (
+            np.maximum(0.0, abs_perp - (cross_lim - CROSS_PAD)) ** 2
+        )
+        inside = (abs_along <= ALONG_LIMIT + CROSS_PAD + 1e-6) & (abs_perp <= cross_lim + 1e-6) & (
+            corner <= (CROSS_PAD + 1e-6) ** 2
+        )
+        if not bool(inside.any()):
+            return
+        dist_milli = np.floor(np.abs(perp) * 1000.0 + 0.5).astype(np.int64)
+        np.clip(dist_milli, 0, 0xFFFFFF, out=dist_milli)
+        # hi holds distance above inverted order. lo holds the full uint32 reach
+        # id above the uint16 station id. Compare hi, then lo. Both sentinels are
+        # the uint64 maximum, so any real pair is smaller and the min is associative.
+        along_milli = np.floor(abs_along * 1000.0 + 0.5).astype(np.int64)
+        np.clip(along_milli, 0, 0xFFFF, out=along_milli)
+        order_hi, _ = ownership_hi_lo(0, order, reach_id, station_id)
+        keys_hi = (dist_milli.astype(np.uint64) << np.uint64(8)) | order_hi
+        keys_lo = (
+            (np.uint64(int(reach_id) & 0xFFFFFFFF) << np.uint64(32))
+            | (along_milli.astype(np.uint64) << np.uint64(16))
+            | np.uint64(int(station_id) & 0xFFFF)
+        )
+        lz0 = z0 - origin_z
+        lx0 = x0 - origin_x
+        hh = z1 - z0
+        ww = x1 - x0
+        best_hi_view = best_hi[lz0 : lz0 + hh, lx0 : lx0 + ww]
+        best_lo_view = best_lo[lz0 : lz0 + hh, lx0 : lx0 + ww]
+        better = inside & ((keys_hi < best_hi_view) | ((keys_hi == best_hi_view) & (keys_lo < best_lo_view)))
+        if not bool(better.any()):
+            return
+        best_hi_view[better] = keys_hi[better]
+>       best_lo_view[better] = keys_lo
+        ^^^^^^^^^^^^^^^^^^^^
+E       TypeError: NumPy boolean array indexing assignment requires a 0 or 1-dimensional input, input has 2 dimensions
+
+src/ukgeo/river_stations.py:883: TypeError
+_________________ test_no_triangular_ownership_spikes_on_curve _________________
+
+    def test_no_triangular_ownership_spikes_on_curve():
+        stations = _quarter_circle_stations()
+>       grid = rasterize_stations(stations, depth=48, width=48)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_river_stations.py:1119: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/ukgeo/river_stations.py:703: in rasterize_stations
+    _stamp_stations(stations, reach, station_id, water, azimuth, best_hi, best_lo, origin_x=0, origin_z=0)
+src/ukgeo/river_stations.py:771: in _stamp_stations
+    _stamp_one(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+sx = 16.5, sz = 4.5, tx = 1.0, tz = 0.0, half_width = 2, order = 3, reach_id = 1
+station_id = 0, water_y = 70, azimuth_value = 0
+reach = array([[0, 0, 0, ..., 0, 0, 0],
+       [0, 0, 0, ..., 0, 0, 0],
+       [0, 0, 0, ..., 0, 0, 0],
+       ...,
+       [0, 0, 0, ..., 0, 0, 0],
+       [0, 0, 0, ..., 0, 0, 0],
+       [0, 0, 0, ..., 0, 0, 0]], shape=(48, 48), dtype=uint32)
+station_out = array([[0, 0, 0, ..., 0, 0, 0],
+       [0, 0, 0, ..., 0, 0, 0],
+       [0, 0, 0, ..., 0, 0, 0],
+       ...,
+       [0, 0, 0, ..., 0, 0, 0],
+       [0, 0, 0, ..., 0, 0, 0],
+       [0, 0, 0, ..., 0, 0, 0]], shape=(48, 48), dtype=uint16)
+water = array([[-32768, -32768, -32768, ..., -32768, -32768, -32768],
+       [-32768, -32768, -32768, ..., -32768, -32768, -32...768, -32768, -32768],
+       [-32768, -32768, -32768, ..., -32768, -32768, -32768]],
+      shape=(48, 48), dtype=int16)
+azimuth = array([[0, 0, 0, ..., 0, 0, 0],
+       [0, 0, 0, ..., 0, 0, 0],
+       [0, 0, 0, ..., 0, 0, 0],
+       ...,
+       [0, 0, 0, ..., 0, 0, 0],
+       [0, 0, 0, ..., 0, 0, 0],
+       [0, 0, 0, ..., 0, 0, 0]], shape=(48, 48), dtype=uint8)
+best_hi = array([[18446744073709551615, 18446744073709551615, 18446744073709551615,
+        ..., 18446744073709551615, 184467440...
+        ..., 18446744073709551615, 18446744073709551615,
+        18446744073709551615]], shape=(48, 48), dtype=uint64)
+best_lo = array([[18446744073709551615, 18446744073709551615, 18446744073709551615,
+        ..., 18446744073709551615, 184467440...
+        ..., 18446744073709551615, 18446744073709551615,
+        18446744073709551615]], shape=(48, 48), dtype=uint64)
+origin_x = 0, origin_z = 0, width = 48, depth = 48, previous_water_y = None
+previous_spacing = 0.0, next_water_y = 71, next_spacing = 1.0
+
+    def _stamp_one(
+        sx: float,
+        sz: float,
+        tx: float,
+        tz: float,
+        half_width: int,
+        order: int,
+        reach_id: int,
+        station_id: int,
+        water_y: int,
+        azimuth_value: int,
+        reach: np.ndarray,
+        station_out: np.ndarray,
+        water: np.ndarray,
+        azimuth: np.ndarray,
+        best_hi: np.ndarray,
+        best_lo: np.ndarray,
+        *,
+        origin_x: int,
+        origin_z: int,
+        width: int,
+        depth: int,
+        previous_water_y: int | None = None,
+        previous_spacing: float = 0.0,
+        next_water_y: int | None = None,
+        next_spacing: float = 0.0,
+    ) -> None:
+        tx, tz = _unit_tangent(tx, tz)
+        cross_lim = float(max(0, half_width) + BANK_CARVE_REACH) + CROSS_PAD
+        x0 = max(origin_x, int(math.floor(sx - cross_lim - 1.0)))
+        x1 = min(origin_x + width, int(math.ceil(sx + cross_lim + 1.0)))
+        z0 = max(origin_z, int(math.floor(sz - cross_lim - 1.0)))
+        z1 = min(origin_z + depth, int(math.ceil(sz + cross_lim + 1.0)))
+        if x0 >= x1 or z0 >= z1:
+            return
+        xs = np.arange(x0, x1, dtype=np.float64) + 0.5
+        zs = np.arange(z0, z1, dtype=np.float64) + 0.5
+        dx = xs[None, :] - sx
+        dz = zs[:, None] - sz
+        along = dx * tx + dz * tz
+        perp = dx * (-tz) + dz * tx
+        # Rounded-rectangle eligibility: hard rect corners become quarter-circles so
+        # neighbouring stamps with different tangents do not leave triangular spikes.
+        abs_along = np.abs(along)
+        abs_perp = np.abs(perp)
+        corner = (np.maximum(0.0, abs_along - ALONG_LIMIT) ** 2) + (
+            np.maximum(0.0, abs_perp - (cross_lim - CROSS_PAD)) ** 2
+        )
+        inside = (abs_along <= ALONG_LIMIT + CROSS_PAD + 1e-6) & (abs_perp <= cross_lim + 1e-6) & (
+            corner <= (CROSS_PAD + 1e-6) ** 2
+        )
+        if not bool(inside.any()):
+            return
+        dist_milli = np.floor(np.abs(perp) * 1000.0 + 0.5).astype(np.int64)
+        np.clip(dist_milli, 0, 0xFFFFFF, out=dist_milli)
+        # hi holds distance above inverted order. lo holds the full uint32 reach
+        # id above the uint16 station id. Compare hi, then lo. Both sentinels are
+        # the uint64 maximum, so any real pair is smaller and the min is associative.
+        along_milli = np.floor(abs_along * 1000.0 + 0.5).astype(np.int64)
+        np.clip(along_milli, 0, 0xFFFF, out=along_milli)
+        order_hi, _ = ownership_hi_lo(0, order, reach_id, station_id)
+        keys_hi = (dist_milli.astype(np.uint64) << np.uint64(8)) | order_hi
+        keys_lo = (
+            (np.uint64(int(reach_id) & 0xFFFFFFFF) << np.uint64(32))
+            | (along_milli.astype(np.uint64) << np.uint64(16))
+            | np.uint64(int(station_id) & 0xFFFF)
+        )
+        lz0 = z0 - origin_z
+        lx0 = x0 - origin_x
+        hh = z1 - z0
+        ww = x1 - x0
+        best_hi_view = best_hi[lz0 : lz0 + hh, lx0 : lx0 + ww]
+        best_lo_view = best_lo[lz0 : lz0 + hh, lx0 : lx0 + ww]
+        better = inside & ((keys_hi < best_hi_view) | ((keys_hi == best_hi_view) & (keys_lo < best_lo_view)))
+        if not bool(better.any()):
+            return
+        best_hi_view[better] = keys_hi[better]
+>       best_lo_view[better] = keys_lo
+        ^^^^^^^^^^^^^^^^^^^^
+E       TypeError: NumPy boolean array indexing assignment requires a 0 or 1-dimensional input, input has 2 dimensions
+
+src/ukgeo/river_stations.py:883: TypeError
+=========================== short test summary info ============================
+FAILED tests/test_river_stations.py::test_reverse_reach_order_identical_ownership
+FAILED tests/test_river_stations.py::test_lower_bank_wins_and_profile_keeps_cascade
+FAILED tests/test_river_stations.py::test_same_station_water_y_across_width
+FAILED tests/test_river_stations.py::test_bake_river_stations_writes_schema_and_tiles
+FAILED tests/test_river_stations.py::test_skip_existing_keeps_prewritten_station_tile
+FAILED tests/test_river_stations.py::test_cross_track_ownership_on_bend_not_radial
+FAILED tests/test_river_stations.py::test_write_curved_channel_ownership_preview
+FAILED tests/test_river_stations.py::test_rounded_stamp_eligibility_rejects_sharp_corner
+FAILED tests/test_river_stations.py::test_station_water_is_interpolated_between_neighbouring_stamps
+FAILED tests/test_river_stations.py::test_ownership_still_order_independent_with_rounded_stamps
+FAILED tests/test_river_stations.py::test_no_triangular_ownership_spikes_on_curve
+11 failed, 12 passed in 1.92s
