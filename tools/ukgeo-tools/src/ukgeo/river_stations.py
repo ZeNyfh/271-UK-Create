@@ -241,15 +241,13 @@ def smooth_water_y_profile(
     raw_ys: np.ndarray,
     *,
     max_step: int = 1,
-    cascade_min_drop: int = 3,
+    cascade_at: np.ndarray | None = None,
 ) -> np.ndarray:
-    """Integer Minecraft Y along a reach: gradual slopes, intact cascades.
+    """Integer Minecraft Y along a reach: gradual slopes, metre-true cascades.
 
-    Starts from per-station metre→Y conversion, then never rises downstream.
-    Neighbouring stations on gentle reaches step by at most ``max_step``.
-    Steps whose monotone input drop is ``cascade_min_drop`` or more are kept
-    in full (waterfall / cascade). Call once per reach; do not blend across
-    confluences.
+    Large integer drops are only preserved where ``cascade_at[i]`` is true
+    (from CASCADE_DROP_METRES in the metre profile). Accidental Y jumps from
+    bank sampling or rounding are stepped at most ``max_step``.
     """
     raw = np.asarray(raw_ys, dtype=np.float64).reshape(-1)
     if raw.size == 0:
@@ -267,13 +265,17 @@ def smooth_water_y_profile(
             mono[i] = last_v
     for i in range(1, mono.size):
         mono[i] = min(mono[i], mono[i - 1])
+    flags = np.zeros(mono.shape, dtype=bool) if cascade_at is None else np.asarray(cascade_at, dtype=bool).reshape(-1)
+    if flags.size != mono.size:
+        raise ValueError("cascade_at must match raw_ys length")
     result = mono.copy()
     for i in range(1, result.size):
-        input_drop = float(mono[i - 1] - mono[i])
-        if input_drop >= float(cascade_min_drop):
-            result[i] = min(float(result[i - 1]), float(mono[i]))
+        target = float(mono[i])
+        prev = float(result[i - 1])
+        if bool(flags[i]):
+            result[i] = min(prev, target)
         else:
-            result[i] = max(float(mono[i]), float(result[i - 1]) - float(max_step))
+            result[i] = max(target, prev - float(max_step))
     return result
 
 
@@ -511,7 +513,13 @@ def _stations_from_reach(
         ],
         dtype=np.float64,
     )
-    water_ys = smooth_water_y_profile(raw_ys)
+    cascade = np.zeros(smoothed.shape, dtype=bool)
+    for i in range(int(smoothed.size) - 1):
+        left = float(smoothed[i])
+        right = float(smoothed[i + 1])
+        if math.isfinite(left) and math.isfinite(right) and (left - right) >= CASCADE_DROP_METRES:
+            cascade[i + 1] = True
+    water_ys = smooth_water_y_profile(raw_ys, cascade_at=cascade)
     stations: list[Station] = []
     for station_id, (sample, metres, water_y) in enumerate(zip(samples, smoothed, water_ys)):
         metres_f = float(metres)

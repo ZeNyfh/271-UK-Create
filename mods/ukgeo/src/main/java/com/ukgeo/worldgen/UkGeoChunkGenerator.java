@@ -157,7 +157,7 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     public static final int VEGETATION_FRESHWATER = 10;
     public static final int VEGETATION_URBAN = 11;
     public static final int VEGETATION_ROCKY = 12;
-    private static final int LAKE_EDGE_SEARCH_RADIUS = Integer.getInteger("ukgeo.lakeEdgeSearchRadius", 18);
+    private static final int LAKE_EDGE_SEARCH_RADIUS = Integer.getInteger("ukgeo.lakeEdgeSearchRadius", 24);
     private static final int LAKE_BANK_BLEND_RADIUS = 8;
     /** River corridor → lake mouth waterY/depth blend radius (blocks). */
     private static final int RIVER_LAKE_BLEND_RADIUS = 32;
@@ -719,7 +719,12 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         }
         double blocks = distance.found() ? distance.blocks() : waterRadius + 1.0;
         // Soften polygonal channel edges from quantized distance stamps.
-        double occupancy = blocks + RiverChannelForm.edgeOccupancyJitter(x, z);
+        // Mountain stamps skip occupancy jitter — it reads as triangular facets
+        // on diagonal corridors inside the shallow incision budget.
+        double occupancy = blocks;
+        if (!RiverBankFit.isMountainStamp(originalSurfaceY, rawWater)) {
+            occupancy += RiverChannelForm.edgeOccupancyJitter(x, z);
+        }
         boolean inChannel = distance.found() && occupancy <= waterRadius;
         double edgeDistance = inChannel ? Math.max(0.5, waterRadius + 0.5 - occupancy) : Math.max(0.5, occupancy - waterRadius);
         int depth = inChannel
@@ -799,7 +804,7 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
             int depth = lakeDepth(data, heightWindow, x, z, cache);
             int bed = Math.max(minBuildY + 1, waterSurface - depth);
             BlockState floor = stillWaterFloorMaterial(depth);
-            shape = new RiverShape(true, true, bed, waterSurface, floor);
+            shape = RiverShape.lakeBody(bed, waterSurface, floor);
         } else if (!stationsEnabled) {
             shape = RiverShape.none(originalSurfaceY);
         } else {
@@ -902,21 +907,11 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
                 return cached;
             }
         }
-        // Soften cubic concentric rings from the discrete freshwater mask.
-        double edgeDistance = nearestLakeEdge(data, x, z, LAKE_EDGE_SEARCH_RADIUS, cache)
-            + RiverChannelForm.edgeOccupancyJitter(x, z) * 1.75;
-        edgeDistance = Math.max(0.0, edgeDistance);
-        int maxDepth = Math.min(lakeDepthForOpenWaterWidth(edgeDistance * 2.0), lakeMaxDepth(edgeDistance));
-        double lakeHalfWidth = Math.max(6.0, maxDepth * 1.75);
-        int depth = RiverChannelForm.bowlDepthBlocks(edgeDistance, lakeHalfWidth, maxDepth);
-        depth = RiverChannelForm.applyDepthJitter(depth, maxDepth, x, z, edgeDistance, lakeHalfWidth);
-        if (edgeDistance <= 1.25) {
-            depth = 1;
-        } else if (edgeDistance <= 2.75) {
-            depth = Math.min(depth, 2);
-        }
-        // Do not pull lake beds toward shallow river mouth depth.
-        depth = Math.clamp(depth, 1, lakeMaxDepth(edgeDistance));
+        // Continuous world-coord basin from lake-edge distance. No high-frequency
+        // occupancy/depth jitter — those produced checkerboard and cubic rings.
+        // River mouth depth never feeds this path (effective lakes use lakeBody).
+        double edgeDistance = Math.max(0.0, nearestLakeEdge(data, x, z, LAKE_EDGE_SEARCH_RADIUS, cache));
+        int depth = LakeBathymetry.depthBlocks(edgeDistance, x, z);
         if (cache != null) {
             cache.lakeDepths.put(key, depth);
         }
@@ -7144,9 +7139,24 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
     ) {
     }
 
-    public record RiverShape(boolean hasWater, boolean influenced, int terrainSurfaceY, int waterSurfaceY, BlockState floorMaterial) {
+    public record RiverShape(
+        boolean hasWater,
+        boolean influenced,
+        int terrainSurfaceY,
+        int waterSurfaceY,
+        BlockState floorMaterial,
+        boolean lake
+    ) {
+        public RiverShape(boolean hasWater, boolean influenced, int terrainSurfaceY, int waterSurfaceY, BlockState floorMaterial) {
+            this(hasWater, influenced, terrainSurfaceY, waterSurfaceY, floorMaterial, false);
+        }
+
         static RiverShape none(int surfaceY) {
-            return new RiverShape(false, false, surfaceY, surfaceY, Blocks.GRAVEL.defaultBlockState());
+            return new RiverShape(false, false, surfaceY, surfaceY, Blocks.GRAVEL.defaultBlockState(), false);
+        }
+
+        static RiverShape lakeBody(int bedY, int waterY, BlockState floor) {
+            return new RiverShape(true, true, bedY, waterY, floor, true);
         }
     }
 

@@ -65,23 +65,39 @@ final class RiverStationColumn {
         if (baked.isEmpty()) {
             return Shape.none(originalSurfaceY);
         }
-        int water = baked.getAsInt();
+        int water = clampWaterToLocalSurface(baked.getAsInt(), originalSurfaceY);
         boolean inChannel = distanceFound && blocks <= waterRadius;
         if (inChannel) {
             // Mountain stamps: DEM→bed ≤ MOUNTAIN_TOTAL_INCISION (depth included).
-            // Valleys keep absolute baked water Y.
+            // Valleys keep absolute baked water Y (clamped above).
             int plane = RiverBankFit.cappedPlane(originalSurfaceY, water, depth);
             int bed = RiverWaterPlane.bedUnderPlane(plane, depth, minBuildY);
             return new Shape(true, true, bed, plane);
         }
         double dOut = distanceFound ? Math.max(0.5, blocks - waterRadius) : 1.0;
-        // Banks: carve is DEM-capped; reference water Y stays baked.
+        // Banks: carve is DEM-capped; reference water Y stays baked (clamped).
         int terrain = RiverWaterPlane.conformBankTop(originalSurfaceY, water, dOut, RiverBankFit.BANK_CARVE_REACH);
         terrain = Math.max(minBuildY + 1, terrain);
         return new Shape(false, true, terrain, water);
     }
 
+    /**
+     * Baked water Y is authoritative along a reach, but must not float as a
+     * protrusion above the local DEM (bad station samples / false cascades).
+     * Cascades remain intact because they lower water below the DEM.
+     */
+    static int clampWaterToLocalSurface(int waterY, int originalSurfaceY) {
+        // Never float a water plane above the local DEM. Bank raise is handled
+        // by conformBankTop on dry columns; baked spikes / false cascades must
+        // not create unsupported surface water above the land surface.
+        if (waterY > originalSurfaceY) {
+            return originalSurfaceY;
+        }
+        return waterY;
+    }
+
     record Shape(boolean hasWater, boolean influenced, int terrainY, int waterY) {
+
         static Shape none(int surfaceY) {
             return new Shape(false, false, surfaceY, surfaceY);
         }

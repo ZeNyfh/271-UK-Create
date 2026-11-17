@@ -134,4 +134,38 @@ class RiverStationColumnTest {
         assertEquals(-32767, R16IntTileLayer.decode((short) -32767));
         assertEquals(R16IntTileLayer.NODATA, R16IntTileLayer.decode((short) -32768));
     }
+
+    @Test
+    void spawnStyleFloatingWaterIsClampedToDem() {
+        RiverStationColumn.Shape shape = RiverStationColumn.resolve(true, 255901, 77, true, 0, 10, 71, 3, -64);
+        assertTrue(shape.hasWater());
+        assertTrue(shape.waterY() <= 71, "waterY=" + shape.waterY());
+        assertTrue(shape.terrainY() < shape.waterY());
+    }
+
+    @Test
+    void clampWaterToLocalSurfaceNeverExceedsDem() {
+        assertEquals(71, RiverStationColumn.clampWaterToLocalSurface(77, 71));
+        assertEquals(71, RiverStationColumn.clampWaterToLocalSurface(71, 71));
+        assertEquals(68, RiverStationColumn.clampWaterToLocalSurface(68, 71));
+    }
+
+    @Test
+    void diagonalMountainChannelRespectsIncisionBudget() {
+        int dem = 150;
+        int baked = 100;
+        int prevBed = Integer.MIN_VALUE;
+        for (int i = 0; i < 12; i++) {
+            double blocks = Math.abs(i * 0.7 - 4.0);
+            RiverStationColumn.Shape shape = RiverStationColumn.resolve(true, 9, baked, true, blocks, 3, dem, 2, -64);
+            if (shape.hasWater()) {
+                int incision = dem - shape.terrainY();
+                assertTrue(incision <= RiverBankFit.MOUNTAIN_TOTAL_INCISION, "incision=" + incision);
+                if (prevBed != Integer.MIN_VALUE) {
+                    assertTrue(Math.abs(shape.terrainY() - prevBed) <= 2);
+                }
+                prevBed = shape.terrainY();
+            }
+        }
+    }
 }

@@ -1,0 +1,11 @@
+site=uneven_banks minecraft=(-13757,-34570) data=(38343,39280)
+dem_y≈193 water_y=191 reach=186320 station=38
+float_above_dem=False water_max=199 chunk=(-860,-2161)
+
+site=mountain_river minecraft=(-13957,-34342) data=(38143,39508)
+dem_y≈185 water_y=-32768 reach=0 station=0
+float_above_dem=False water_max=185 chunk=(-873,-2147)
+
+site=spawn_water minecraft=(-255,380) data=(51845,74230)
+dem_y≈71 water_y=77 reach=255901 station=2
+float_above_dem=True water_max=77 chunk=(-16,23)

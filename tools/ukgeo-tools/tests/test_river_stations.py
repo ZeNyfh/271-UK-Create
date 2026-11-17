@@ -1034,10 +1034,43 @@ def test_smooth_water_y_gradual_and_keeps_cascade():
     gradual = smooth_water_y_profile(np.array([100, 98, 96, 94, 92], dtype=np.float64))
     assert np.all(np.diff(gradual) <= 0)
     assert np.all(np.diff(gradual) >= -1 - 1e-9)
-    cascade = smooth_water_y_profile(np.array([100, 100, 100, 90, 90], dtype=np.float64))
+    # Without cascade_at, large integer drops are stepped (false cascades).
+    false_cascade = smooth_water_y_profile(np.array([100, 100, 100, 90, 90], dtype=np.float64))
+    assert false_cascade[2] == 100
+    assert false_cascade[3] == 99
+    assert np.all(np.diff(false_cascade) >= -1 - 1e-9)
+    # Metre-true cascades keep the full drop when flagged.
+    flags = np.array([False, False, False, True, False])
+    cascade = smooth_water_y_profile(
+        np.array([100, 100, 100, 90, 90], dtype=np.float64),
+        cascade_at=flags,
+    )
     assert cascade[2] == 100
     assert cascade[3] == 90
     assert cascade[2] - cascade[3] >= 3
+
+
+def test_smooth_water_y_spawn_style_false_spike_is_stepped():
+    """Station water_y spike like spawn (-255,380): 77 amid 72s must not stay a wedge."""
+    raw = np.array([72, 72, 77, 77, 72, 72], dtype=np.float64)
+    out = smooth_water_y_profile(raw)  # no metre cascade flags
+    assert out[0] == 72
+    # Monotone then step: 72,72,72,72,72,72 after clamp-down of the spike... 
+    # Actually mono first: 72,72,72,72,72,72 because min with previous after fill?
+    # Raw after mono-decreasing from left: 72,72,72,72,72,72 — spike removed by mono? 
+    # Wait mono takes min with previous: 72,72,min(77,72)=72,... so spike dies in mono when upstream is lower.
+    assert np.all(out <= 72 + 1e-9)
+    # Upstream spike then drop: 77..72 without cascade flag steps by 1.
+    spiked = smooth_water_y_profile(np.array([77, 77, 77, 72, 72], dtype=np.float64))
+    assert spiked[0] == 77
+    assert np.all(np.diff(spiked) >= -1 - 1e-9)
+    # Five stations: 77→72 needs four steps of 1 → ends at 75 on this short array.
+    assert spiked[-1] == 75
+    assert spiked[3] == 76
+    long_spike = smooth_water_y_profile(np.array([77] * 3 + [72] * 8, dtype=np.float64))
+    assert long_spike[0] == 77
+    assert long_spike[-1] == 72
+    assert np.all(np.diff(long_spike) >= -1 - 1e-9)
 
 
 def test_ownership_still_order_independent_with_rounded_stamps():

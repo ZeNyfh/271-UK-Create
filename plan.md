@@ -85,3 +85,18 @@ Not required for the fixes above. If centreline geometry changes, rebuild mask �
 - Re-deriving OS river centreline geometry.
 - Re-enabling runtime local water-Y smoothing across stations.
 - Live server deploy / world overwrite from this document.
+
+
+## Status update (banks / lakes / spawn water)
+
+### Spawn water protrusion `(-255, 72, 380)`
+**Cause:** Station `water_y=77` on DEM ≈71 from a false cascade (large integer drop without a metre-profile cascade). Ownership wedge of early stations left a triangle of elevated water.
+**Fix:** `smooth_water_y_profile(..., cascade_at=)` only preserves large drops where `CASCADE_DROP_METRES` is met in the metre profile; runtime `clampWaterToLocalSurface` never floats water above the local DEM. Requires stations-only rebake of `water/river_water_y`.
+
+### Uneven / diagonal mountain banks
+**Cause:** Chunk-local bank averaging created border seams; mountain edge occupancy jitter created triangular facets inside the shallow incision budget.
+**Fix:** Skip occupancy jitter on mountain stamps; replace chunk-local bank blur with world-deterministic talus re-anchor (±1). Keep `MOUNTAIN_TOTAL_INCISION=3`.
+
+### Lake beds
+**Cause:** Mask-edge bowl + high-frequency jitter + chunk-local smooth mixing river cells.
+**Fix:** `LakeBathymetry` world-coord basin (no jitter); `RiverShape.lake` + lake-only components for residual smooth; rivers excluded from lake bed passes.
