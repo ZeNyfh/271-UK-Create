@@ -137,6 +137,16 @@ The QA commands leave live worlds and runtime data untouched. The confirmed stee
 ```
 
 
+## VanillaBackport biomes
+
+Optional soft dep on [VanillaBackport](https://modrinth.com/mod/vanilla-backport) (+ BlackGear Platform). When present, `UkGeoVegetationBiomeSource` remaps woodland in oversized BNG regions:
+
+- `minecraft:pale_garden` — Dartmoor, Exmoor, Eryri lower slopes, W Highlands Celtic rainforest, W Ireland oak belt
+- `minecraft:dappled_forest` — Scottish Highlands/islands, Pennines, Lake District, NI uplands
+- `minecraft:sulfur_caves` — underground in Wales (stronger in Vale of Glamorgan / S Wales sulfate core)
+
+Runtime forest expand (no tile rebuild) promotes vegetation classes 3–9 toward woodland in those priority boxes plus densest IE/NI belts. Nautiluses are disabled via instance `config/vanillabackport-common.toml` (`has_nautilus = false`), not a biome modifier.
+
 ## Distant Horizons (LOD)
 
 When [Distant Horizons](https://modrinth.com/mod/distanthorizons) (`distanthorizons`) is installed, UKGeo registers a custom DH world generator for levels using `ukgeo:heightmap`. LODs are built from UK height/surface tiles via `surfaceY` / `sampleLodColumn` — **not** via Minecraft `fillFromNoise` / DH `INTERNAL_SERVER` full chunk generation. Ores, caves, trees, and structures are skipped on the LOD path.

@@ -3973,10 +3973,14 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
             String path = id.getPath();
             switch (path) {
                 case "plains", "arable", "improved_grassland", "urban" -> features.add(VegetationPlacements.TREES_PLAINS);
-                case "forest" -> features.add(VegetationPlacements.TREES_BIRCH_AND_OAK);
+                case "forest", "pale_garden" -> features.add(VegetationPlacements.TREES_BIRCH_AND_OAK);
                 case "broadleaf_woodland" -> {
                     features.add(VegetationPlacements.TREES_BIRCH_AND_OAK);
                     features.add(VegetationPlacements.TREES_SPARSE_JUNGLE);
+                }
+                case "dappled_forest" -> {
+                    features.add(VegetationPlacements.TREES_TAIGA);
+                    features.add(VegetationPlacements.TREES_BIRCH_AND_OAK);
                 }
                 case "taiga", "conifer_woodland" -> features.add(VegetationPlacements.TREES_TAIGA);
                 case "meadow", "neutral_grassland" -> features.add(VegetationPlacements.TREES_MEADOW);

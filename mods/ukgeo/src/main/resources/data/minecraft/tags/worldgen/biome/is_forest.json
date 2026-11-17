@@ -2,6 +2,8 @@
   "replace": false,
   "values": [
     "ukgeo:broadleaf_woodland",
-    "ukgeo:conifer_woodland"
+    "ukgeo:conifer_woodland",
+    "minecraft:pale_garden",
+    "minecraft:dappled_forest"
   ]
 }

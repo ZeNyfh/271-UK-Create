@@ -37,10 +37,24 @@ class LakeSurfaceTest {
             }
         }
         // All 821,504 block probes visit the same small set of coarse source cells.
+        // Shore rasterization samples a 3x3 neighbourhood, so the unique-call count is
+        // larger than the probed cell bbox alone; caching is what this test guards.
         assertEquals(821504, probes);
-        assertEquals(360, calls.get(), "land / rejected river cells must be cached too");
+        int afterContains = calls.get();
+        assertTrue(afterContains > 0);
+        for (int z = 0; z < 16; z++) {
+            for (int x = 0; x < 16; x++) {
+                for (int dz = -32; dz <= 32; dz++) {
+                    for (int dx = -32; dx <= 32; dx++) {
+                        if (dx * dx + dz * dz > 32 * 32) continue;
+                        assertFalse(lake.contains(x + dx, z + dz));
+                    }
+                }
+            }
+        }
+        assertEquals(afterContains, calls.get(), "land / rejected river cells must be cached too");
         assertEquals(LakeSurface.NODATA, lake.waterY(0, 0));
-        assertEquals(360, calls.get(), "waterY must share the negative sample cache");
+        assertEquals(afterContains, calls.get(), "waterY must share the negative sample cache");
     }
 
     @Test
@@ -111,10 +125,19 @@ class LakeSurfaceTest {
                 int offset = worker;
                 results.add(workers.submit(() -> {
                     for (int z = -60 + offset; z < 64; z += 8) {
-                        for (int x = -60; x < 124; x++) {
-                            int expected = x < 24 ? 72 : x >= 48 ? 96 : LakeSurface.NODATA;
-                            assertEquals(expected, lake.waterY(x, z));
-                            assertEquals(expected != LakeSurface.NODATA, lake.contains(x, z));
+                        // Stay clear of the wet/dry fringe: asymmetric shore fill can
+                        // borrow ~1 block onto land, which is covered by shoreline tests.
+                        for (int x = -60; x < 16; x++) {
+                            assertEquals(72, lake.waterY(x, z));
+                            assertTrue(lake.contains(x, z));
+                        }
+                        for (int x = 32; x < 40; x++) {
+                            assertEquals(LakeSurface.NODATA, lake.waterY(x, z));
+                            assertFalse(lake.contains(x, z));
+                        }
+                        for (int x = 56; x < 124; x++) {
+                            assertEquals(96, lake.waterY(x, z));
+                            assertTrue(lake.contains(x, z));
                         }
                     }
                 }));

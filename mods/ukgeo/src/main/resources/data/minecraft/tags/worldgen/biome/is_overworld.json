@@ -14,6 +14,9 @@
     "ukgeo:rocky",
     "ukgeo:urban",
     "ukgeo:wetland",
-    "ukgeo:mountains"
+    "ukgeo:mountains",
+    "minecraft:pale_garden",
+    "minecraft:dappled_forest",
+    "minecraft:sulfur_caves"
   ]
 }

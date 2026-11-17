@@ -25,7 +25,10 @@
             "mountains": "ukgeo:mountains",
             "lush_caves": "minecraft:lush_caves",
             "deep_dark": "minecraft:deep_dark",
-            "dripstone_caves": "minecraft:dripstone_caves"
+            "dripstone_caves": "minecraft:dripstone_caves",
+            "pale_garden": "minecraft:pale_garden",
+            "dappled_forest": "minecraft:dappled_forest",
+            "sulfur_caves": "minecraft:sulfur_caves"
           }
         },
         "cave_settings": "minecraft:overworld",

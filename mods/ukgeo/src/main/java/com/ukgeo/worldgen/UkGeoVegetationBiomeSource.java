@@ -1,5 +1,6 @@
 package com.ukgeo.worldgen;
 
+import com.ukgeo.worldgen.geo.UkGeoReference;
 import com.mojang.serialization.MapCodec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
 import java.io.IOException;
@@ -28,7 +29,9 @@ public final class UkGeoVegetationBiomeSource extends BiomeSource {
         Biome.CODEC.fieldOf("freshwater").forGetter((UkGeoVegetationBiomeSource source) -> source.freshwater),
         Biome.CODEC.fieldOf("urban").forGetter((UkGeoVegetationBiomeSource source) -> source.urban),
         Biome.CODEC.fieldOf("rocky").forGetter((UkGeoVegetationBiomeSource source) -> source.rocky),
-        ExtraBiomes.CODEC.codec().optionalFieldOf("extras").forGetter((UkGeoVegetationBiomeSource source) -> Optional.of(new ExtraBiomes(source.mountains, source.lushCaves, source.deepDark, source.dripstoneCaves)))
+        ExtraBiomes.CODEC.codec().optionalFieldOf("extras").forGetter((UkGeoVegetationBiomeSource source) -> Optional.of(new ExtraBiomes(
+            source.mountains, source.lushCaves, source.deepDark, source.dripstoneCaves,
+            Optional.ofNullable(source.paleGarden), Optional.ofNullable(source.dappledForest), Optional.ofNullable(source.sulfurCaves))))
     ).apply(instance, UkGeoVegetationBiomeSource::new));
 
     private final Holder<Biome> fallback;
@@ -50,6 +53,9 @@ public final class UkGeoVegetationBiomeSource extends BiomeSource {
     private final Holder<Biome> lushCaves;
     private final Holder<Biome> deepDark;
     private final Holder<Biome> dripstoneCaves;
+    private final Holder<Biome> paleGarden;
+    private final Holder<Biome> dappledForest;
+    private final Holder<Biome> sulfurCaves;
     private volatile RuntimeData runtimeData;
     private volatile boolean attemptedDataLoad;
 
@@ -91,6 +97,9 @@ public final class UkGeoVegetationBiomeSource extends BiomeSource {
         this.lushCaves = resolved == null ? fallback : resolved.lushCaves();
         this.deepDark = resolved == null ? this.mountains : resolved.deepDark();
         this.dripstoneCaves = resolved == null ? rocky : resolved.dripstoneCaves();
+        this.paleGarden = resolved == null ? null : resolved.paleGarden().orElse(null);
+        this.dappledForest = resolved == null ? null : resolved.dappledForest().orElse(null);
+        this.sulfurCaves = resolved == null ? null : resolved.sulfurCaves().orElse(null);
     }
 
     @Override
@@ -119,8 +128,11 @@ public final class UkGeoVegetationBiomeSource extends BiomeSource {
             mountains,
             lushCaves,
             deepDark,
-            dripstoneCaves
-        ).distinct();
+            dripstoneCaves,
+            paleGarden,
+            dappledForest,
+            sulfurCaves
+        ).filter(holder -> holder != null).distinct();
     }
 
     @Override
@@ -149,7 +161,35 @@ public final class UkGeoVegetationBiomeSource extends BiomeSource {
             return mountains;
         }
         int biomeClass = smoothedBiomeClass(data, blockX, blockZ);
+        double easting = Double.NaN;
+        double northing = Double.NaN;
+        boolean haveBng = false;
+        if (data.reference != null) {
+            var bng = data.reference.minecraftToBng(blockX, blockZ);
+            if (bng.isPresent()) {
+                easting = bng.get().easting();
+                northing = bng.get().northing();
+                haveBng = true;
+            }
+        }
+        if (haveBng && VanillaBackportBiomeRegions.shouldExpandForest(easting, northing, biomeClass, 0L)) {
+            biomeClass = VanillaBackportBiomeRegions.expandedWoodlandClass(easting, northing);
+        }
+        if (haveBng && (biomeClass == 1 || biomeClass == 2)) {
+            Holder<Biome> remapped = vanillaBackportWoodland(easting, northing);
+            if (remapped != null) {
+                return remapped;
+            }
+        }
         return biomeForVegetationClass(biomeClass);
+    }
+
+    private Holder<Biome> vanillaBackportWoodland(double easting, double northing) {
+        return switch (VanillaBackportBiomeRegions.classify(easting, northing)) {
+            case PALE_GARDEN -> paleGarden;
+            case DAPPLED_FOREST -> dappledForest;
+            case NONE -> null;
+        };
     }
 
     private int smoothedBiomeClass(RuntimeData data, int blockX, int blockZ) {
@@ -202,6 +242,25 @@ public final class UkGeoVegetationBiomeSource extends BiomeSource {
         }
         if (blockY <= Integer.getInteger("ukgeo.dripstoneCavesMaxY", 24) && caveNoise < Double.parseDouble(System.getProperty("ukgeo.dripstoneCavesNoiseThreshold", "-0.52"))) {
             return dripstoneCaves;
+        }
+        if (sulfurCaves != null
+            && blockY <= Integer.getInteger("ukgeo.sulfurCavesMaxY", 40)
+            && data() != null
+            && data().reference != null) {
+            var bng = data().reference.minecraftToBng(blockX, blockZ);
+            if (bng.isPresent()) {
+                double e = bng.get().easting();
+                double n = bng.get().northing();
+                if (VanillaBackportBiomeRegions.inSulfurWales(e, n)) {
+                    double threshold = Double.parseDouble(System.getProperty(
+                        "ukgeo.sulfurCavesNoiseThreshold",
+                        VanillaBackportBiomeRegions.inSulfurValeCore(e, n) ? "0.35" : "0.62"));
+                    // Soft Wales: require stronger noise than Vale sulfate core.
+                    if (caveNoise > threshold) {
+                        return sulfurCaves;
+                    }
+                }
+            }
         }
         return null;
     }
@@ -293,7 +352,7 @@ public final class UkGeoVegetationBiomeSource extends BiomeSource {
                     ? null
                     : new U8OreTileLayer(manifest, "biome_regions", manifest.biomeRegionsPath, manifest.biomeRegionsCellBlocks, manifest.paddedWidth, manifest.paddedDepth);
                 U8OreTileLayer riverLayer = manifest.riversPath == null ? null : new U8OreTileLayer(manifest, "rivers", manifest.riversPath);
-                runtimeData = new RuntimeData(height, vegetationLayer, biomeRegionLayer, riverLayer, manifest.biomeRegionsCellBlocks);
+                runtimeData = new RuntimeData(height, vegetationLayer, biomeRegionLayer, riverLayer, manifest.biomeRegionsCellBlocks, manifest.toReference());
             } catch (IOException | RuntimeException ex) {
                 UkGeoMod.LOGGER.warn("UK vegetation biome data is missing or invalid; using fallback biome: {}", ex.getMessage());
                 runtimeData = null;
@@ -302,15 +361,33 @@ public final class UkGeoVegetationBiomeSource extends BiomeSource {
         }
     }
 
-    private record ExtraBiomes(Holder<Biome> mountains, Holder<Biome> lushCaves, Holder<Biome> deepDark, Holder<Biome> dripstoneCaves) {
+    private record ExtraBiomes(
+        Holder<Biome> mountains,
+        Holder<Biome> lushCaves,
+        Holder<Biome> deepDark,
+        Holder<Biome> dripstoneCaves,
+        Optional<Holder<Biome>> paleGarden,
+        Optional<Holder<Biome>> dappledForest,
+        Optional<Holder<Biome>> sulfurCaves
+    ) {
         private static final MapCodec<ExtraBiomes> CODEC = RecordCodecBuilder.mapCodec(instance -> instance.group(
             Biome.CODEC.fieldOf("mountains").forGetter(ExtraBiomes::mountains),
             Biome.CODEC.fieldOf("lush_caves").forGetter(ExtraBiomes::lushCaves),
             Biome.CODEC.fieldOf("deep_dark").forGetter(ExtraBiomes::deepDark),
-            Biome.CODEC.fieldOf("dripstone_caves").forGetter(ExtraBiomes::dripstoneCaves)
+            Biome.CODEC.fieldOf("dripstone_caves").forGetter(ExtraBiomes::dripstoneCaves),
+            Biome.CODEC.optionalFieldOf("pale_garden").forGetter(ExtraBiomes::paleGarden),
+            Biome.CODEC.optionalFieldOf("dappled_forest").forGetter(ExtraBiomes::dappledForest),
+            Biome.CODEC.optionalFieldOf("sulfur_caves").forGetter(ExtraBiomes::sulfurCaves)
         ).apply(instance, ExtraBiomes::new));
     }
 
-    private record RuntimeData(R16HeightTileLayer height, U8OreTileLayer vegetationLayer, U8OreTileLayer biomeRegionLayer, U8OreTileLayer riverLayer, int biomeRegionCellBlocks) {
+    private record RuntimeData(
+        R16HeightTileLayer height,
+        U8OreTileLayer vegetationLayer,
+        U8OreTileLayer biomeRegionLayer,
+        U8OreTileLayer riverLayer,
+        int biomeRegionCellBlocks,
+        UkGeoReference reference
+    ) {
     }
 }

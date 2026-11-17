@@ -11,6 +11,7 @@ import com.seibel.distanthorizons.api.interfaces.world.IDhApiLevelWrapper;
 import com.seibel.distanthorizons.api.objects.data.DhApiChunk;
 import com.seibel.distanthorizons.api.objects.data.DhApiTerrainDataPoint;
 import com.ukgeo.worldgen.UkGeoChunkGenerator;
+import com.ukgeo.worldgen.VanillaBackportBiomeRegions;
 import com.ukgeo.worldgen.UkGeoMod;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
@@ -101,20 +102,20 @@ public final class UkGeoDhLodWorldGenerator implements IDhApiWorldGenerator {
             for (int localZ = 0; localZ < 16; localZ++) {
                 UkGeoChunkGenerator.LodColumnSample sample =
                     generator.sampleLodColumn(originX + localX, originZ + localZ);
-                apiChunk.setDataPoints(localX, localZ, buildColumn(sample));
+                apiChunk.setDataPoints(localX, localZ, buildColumn(sample, originX + localX, originZ + localZ));
             }
         }
         return apiChunk;
     }
 
-    private List<DhApiTerrainDataPoint> buildColumn(UkGeoChunkGenerator.LodColumnSample sample) {
+    private List<DhApiTerrainDataPoint> buildColumn(UkGeoChunkGenerator.LodColumnSample sample, int blockX, int blockZ) {
         int minY = sample.minY();
         int maxY = Math.max(sample.maxY(), minY + 1);
         int surface = Math.clamp(sample.surfaceY(), minY, maxY - 1);
         int sea = sample.seaLevelY();
         boolean oceanOrFlooded = !sample.hasHeightData() || surface < sea;
         IDhApiBlockStateWrapper surfaceRock = wrap(sample.surfaceRock());
-        IDhApiBiomeWrapper biome = resolveBiome(sample, oceanOrFlooded);
+        IDhApiBiomeWrapper biome = resolveBiome(sample, oceanOrFlooded, blockX, blockZ);
 
         ArrayList<Segment> segments = new ArrayList<>(10);
         if (oceanOrFlooded) {
@@ -201,18 +202,42 @@ public final class UkGeoDhLodWorldGenerator implements IDhApiWorldGenerator {
         return points;
     }
 
-    private IDhApiBiomeWrapper resolveBiome(UkGeoChunkGenerator.LodColumnSample sample, boolean oceanOrFlooded) {
-        return biomeWrapper(lodBiomeId(sample, oceanOrFlooded));
+    private IDhApiBiomeWrapper resolveBiome(UkGeoChunkGenerator.LodColumnSample sample, boolean oceanOrFlooded, int blockX, int blockZ) {
+        return biomeWrapper(lodBiomeId(sample, oceanOrFlooded, blockX, blockZ));
     }
 
-    private static String lodBiomeId(UkGeoChunkGenerator.LodColumnSample sample, boolean oceanOrFlooded) {
+    private String lodBiomeId(UkGeoChunkGenerator.LodColumnSample sample, boolean oceanOrFlooded, int blockX, int blockZ) {
         if (oceanOrFlooded) {
             return BIOME_COASTAL_OCEAN;
         }
         if (sample.riverWater()) {
             return BIOME_FRESHWATER;
         }
-        return switch (sample.vegetationClass()) {
+        int vegetationClass = sample.vegetationClass();
+        var reference = generator.reference();
+        if (reference.isPresent()) {
+            var bng = reference.get().minecraftToBng(blockX, blockZ);
+            if (bng.isPresent()) {
+                double e = bng.get().easting();
+                double n = bng.get().northing();
+                if (VanillaBackportBiomeRegions.shouldExpandForest(e, n, vegetationClass, 0L)) {
+                    vegetationClass = VanillaBackportBiomeRegions.expandedWoodlandClass(e, n);
+                }
+                if (vegetationClass == UkGeoChunkGenerator.VEGETATION_BROADLEAF_WOODLAND
+                    || vegetationClass == UkGeoChunkGenerator.VEGETATION_CONIFER_WOODLAND) {
+                    return switch (VanillaBackportBiomeRegions.classify(e, n)) {
+                        case PALE_GARDEN -> "minecraft:pale_garden";
+                        case DAPPLED_FOREST -> "minecraft:dappled_forest";
+                        case NONE -> woodlandBiomeId(vegetationClass);
+                    };
+                }
+            }
+        }
+        return woodlandBiomeId(vegetationClass);
+    }
+
+    private static String woodlandBiomeId(int vegetationClass) {
+        return switch (vegetationClass) {
             case UkGeoChunkGenerator.VEGETATION_BROADLEAF_WOODLAND -> "ukgeo:broadleaf_woodland";
             case UkGeoChunkGenerator.VEGETATION_CONIFER_WOODLAND -> "ukgeo:conifer_woodland";
             case UkGeoChunkGenerator.VEGETATION_ARABLE -> "ukgeo:arable";

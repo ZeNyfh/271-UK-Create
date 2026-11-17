@@ -35,3 +35,15 @@ type = "optional"
 ordering = "AFTER"
 side = "BOTH"
 
+[[dependencies."${mod_id}"]]
+modId = "vanillabackport"
+type = "optional"
+ordering = "AFTER"
+side = "BOTH"
+
+[[dependencies."${mod_id}"]]
+modId = "platform"
+type = "optional"
+ordering = "AFTER"
+side = "BOTH"
+
