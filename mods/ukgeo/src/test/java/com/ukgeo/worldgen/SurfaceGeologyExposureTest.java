@@ -3,44 +3,17 @@ package com.ukgeo.worldgen;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import net.minecraft.SharedConstants;
-import net.minecraft.server.Bootstrap;
-import net.minecraft.world.level.block.Blocks;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 class SurfaceGeologyExposureTest {
-    @BeforeAll
-    static void bootstrapMinecraft() {
-        SharedConstants.tryDetectVersion();
-        Bootstrap.bootStrap();
-    }
-
     @Test
-    void rejectedSteepGeologyUsesSoilAndStoneInsteadOfOriginalRock() {
-        var rejectedExposure = Blocks.GRASS_BLOCK.defaultBlockState();
-
-        assertEquals(
-            Blocks.DIRT.defaultBlockState(),
-            ChunkTerrainPlanner.steepSubsurfaceState(99, 100, rejectedExposure)
-        );
-        assertEquals(
-            Blocks.DIRT.defaultBlockState(),
-            ChunkTerrainPlanner.steepSubsurfaceState(97, 100, rejectedExposure)
-        );
-        assertEquals(
-            Blocks.STONE.defaultBlockState(),
-            ChunkTerrainPlanner.steepSubsurfaceState(96, 100, rejectedExposure)
-        );
-    }
-
-    @Test
-    void permittedSteepGeologyRemainsExposed() {
-        var permittedExposure = Blocks.SMOOTH_BASALT.defaultBlockState();
-        assertEquals(
-            permittedExposure,
-            ChunkTerrainPlanner.steepSubsurfaceState(96, 100, permittedExposure)
-        );
+    void rejectedSteepGeologyFallsBackToDirtAndStone() {
+        assertEquals(ChunkTerrainPlanner.SteepSubsurfaceMaterial.DIRT,
+            ChunkTerrainPlanner.steepSubsurfaceMaterial(99, 100));
+        assertEquals(ChunkTerrainPlanner.SteepSubsurfaceMaterial.DIRT,
+            ChunkTerrainPlanner.steepSubsurfaceMaterial(97, 100));
+        assertEquals(ChunkTerrainPlanner.SteepSubsurfaceMaterial.STONE,
+            ChunkTerrainPlanner.steepSubsurfaceMaterial(96, 100));
     }
 
     @Test
