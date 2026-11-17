@@ -6,6 +6,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.biome.BiomeSource;
 import net.minecraft.world.level.chunk.ChunkGenerator;
 import net.neoforged.bus.api.IEventBus;
+import net.neoforged.bus.api.EventPriority;
 import net.neoforged.fml.ModContainer;
 import net.neoforged.fml.ModList;
 import net.neoforged.fml.config.ModConfig;
@@ -28,6 +29,7 @@ public final class UkGeoMod {
         modContainer.registerConfig(ModConfig.Type.COMMON, UkGeoConfig.SPEC);
         modBus.addListener(this::register);
         NeoForge.EVENT_BUS.addListener(UkGeoCommands::register);
+        NeoForge.EVENT_BUS.addListener(EventPriority.HIGHEST, LegacyStructureStarts::onChunkLoad);
         NeoForge.EVENT_BUS.addListener(UkGeoOilIntegration::onServerTick);
         NeoForge.EVENT_BUS.addListener(TravelChunkPrefetch::onServerTick);
         NeoForge.EVENT_BUS.addListener(UkGeoMod::onServerTick);

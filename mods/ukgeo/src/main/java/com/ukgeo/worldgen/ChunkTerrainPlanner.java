@@ -89,10 +89,7 @@ final class ChunkTerrainPlanner {
         logTiming("ChunkTerrainPlanner.waterPlanning", chunk, waterStartNanos);
         // Baked station water Y is authoritative. Do not call fitWaterToBanks*,
         // levelGentleReachWater, or smoothRiverWaterSurfacesLocally.
-        cutCascadeLips(columns, minBuildY, maxBuildY);
-        smoothFreshwaterLakeBeds(columns, minBuildY, maxBuildY);
-        smoothRiverBedsInComponents(columns, minBuildY, maxBuildY);
-        smoothDryRiverBanks(columns, minBuildY, maxBuildY);
+        finishWaterPlanning(columns, minBuildY, maxBuildY);
         long oreStartNanos = System.nanoTime();
         Plan plan = new Plan(columns, generator.buildOrePlacements(data, chunk, columns), generator.seaLevel());
         long oreElapsedNanos = System.nanoTime() - oreStartNanos;
@@ -108,6 +105,13 @@ final class ChunkTerrainPlanner {
         );
         logSlowPlanBreakdown(chunk, windowElapsedNanos, surfaceElapsedNanos, waterElapsedNanos, oreElapsedNanos, totalElapsedNanos);
         return plan;
+    }
+
+    static void finishWaterPlanning(ColumnPlan[] columns, int minBuildY, int maxBuildY) {
+        // Dry banks already have a world-distance profile from RiverStationColumn.
+        // Re-cutting per wet neighbour stacks incision; estimating distance from the
+        // carved height then raises isolated blocks and depends on chunk boundaries.
+        smoothRiverBedsInComponents(columns, minBuildY, maxBuildY);
     }
 
     private static void logSlowPlanBreakdown(
@@ -1506,346 +1510,12 @@ final class ChunkTerrainPlanner {
         }
     }
 
-    /**
-     * Level lake water planes and lightly diffuse lake beds.
-     * Uses lake-only components ({@link UkGeoChunkGenerator.RiverShape#lake()}) so
-     * river corridors that touch a lake never participate in lake smoothing.
-     * Primary bathymetry comes from {@link LakeBathymetry} in world coordinates;
-     * this pass only removes residual chunk-local steps.
-     */
-    private static void smoothFreshwaterLakeBeds(ColumnPlan[] columns, int minBuildY, int maxBuildY) {
-        int[] componentOf = labelLakeWaterComponents(columns);
-        int maxId = maxLabel(componentOf);
-        if (maxId < 0) {
-            return;
-        }
-        int componentCount = maxId + 1;
-        int[] waterCounts = new int[componentCount];
-        int[] waterMax = new int[componentCount];
-        java.util.Arrays.fill(waterMax, Integer.MIN_VALUE);
-        for (int index = 0; index < columns.length; index++) {
-            ColumnPlan column = columns[index];
-            if (!isLakeWaterColumn(column)) {
-                continue;
-            }
-            int id = componentOf[index];
-            if (id < 0 || id >= componentCount) {
-                continue;
-            }
-            waterCounts[id]++;
-            waterMax[id] = Math.max(waterMax[id], column.river().waterSurfaceY());
-        }
-
-        // Flatten stepped lake water planes within each sizable lake component.
-        for (int index = 0; index < columns.length; index++) {
-            ColumnPlan column = columns[index];
-            if (!isLakeWaterColumn(column)) {
-                continue;
-            }
-            int id = componentOf[index];
-            if (id < 0 || id >= componentCount || waterCounts[id] < LAKE_SMOOTH_MIN_CELLS) {
-                continue;
-            }
-            int targetWater = waterMax[id];
-            if (targetWater == Integer.MIN_VALUE || targetWater == column.river().waterSurfaceY()) {
-                continue;
-            }
-            columns[index] = withRiverBedAndWater(
-                column,
-                column.river().terrainSurfaceY(),
-                targetWater,
-                minBuildY,
-                maxBuildY
-            );
-        }
-
-        int[] beds = new int[columns.length];
-        for (int index = 0; index < columns.length; index++) {
-            ColumnPlan column = columns[index];
-            if (!isLakeWaterColumn(column)) {
-                beds[index] = Integer.MIN_VALUE;
-                continue;
-            }
-            int id = componentOf[index];
-            if (id < 0 || id >= componentCount || waterCounts[id] < LAKE_SMOOTH_MIN_CELLS) {
-                beds[index] = Integer.MIN_VALUE;
-                continue;
-            }
-            int localZ = index / CHUNK_SIZE;
-            int localX = index - localZ * CHUNK_SIZE;
-            int freshwaterNeighbors = 0;
-            for (int[] offset : EIGHT_OFFSETS) {
-                int nx = localX + offset[0];
-                int nz = localZ + offset[1];
-                if (nx < 0 || nz < 0 || nx >= CHUNK_SIZE || nz >= CHUNK_SIZE) {
-                    continue;
-                }
-                int neighbor = nz * CHUNK_SIZE + nx;
-                ColumnPlan nb = columns[neighbor];
-                if (isLakeWaterColumn(nb) && componentOf[neighbor] == id) {
-                    freshwaterNeighbors++;
-                }
-            }
-            // Include near-shore cells so cubic rings dissolve at the edge too.
-            if (freshwaterNeighbors < 2) {
-                beds[index] = Integer.MIN_VALUE;
-            } else {
-                beds[index] = column.river().terrainSurfaceY();
-            }
-        }
-
-        for (int pass = 0; pass < LAKE_BED_SMOOTH_PASSES; pass++) {
-            int[] next = beds.clone();
-            for (int index = 0; index < columns.length; index++) {
-                if (beds[index] == Integer.MIN_VALUE) {
-                    continue;
-                }
-                int localZ = index / CHUNK_SIZE;
-                int localX = index - localZ * CHUNK_SIZE;
-                int component = componentOf[index];
-                int sum = beds[index];
-                int count = 1;
-                for (int[] offset : EIGHT_OFFSETS) {
-                    int nx = localX + offset[0];
-                    int nz = localZ + offset[1];
-                    if (nx < 0 || nz < 0 || nx >= CHUNK_SIZE || nz >= CHUNK_SIZE) {
-                        continue;
-                    }
-                    int neighbor = nz * CHUNK_SIZE + nx;
-                    if (componentOf[neighbor] != component || beds[neighbor] == Integer.MIN_VALUE) {
-                        continue;
-                    }
-                    sum += beds[neighbor];
-                    count++;
-                }
-                int averaged = Math.round(sum / (float) count);
-                int bed = beds[index];
-                if (averaged > bed + 1) {
-                    averaged = bed + 1;
-                } else if (averaged < bed - 1) {
-                    averaged = bed - 1;
-                }
-                next[index] = Math.max(minBuildY + 1, averaged);
-            }
-            beds = next;
-        }
-
-        for (int index = 0; index < columns.length; index++) {
-            if (beds[index] == Integer.MIN_VALUE) {
-                continue;
-            }
-            ColumnPlan column = columns[index];
-            int newBed = beds[index];
-            if (newBed == column.river().terrainSurfaceY()) {
-                continue;
-            }
-            columns[index] = withRiverBedAndWater(
-                column,
-                newBed,
-                column.river().waterSurfaceY(),
-                minBuildY,
-                maxBuildY
-            );
-        }
-    }
-
-    /**
-     * Just upstream of a cascade, notch dry banks toward each bank's own baked water Y.
-     * Water columns are not edited, and no column's waterSurfaceY is replaced.
-     */
-    private static void cutCascadeLips(ColumnPlan[] columns, int minBuildY, int maxBuildY) {
-        boolean[] isLip = new boolean[columns.length];
-        for (int index = 0; index < columns.length; index++) {
-            ColumnPlan column = columns[index];
-            if (!column.river().hasWater()) {
-                continue;
-            }
-            int waterY = column.river().waterSurfaceY();
-            int localZ = index / CHUNK_SIZE;
-            int localX = index - localZ * CHUNK_SIZE;
-            for (int[] offset : CARDINAL_OFFSETS) {
-                int nx = localX + offset[0];
-                int nz = localZ + offset[1];
-                if (nx < 0 || nz < 0 || nx >= CHUNK_SIZE || nz >= CHUNK_SIZE) {
-                    continue;
-                }
-                ColumnPlan neighbor = columns[nz * CHUNK_SIZE + nx];
-                if (neighbor.river().hasWater() && neighbor.river().waterSurfaceY() <= waterY - 1) {
-                    isLip[index] = true;
-                    break;
-                }
-            }
-        }
-
-        final int lipCarveRadius = 3;
-        for (int index = 0; index < columns.length; index++) {
-            if (!isLip[index]) {
-                continue;
-            }
-            int localZ = index / CHUNK_SIZE;
-            int localX = index - localZ * CHUNK_SIZE;
-            for (int dz = -lipCarveRadius; dz <= lipCarveRadius; dz++) {
-                for (int dx = -lipCarveRadius; dx <= lipCarveRadius; dx++) {
-                    if (dx == 0 && dz == 0) {
-                        continue;
-                    }
-                    if (Math.abs(dx) + Math.abs(dz) > lipCarveRadius) {
-                        continue;
-                    }
-                    int nx = localX + dx;
-                    int nz = localZ + dz;
-                    if (nx < 0 || nz < 0 || nx >= CHUNK_SIZE || nz >= CHUNK_SIZE) {
-                        continue;
-                    }
-                    notchBankToOwnWater(columns, nz * CHUNK_SIZE + nx, Math.hypot(dx, dz), lipCarveRadius, minBuildY, maxBuildY);
-                }
-            }
-        }
-
-        final int brookCarveRadius = 2;
-        for (int index = 0; index < columns.length; index++) {
-            ColumnPlan column = columns[index];
-            if (!column.steep() || !column.river().hasWater()) {
-                continue;
-            }
-            int localZ = index / CHUNK_SIZE;
-            int localX = index - localZ * CHUNK_SIZE;
-            for (int dz = -brookCarveRadius; dz <= brookCarveRadius; dz++) {
-                for (int dx = -brookCarveRadius; dx <= brookCarveRadius; dx++) {
-                    if (dx == 0 && dz == 0) {
-                        continue;
-                    }
-                    if (Math.abs(dx) + Math.abs(dz) > brookCarveRadius) {
-                        continue;
-                    }
-                    int nx = localX + dx;
-                    int nz = localZ + dz;
-                    if (nx < 0 || nz < 0 || nx >= CHUNK_SIZE || nz >= CHUNK_SIZE) {
-                        continue;
-                    }
-                    notchBankToOwnWater(columns, nz * CHUNK_SIZE + nx, Math.hypot(dx, dz), brookCarveRadius, minBuildY, maxBuildY);
-                }
-            }
-        }
-    }
-
-    /** Lower a dry bank toward its own baked water Y. Does not create water or change water Y. */
-    private static void notchBankToOwnWater(
-        ColumnPlan[] columns,
-        int nIndex,
-        double dOut,
-        double reach,
-        int minBuildY,
-        int maxBuildY
-    ) {
-        ColumnPlan neighbor = columns[nIndex];
-        UkGeoChunkGenerator.RiverShape river = neighbor.river();
-        if (river.hasWater() || !river.influenced()) {
-            return;
-        }
-        int waterY = river.waterSurfaceY();
-        int bankTop = Math.min(neighbor.terrainTop(), neighbor.originalSurfaceY());
-        if (bankTop <= waterY) {
-            return;
-        }
-        int notchedTop = RiverBankFit.bankCarveTarget(bankTop, waterY, dOut, Math.max(1.0, reach));
-        notchedTop = Math.clamp(notchedTop, Math.max(minBuildY + 1, waterY), bankTop);
-        if (notchedTop >= neighbor.terrainTop()) {
-            return;
-        }
-        UkGeoChunkGenerator.RiverShape notched = new UkGeoChunkGenerator.RiverShape(
-            false,
-            true,
-            notchedTop,
-            waterY,
-            river.floorMaterial()
-        );
-        int columnTop = Math.clamp(Math.max(neighbor.columnTop(), notchedTop), minBuildY, maxBuildY);
-        columns[nIndex] = new ColumnPlan(
-            neighbor.originalSurfaceY(),
-            notchedTop,
-            columnTop,
-            neighbor.steep(),
-            neighbor.coastalBeach(),
-            notched,
-            neighbor.vegetationClass(),
-            neighbor.surfaceRock(),
-            neighbor.exposedSurfaceRock(),
-            neighbor.hasHeightData()
-        );
-    }
-
     private static int maxLabel(int[] labels) {
         int max = -1;
         for (int id : labels) {
             max = Math.max(max, id);
         }
         return max;
-    }
-
-    /**
-     * Light 8-neighbour average on dry river-influenced bank tops to break triangular stamp facets.
-     * Does not edit wet columns or baked water Y.
-     */
-    private static void smoothDryRiverBanks(ColumnPlan[] columns, int minBuildY, int maxBuildY) {
-        // Do not average across the chunk — that creates seams at chunk borders.
-        // Re-anchor each dry influenced bank to its own baked water plane using the
-        // world-deterministic talus (same as RiverStationColumn.resolve).
-        for (int index = 0; index < columns.length; index++) {
-            ColumnPlan column = columns[index];
-            UkGeoChunkGenerator.RiverShape river = column.river();
-            if (!river.influenced() || river.hasWater() || river.lake()) {
-                continue;
-            }
-            int waterY = river.waterSurfaceY();
-            int original = column.originalSurfaceY();
-            // Infer outward distance from how far the current top sits above the plane.
-            // Prefer keeping the already-planned top when it already matches talus.
-            int planned = column.terrainTop();
-            double dOut = 1.0;
-            if (original > waterY && planned > waterY) {
-                // Invert talus roughly: closer banks sit nearer the water plane.
-                double heightAbove = original - waterY;
-                double rise = planned - waterY;
-                if (heightAbove > 1e-6) {
-                    dOut = Math.clamp(rise / heightAbove, 0.05, 1.0) * RiverBankFit.BANK_CARVE_REACH;
-                }
-            } else if (original <= waterY) {
-                dOut = 1.0;
-            }
-            int target = RiverWaterPlane.conformBankTop(original, waterY, dOut, RiverBankFit.BANK_CARVE_REACH);
-            target = Math.clamp(target, minBuildY + 1, maxBuildY);
-            // Only nudge by at most 1 so we never invent new facets.
-            if (target > planned + 1) {
-                target = planned + 1;
-            } else if (target < planned - 1) {
-                target = planned - 1;
-            }
-            if (target == planned) {
-                continue;
-            }
-            UkGeoChunkGenerator.RiverShape shaped = new UkGeoChunkGenerator.RiverShape(
-                false,
-                true,
-                target,
-                waterY,
-                river.floorMaterial(),
-                false
-            );
-            int columnTop = Math.clamp(Math.max(column.columnTop(), target), minBuildY, maxBuildY);
-            columns[index] = new ColumnPlan(
-                column.originalSurfaceY(),
-                target,
-                columnTop,
-                column.steep(),
-                column.coastalBeach(),
-                shaped,
-                column.vegetationClass(),
-                column.surfaceRock(),
-                column.exposedSurfaceRock(),
-                column.hasHeightData()
-            );
-        }
     }
 
     private static final int[][] CARDINAL_OFFSETS = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
@@ -1855,8 +1525,6 @@ final class ChunkTerrainPlanner {
     };
     private static final int RIVER_BED_MAX_NEIGHBOR_STEP = 1;
     private static final int RIVER_BED_SMOOTH_PASSES = 3;
-    private static final int LAKE_BED_SMOOTH_PASSES = 2;
-    private static final int LAKE_SMOOTH_MIN_CELLS = 8;
 
     /** 4-connected flood-fill labels for hasWater columns; -1 = dry / no water. */
     private static int[] labelWaterComponents(ColumnPlan[] columns) {
@@ -1894,48 +1562,6 @@ final class ChunkTerrainPlanner {
         }
         return componentOf;
     }
-
-    /** Connected components over lake-owned water only (excludes river channels). */
-    private static int[] labelLakeWaterComponents(ColumnPlan[] columns) {
-        int[] labels = new int[columns.length];
-        java.util.Arrays.fill(labels, -1);
-        int next = 0;
-        int[] queue = new int[columns.length];
-        for (int start = 0; start < columns.length; start++) {
-            if (labels[start] >= 0 || !isLakeWaterColumn(columns[start])) {
-                continue;
-            }
-            int head = 0;
-            int tail = 0;
-            queue[tail++] = start;
-            labels[start] = next;
-            while (head < tail) {
-                int index = queue[head++];
-                int localZ = index / CHUNK_SIZE;
-                int localX = index - localZ * CHUNK_SIZE;
-                for (int[] offset : CARDINAL_OFFSETS) {
-                    int nx = localX + offset[0];
-                    int nz = localZ + offset[1];
-                    if (nx < 0 || nz < 0 || nx >= CHUNK_SIZE || nz >= CHUNK_SIZE) {
-                        continue;
-                    }
-                    int neighbor = nz * CHUNK_SIZE + nx;
-                    if (labels[neighbor] >= 0 || !isLakeWaterColumn(columns[neighbor])) {
-                        continue;
-                    }
-                    labels[neighbor] = next;
-                    queue[tail++] = neighbor;
-                }
-            }
-            next++;
-        }
-        return labels;
-    }
-
-    private static boolean isLakeWaterColumn(ColumnPlan column) {
-        return column.river().hasWater() && column.river().lake();
-    }
-
 
     private static void smoothRiverBedsInComponents(ColumnPlan[] columns, int minBuildY, int maxBuildY) {
         smoothRiverBedsInComponents(columns, labelWaterComponents(columns), minBuildY, maxBuildY);
@@ -2026,6 +1652,8 @@ final class ChunkTerrainPlanner {
             int waterY = river.waterSurfaceY();
             int newBed = Math.min(beds[index], waterY - 1);
             newBed = Math.max(minBuildY + 1, newBed);
+            // Neighbour smoothing must not undo the channel's mountain budget.
+            newBed = RiverBankFit.capBedIncision(column.originalSurfaceY(), newBed);
             if (newBed == river.terrainSurfaceY()) {
                 continue;
             }

@@ -90,6 +90,14 @@ final class HeightTileWindow {
         return R16HeightTileLayer.normalizeSample(samples[localZ * sizeX + localX]);
     }
 
+    /** Structure and LOD queries have no chunk window; read the cached dataset instead. */
+    static int sampleDecimetresOrNodata(HeightTileWindow window, R16HeightTileLayer fallback, int x, int z) {
+        if (window != null) {
+            return window.decimetresOrNodata(x, z);
+        }
+        return fallback == null ? NODATA : fallback.sampleDecimetresOrNodata(x, z);
+    }
+
     private static int floorDiv(int a, int b) {
         int result = a / b;
         if ((a ^ b) < 0 && result * b != a) {

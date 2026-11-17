@@ -21,8 +21,8 @@ final class RiverBankFit {
      */
     static final int MOUNTAIN_SURFACE_MIN = 128;
     /**
-     * When highland DEM is more than this many blocks above baked water, notch
-     * shallowly instead of following absolute valley Y.
+     * When highland DEM is more than this many blocks above baked water, limit
+     * dry-bank carving too.
      */
     static final int MOUNTAIN_DROP_TRIGGER = MOUNTAIN_TOTAL_INCISION;
     /** Near-water bank drop cap on mountain stamps; tapers to 1 at reach. */
@@ -38,7 +38,7 @@ final class RiverBankFit {
     }
 
     /**
-     * Whether this column should notch the DEM instead of following absolute baked water.
+     * Whether dry-bank carving needs the mountain incision limit.
      * Highland only — deep lowland valleys stay absolute.
      */
     static boolean isMountainStamp(int originalTop, int waterPlane) {
@@ -47,20 +47,25 @@ final class RiverBankFit {
     }
 
     /**
-     * Channel water plane. Valleys keep baked {@code waterPlane}. Mountain stamps
-     * lift the plane so {@code originalTop - bed} ≤ {@link #MOUNTAIN_TOTAL_INCISION}
-     * after {@code channelDepth} is applied under the plane.
+     * Limit terrain incision independently of water Y, including shallow highland
+     * channels whose requested depth alone would exceed the budget. A result at or
+     * above the baked plane cannot support a wet channel at this column.
      */
-    static int cappedPlane(int originalTop, int waterPlane, int channelDepth) {
-        if (!isMountainStamp(originalTop, waterPlane)) {
-            return waterPlane;
+    static int capBedIncision(int originalTop, int bed) {
+        return originalTop >= MOUNTAIN_SURFACE_MIN
+            ? Math.max(bed, originalTop - MOUNTAIN_TOTAL_INCISION)
+            : bed;
+    }
+
+    /** Keep mountain smoothing from filling a source river valley; fade across its banks. */
+    static double preserveValleyMetres(double source, double smoothed, double riverDistance, int waterRadius) {
+        if (smoothed <= source) {
+            return smoothed;
         }
-        int depth = Math.max(1, channelDepth);
-        // original - (plane - depth) <= TOTAL  ⇒  plane >= original + depth - TOTAL
-        int minPlane = originalTop + depth - MOUNTAIN_TOTAL_INCISION;
-        // Keep at least 1 block of water column under the DEM top.
-        minPlane = Math.max(minPlane, originalTop - (MOUNTAIN_TOTAL_INCISION - 1));
-        return Math.max(waterPlane, minPlane);
+        // Include the half-block occupancy jitter used at the channel edge.
+        double t = Math.clamp((riverDistance - waterRadius - 0.5) / BANK_CARVE_REACH, 0.0, 1.0);
+        double weight = t * t * (3.0 - 2.0 * t);
+        return source + (smoothed - source) * weight;
     }
 
     /** Allowed drop below original DEM at distance {@code dOut} from the wet edge (mountain banks). */
@@ -109,16 +114,10 @@ final class RiverBankFit {
             return originalTop;
         }
         boolean mountain = isMountainStamp(originalTop, waterSurface);
-        int plane = mountain
-            ? cappedPlane(originalTop, waterSurface, 1)
-            : waterSurface;
-        if (originalTop <= plane) {
-            return originalTop;
-        }
         double safeReach = Math.max(2.0, reach);
-        double heightAbove = originalTop - plane;
+        double heightAbove = originalTop - waterSurface;
         double rise = RiverChannelForm.bankRise(Math.max(0.0, dOut), heightAbove, safeReach, BANK_CARVE_TALUS);
-        int target = plane + (int) Math.round(Math.min(rise, heightAbove));
+        int target = waterSurface + (int) Math.round(Math.min(rise, heightAbove));
         target = Math.min(target, originalTop);
         if (mountain) {
             int floor = originalTop - maxBankIncision(dOut, reach);

@@ -3,7 +3,7 @@ package com.ukgeo.worldgen;
 /**
  * River bed and bank helpers. Water elevation is the baked station Y;
  * these functions never invent a plane from bank samples.
- * Mountain incision is capped via {@link RiverBankFit#cappedPlane}.
+ * Mountain bed incision is capped separately via {@link RiverBankFit#capBedIncision}.
  */
 final class RiverWaterPlane {
     private static final double BANK_RAISE_DOUT = 3.0;

@@ -70,9 +70,14 @@ final class RiverStationColumn {
             // The station layer owns the channel's water elevation. Do not clamp it
             // to each column's raw DEM: small DEM depressions would otherwise become
             // repeated, artificial pools with both water and bed stepping down.
-            int plane = RiverBankFit.cappedPlane(originalSurfaceY, water, depth);
-            int bed = RiverWaterPlane.bedUnderPlane(plane, depth, minBuildY);
-            return new Shape(true, true, bed, plane);
+            int bed = RiverBankFit.capBedIncision(originalSurfaceY,
+                RiverWaterPlane.bedUnderPlane(water, depth, minBuildY));
+            // A mismatched corridor through high terrain cannot be made wet
+            // without either inventing uphill water or excavating a canyon.
+            if (bed >= water) {
+                return Shape.none(originalSurfaceY);
+            }
+            return new Shape(true, true, bed, water);
         }
         // Outside the wet channel, retain the DEM safety clamp so bank columns
         // cannot carry unsupported water planes above their local surface.
