@@ -3,9 +3,37 @@ package com.ukgeo.worldgen;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import net.minecraft.world.level.block.Blocks;
 import org.junit.jupiter.api.Test;
 
 class SurfaceGeologyExposureTest {
+    @Test
+    void rejectedSteepGeologyUsesSoilAndStoneInsteadOfOriginalRock() {
+        var rejectedExposure = Blocks.GRASS_BLOCK.defaultBlockState();
+
+        assertEquals(
+            Blocks.DIRT.defaultBlockState(),
+            ChunkTerrainPlanner.steepSubsurfaceState(99, 100, rejectedExposure)
+        );
+        assertEquals(
+            Blocks.DIRT.defaultBlockState(),
+            ChunkTerrainPlanner.steepSubsurfaceState(97, 100, rejectedExposure)
+        );
+        assertEquals(
+            Blocks.STONE.defaultBlockState(),
+            ChunkTerrainPlanner.steepSubsurfaceState(96, 100, rejectedExposure)
+        );
+    }
+
+    @Test
+    void permittedSteepGeologyRemainsExposed() {
+        var permittedExposure = Blocks.SMOOTH_BASALT.defaultBlockState();
+        assertEquals(
+            permittedExposure,
+            ChunkTerrainPlanner.steepSubsurfaceState(96, 100, permittedExposure)
+        );
+    }
+
     @Test
     void valueNoiseIsDeterministicAndBounded() {
         double a = SurfaceExposureNoise.valueNoise2(12.3, -4.5, 42);
