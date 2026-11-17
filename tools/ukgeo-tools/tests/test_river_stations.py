@@ -235,14 +235,22 @@ def test_same_station_water_y_across_width():
     assert bool(owned.any())
     counts: dict[tuple[int, int], int] = {}
     water_values: set[int] = set()
+    # Interpolation is longitudinal, not cross-channel: at a given river
+    # cross-section, all columns owned by the same station must retain one
+    # water height, while successive cross-sections may transition to the
+    # neighbouring station's baked level.
+    cross_sections: dict[tuple[int, int, int], set[int]] = {}
     for z, x in zip(*np.nonzero(owned)):
         key = (int(baked.reach_id[z, x]), int(baked.station_id[z, x]))
-        assert int(baked.water_y[z, x]) == lookup[key].water_y
         assert int(baked.azimuth[z, x]) == lookup[key].azimuth == flow_azimuth_u8(0.0, 1.0)
         counts[key] = counts.get(key, 0) + 1
-        water_values.add(int(baked.water_y[z, x]))
+        water_value = int(baked.water_y[z, x])
+        water_values.add(water_value)
+        cross_section = (key[0], key[1], int(z))
+        cross_sections.setdefault(cross_section, set()).add(water_value)
     assert max(counts.values()) >= 5
     assert len(water_values) >= 2
+    assert all(len(values) == 1 for values in cross_sections.values())
 
 
 def test_metres_to_minecraft_y_golden():
