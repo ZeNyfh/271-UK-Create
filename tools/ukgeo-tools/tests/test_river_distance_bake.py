@@ -6,6 +6,7 @@ from pathlib import Path
 import numpy as np
 
 from ukgeo.rivers import bake_river_distance_grids
+from ukgeo.river_stations import BANK_CARVE_REACH
 from ukgeo.tiles import read_u8_tile, u8_extension, write_u8_tile
 
 
@@ -60,7 +61,7 @@ def test_bake_river_distance_grids_tiny_fixture(tmp_path: Path):
     assert rivers_meta["distance_path"] == "water/river_distance"
     assert rivers_meta["nearest_half_width_path"] == "water/river_nearest_half_width"
     assert rivers_meta["distance_units"] == "half_blocks"
-    assert rivers_meta["distance_search_radius"] == max(3, 1) + 12
+    assert rivers_meta["distance_search_radius"] == max(3, 1) + BANK_CARVE_REACH
 
     dist = read_u8_tile(tmp_path / "water" / "river_distance" / f"000_000{u8_extension()}", tile_size)
     nearest_hw = read_u8_tile(tmp_path / "water" / "river_nearest_half_width" / f"000_000{u8_extension()}", tile_size)

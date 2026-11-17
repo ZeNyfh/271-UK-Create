@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -1060,6 +1061,100 @@ def test_station_water_is_interpolated_between_neighbouring_stamps():
     assert int(grid.water_y[12, 9]) == 68
     assert int(grid.water_y[12, 10]) == 66
     assert np.all(np.diff(grid.water_y[12, 8:11].astype(np.int16)) <= 0)
+
+
+@pytest.mark.parametrize("tx,tz", [(1, 0), (-1, 0), (0, 1), (0, -1)])
+def test_interpolation_follows_station_order_in_both_axis_directions(tx, tz):
+    stations = [
+        _station(station_id=i, x=12.5 + i * 2 * tx, z=12.5 + i * 2 * tz,
+                 tx=tx, tz=tz, water_y=70 - i * 4)
+        for i in range(2)
+    ]
+    grid = _assert_order_independent(stations, depth=24, width=24)
+    # End caps hold their endpoint's level; there is no extrapolation.
+    for offset, expected in [(-1, 70), (0, 70), (1, 68), (2, 66), (3, 66)]:
+        assert grid.water_y[12 + offset * tz, 12 + offset * tx] == expected
+
+
+def test_bend_interpolation_keeps_centreline_profile_and_flat_cross_sections():
+    stations = [
+        _station(station_id=0, x=8.5, z=12.5, water_y=70),
+        _station(station_id=1, x=10.5, z=12.5, tx=2**-0.5, tz=2**-0.5, water_y=68),
+        _station(station_id=2, x=10.5, z=14.5, tx=0, tz=1, water_y=66),
+    ]
+    grid = _assert_order_independent(stations, depth=24, width=24)
+    assert [int(grid.water_y[z, x]) for z, x in [(12, 8), (12, 9), (12, 10), (13, 10), (14, 10)]] == [70, 69, 68, 67, 66]
+    # A level baked reach must stay level through every ownership change on a bend.
+    flat = _assert_order_independent([replace(s, water_y=70) for s in stations], depth=24, width=24)
+    assert np.all(flat.water_y[flat.reach_id != 0] == 70)
+
+
+def test_overlapping_reaches_with_same_station_ids_never_share_water_profile():
+    stations = [
+        _station(reach_id=1, station_id=0, x=8.5, water_y=70),
+        _station(reach_id=1, station_id=1, x=10.5, water_y=66),
+        _station(reach_id=2, station_id=0, x=9.5, z=6.5, tx=0, tz=1, water_y=90),
+        _station(reach_id=2, station_id=1, x=9.5, z=8.5, tx=0, tz=1, water_y=90),
+    ]
+    grid = _assert_order_independent(stations, depth=24, width=24)
+    assert np.all((grid.water_y[grid.reach_id == 1] >= 66) & (grid.water_y[grid.reach_id == 1] <= 70))
+    assert np.all(grid.water_y[grid.reach_id == 2] == 90)
+
+
+def test_rasterization_retains_large_cascade_between_adjacent_stations():
+    stations = [_station(station_id=i, x=8.5 + i, water_y=80 if i < 2 else 60) for i in range(4)]
+    grid = _assert_order_independent(stations, depth=24, width=24)
+    assert grid.water_y[8, 8:12].tolist() == [80, 80, 60, 60]
+
+
+def test_junction_ceiling_removes_uphill_prefix_without_losing_real_cascade():
+    reaches = [
+        CellReach([(0, 0), (10, 0)], 2, 2),
+        CellReach([(10, 0), (20, 0)], 3, 3),
+        CellReach([(20, 0), (30, 0)], 3, 3),
+        CellReach([(10, 10), (20, 0)], 2, 2),
+    ]
+    levels = {1: [71, 71], 2: [77, 77, 72, 71], 3: [72, 71, 65, 65], 4: [80, 71]}
+    stations = [_station(reach_id=rid, station_id=i, water_y=y)
+                for rid, ys in levels.items() for i, y in enumerate(ys)]
+    corrected = _river_stations._align_junction_water(reaches, stations)
+    by_reach = {rid: [s.water_y for s in corrected if s.reach_id == rid] for rid in levels}
+    assert by_reach[1] == [71, 71]
+    assert by_reach[2] == [71, 71, 71, 71]  # Y=77 slab at the reported junction
+    assert by_reach[3] == [71, 71, 65, 65]  # genuine downstream drop survives
+    assert by_reach[4] == [80, 71]
+    assert [(s.reach_id, s.station_id) for s in corrected] == [(s.reach_id, s.station_id) for s in stations]
+    assert [s.water_y for s in stations if s.reach_id == 2] == levels[2]
+
+
+def test_junction_ceiling_propagates_against_reach_id_order_and_through_cycles():
+    # Reach ids need not be topological. This closed loop must converge, too.
+    reaches = [CellReach([(10, 0), (10, 10)], 2, 2),
+               CellReach([(0, 0), (10, 0)], 2, 2),
+               CellReach([(10, 10), (0, 0)], 2, 2)]
+    stations = [_station(reach_id=rid, station_id=i, water_y=y)
+                for rid, ys in [(1, [80, 80]), (2, [70, 70]), (3, [90, 90])]
+                for i, y in enumerate(ys)]
+    assert all(s.water_y == 70 for s in _river_stations._align_junction_water(reaches, stations))
+
+
+def test_crossing_and_disconnected_reaches_do_not_exchange_junction_heights():
+    reaches = [CellReach([(0, 5), (10, 5)], 2, 2),
+               CellReach([(5, 0), (5, 10)], 2, 2)]
+    stations = [_station(reach_id=1, water_y=80), _station(reach_id=2, water_y=70)]
+    assert _river_stations._align_junction_water(reaches, stations) == stations
+
+
+def test_regional_station_write_leaves_other_tiles_untouched(tmp_path, monkeypatch):
+    monkeypatch.setenv("STATION_BAKE_WORKERS", "1")
+    manifest = {"tile_size": 16, "world": {"padded_width": 48, "padded_depth": 48}}
+    untouched = tmp_path / "water/river_water_y/002_002.r16"
+    untouched.parent.mkdir(parents=True)
+    write_r16_tile(untouched, np.full((16, 16), 99, dtype=np.int16), 16)
+    _river_stations._write_station_tiles(tmp_path, manifest, [_station()], tile_coords={(0, 0)})
+    assert (tmp_path / "water/river_water_y/000_000.r16").exists()
+    assert not (tmp_path / "water/river_water_y/001_000.r16").exists()
+    assert np.all(read_r16_tile(untouched, 16) == 99)
 
 
 def test_smooth_water_y_gradual_and_keeps_cascade():
