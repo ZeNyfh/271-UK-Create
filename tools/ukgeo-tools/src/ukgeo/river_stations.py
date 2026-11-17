@@ -880,7 +880,7 @@ def _stamp_one(
     if not bool(better.any()):
         return
     best_hi_view[better] = keys_hi[better]
-    best_lo_view[better] = keys_lo
+    best_lo_view[better] = keys_lo[better]
     reach_view = reach[lz0 : lz0 + hh, lx0 : lx0 + ww]
     station_view = station_out[lz0 : lz0 + hh, lx0 : lx0 + ww]
     water_view = water[lz0 : lz0 + hh, lx0 : lx0 + ww]
