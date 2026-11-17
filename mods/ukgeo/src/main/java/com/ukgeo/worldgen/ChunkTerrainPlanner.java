@@ -2507,9 +2507,22 @@ final class ChunkTerrainPlanner {
         if (!exposedSurfaceRock.is(Blocks.GRASS_BLOCK)) {
             return exposedSurfaceRock;
         }
-        return y >= surfaceY - 3
+        return steepSubsurfaceMaterial(y, surfaceY) == SteepSubsurfaceMaterial.DIRT
             ? Blocks.DIRT.defaultBlockState()
             : (y < 0 ? Blocks.DEEPSLATE.defaultBlockState() : Blocks.STONE.defaultBlockState());
+    }
+
+    /**
+     * Pure material decision for the shallow fallback beneath rejected steep geology.
+     * Kept independent of Minecraft registries so it can be tested in plain JUnit.
+     */
+    static SteepSubsurfaceMaterial steepSubsurfaceMaterial(int y, int surfaceY) {
+        return y >= surfaceY - 3 ? SteepSubsurfaceMaterial.DIRT : SteepSubsurfaceMaterial.STONE;
+    }
+
+    enum SteepSubsurfaceMaterial {
+        DIRT,
+        STONE
     }
 
     static BlockState exposedSurfaceRock(int worldX, int worldZ, BlockState surfaceRock) {
