@@ -1030,6 +1030,30 @@ def test_rounded_stamp_eligibility_rejects_sharp_corner():
     assert int(reach[z, x]) == 0
 
 
+def test_station_water_is_interpolated_between_neighbouring_stamps():
+    stations = [
+        _station(
+            reach_id=7, station_id=0, order=4,
+            x=8.5, z=12.5, tx=1.0, tz=0.0,
+            water_y=70, azimuth=0,
+        ),
+        _station(
+            reach_id=7, station_id=1, order=4,
+            x=10.5, z=12.5, tx=1.0, tz=0.0,
+            water_y=66, azimuth=0,
+        ),
+    ]
+
+    grid = _assert_order_independent(stations, depth=24, width=24)
+
+    # The station centres retain their baked levels, while the corridor
+    # between them transitions gradually instead of repeating flat slabs.
+    assert int(grid.water_y[12, 8]) == 70
+    assert int(grid.water_y[12, 9]) == 68
+    assert int(grid.water_y[12, 10]) == 66
+    assert np.all(np.diff(grid.water_y[12, 8:11].astype(np.int16)) <= 0)
+
+
 def test_smooth_water_y_gradual_and_keeps_cascade():
     gradual = smooth_water_y_profile(np.array([100, 98, 96, 94, 92], dtype=np.float64))
     assert np.all(np.diff(gradual) <= 0)
