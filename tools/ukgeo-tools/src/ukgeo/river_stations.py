@@ -6,14 +6,15 @@ meet within half a cell, flow continues downstream, and order and half-width
 match. Junctions stay split.
 
 Ownership is an associative minimum of
-(|perp| millicells, -strahler_order, reach_id, station_id). Distance is the
-absolute cross-track offset from the station tangent, not Euclidean range to
-the station point. Station tangents are blended with neighbours so bends do
-not flip abruptly; stamp eligibility uses a rounded rectangle so hard corners
-do not leave triangular bank spikes. Rasterisation order does not change the
-winner. Water Y is computed once per station from the lower bank, gently
-stepped in integer Minecraft Y along the reach (cascades kept), and stamped
-unchanged across that station's corridor.
+(|perp| millicells, -strahler_order, reach_id, |along| millicells, station_id).
+Distance is the absolute cross-track offset from the station tangent, not
+Euclidean range to the station point. Within a reach, the closest longitudinal
+station owns overlapping stamps. Station tangents are blended with neighbours
+so bends do not flip abruptly; stamp eligibility uses a rounded rectangle so
+hard corners do not leave triangular bank spikes. Rasterisation order does not
+change the winner. Water Y is computed once per station from the lower bank,
+gently stepped in integer Minecraft Y along the reach (cascades kept), then
+interpolated between adjacent stations across each station's corridor.
 
 Reach ids are uint32. The minimum compares the full id, so ids above 65535
 do not alias and are never masked with 0xFFFF.
