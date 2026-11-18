@@ -3241,6 +3241,24 @@ public final class UkGeoChunkGenerator extends ChunkGenerator {
         return PERF.dump();
     }
 
+    /** Clears ore vein / empty-origin / region-index caches used during bulk pregen. Safe to call mid-run after Chunky pause. */
+    public static void clearPregenCaches() {
+        ORE_VEIN_PLAN_CACHE.clear();
+        ORE_SLICE_BAG_CACHE.clear();
+        ORE_EMPTY_ORIGINS.clear();
+        // Do NOT clear ORE_EMPTY_ORIGIN_NAME_IDS (stable ids) unless you also reset NEXT_ID — safer leave name ids.
+        ORE_REGION_INDEX.clear();
+        UkGeoMod.LOGGER.info("UKGeo cleared pregen caches (vein plans, slice bags, empty origins, region index)");
+    }
+
+    public static int pregenEmptyOriginCacheSize() {
+        return ORE_EMPTY_ORIGINS.size();
+    }
+
+    public static int pregenEmptyOriginCacheMax() {
+        return MAX_ORE_EMPTY_ORIGIN_CACHE;
+    }
+
     /** Aggregates plan-stage timings for continuous `/ukgeo perf` and interval logs. */
     void recordPlanStageTimings(
         long heightWindowNanos,

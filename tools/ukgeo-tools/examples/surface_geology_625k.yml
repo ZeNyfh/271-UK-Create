@@ -77,6 +77,26 @@ classes:
     fields: [LEX_D, LEX_RCS_D, RCS_D, GP_EQ_D, PREV_NAME]
     keywords: [sandstone]
 
+  sand_gravel:
+    id: 10
+    block: minecraft:sand
+    fallback_block: minecraft:sand
+    color: "#d7c58b"
+    layers: [625k_V5_BEDROCK_Geology]
+    fields: [LEX_D, LEX_RCS_D, RCS_D, GP_EQ_D, PREV_NAME]
+    # Avoid bare "sand" — it would steal sandstone via substring match.
+    keywords: ["sand, silt", "sand and gravel", "sand/gravel", gravel, "blown sand"]
+
+  clay_silt:
+    id: 11
+    block: minecraft:clay
+    fallback_block: minecraft:clay
+    color: "#9a8f7a"
+    layers: [625k_V5_BEDROCK_Geology]
+    fields: [LEX_D, LEX_RCS_D, RCS_D, GP_EQ_D, PREV_NAME]
+    # Avoid bare "mud" (mudstone). "silt" is OK because slate burns after and reclaims siltstone.
+    keywords: [clay, silt, diamicton, till]
+
   slate:
     id: 9
     block: minecraft:deepslate

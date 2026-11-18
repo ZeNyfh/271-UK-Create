@@ -393,7 +393,7 @@ sync_jvm_args() {
     return 1
   fi
   scp -q "$src" "$SERVER_SSH_HOST:$SERVER_REMOTE_DIR/user_jvm_args.txt"
-  log "synced user_jvm_args.txt (8G Aikar-style)"
+  log "synced user_jvm_args.txt (play profile from config/server/)"
 }
 
 

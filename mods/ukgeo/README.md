@@ -134,6 +134,7 @@ The QA commands leave live worlds and runtime data untouched. The confirmed stee
 /ukgeo sample <x> <z>
 /ukgeo water <x> <z>
 /ukgeo where <x> <z>
+/ukgeo pregen-recover [world]
 ```
 
 
@@ -148,6 +149,26 @@ Optional soft dep on [VanillaBackport](https://modrinth.com/mod/vanilla-backport
 Safe vegetal path (biome feature decoration stays off by default): pale oaks / poplars via `pale_garden_vegetation` / `trees_dappled_forest` (not birch+oak/taiga stand-ins). Woodlands stay dense; non-woodland UKGeo biomes get no tree features. Sulfur features use throttled `ukgeo` placed_feature copies (spike ~8–16, cluster ~4–8, pool 12) to avoid VB’s multi-hundred counts killing chunkgen; all place without biome check once the chunk is gated by `sulfur_caves`. Sulfur wins over lush in Wales (defaults: Vale noise >0.20, soft Wales >0.40). Disable with `-Dukgeo.disableSulfurCaveDecoration=true`.
 
 Runtime forest expand (no tile rebuild) promotes vegetation classes 3–9 toward woodland in those priority boxes plus densest IE/NI belts. Nautiluses are disabled via instance `config/vanillabackport-common.toml` (`has_nautilus = false`), not a biome modifier.
+
+
+## Chunky pregen watchdog
+
+Optional recovery helper for long Chunky pregen runs that stall when UKGeo ore caches grow large. Requires the `chunky` mod and an explicit enable flag (default off):
+
+```text
+-Dukgeo.chunkyWatchdog=true
+```
+
+Tunables (defaults shown):
+
+```text
+-Dukgeo.chunkyWatchdog.lowRate=2.0
+-Dukgeo.chunkyWatchdog.badSamples=5
+-Dukgeo.chunkyWatchdog.cooldownSeconds=90
+-Dukgeo.chunkyWatchdog.pauseMillis=3000
+```
+
+When progress rate stays below `lowRate` for `badSamples` consecutive samples (or empty-origin cache is ≥90% full while rate is low), the watchdog pauses the Chunky task for that world, clears vein-plan / slice-bag / empty-origin / region-index caches, waits `pauseMillis`, then continues the task. Manual ops: `/ukgeo pregen-recover [world]` (permission 2; default world is the current dimension id).
 
 ## Distant Horizons (LOD)
 

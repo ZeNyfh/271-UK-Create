@@ -1,0 +1,5 @@
+# Apply manually to server.properties when players are online (do not overwrite blindly).
+# Restart required after editing server.properties.
+max-tick-time=300000
+view-distance=10
+simulation-distance=8

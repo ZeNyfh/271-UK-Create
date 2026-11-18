@@ -1,5 +1,6 @@
 package com.ukgeo.worldgen;
 
+import com.ukgeo.worldgen.pregen.ChunkyPregenWatchdog;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
@@ -102,6 +103,11 @@ public final class UkGeoCommands {
                                 ctx.getSource().sendSuccess(() -> Component.literal(generator.describeWhere(x, z)), false);
                                 return 1;
                             }))))
+                .then(Commands.literal("pregen-recover")
+                    .requires(source -> source.hasPermission(2))
+                    .executes(ctx -> pregenRecover(ctx.getSource(), ctx.getSource().getLevel().dimension().location().toString()))
+                    .then(Commands.argument("world", StringArgumentType.string())
+                        .executes(ctx -> pregenRecover(ctx.getSource(), StringArgumentType.getString(ctx, "world")))))
                 .then(spawnVanillaTreeCommand())
         );
         event.getDispatcher().register(spawnVanillaTreeCommand());
@@ -109,6 +115,16 @@ public final class UkGeoCommands {
 
     private static UkGeoChunkGenerator generator(ChunkGenerator generator) {
         return generator instanceof UkGeoChunkGenerator ukGeo ? ukGeo : null;
+    }
+
+
+    private static int pregenRecover(CommandSourceStack source, String world) {
+        if (ChunkyPregenWatchdog.recoverNow(world)) {
+            source.sendSuccess(() -> Component.literal("Chunky pregen recover started for " + world), true);
+            return 1;
+        }
+        source.sendFailure(Component.literal("Chunky pregen recover failed for " + world + " (watchdog inactive or already recovering)"));
+        return 0;
     }
 
     private static LiteralArgumentBuilder<CommandSourceStack> spawnVanillaTreeCommand() {

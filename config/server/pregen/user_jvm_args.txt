@@ -1,0 +1,35 @@
+# zenvibelaptop pregen / Chunky — leave ~16G+ for OS, page cache, native
+# 14G max (not 16/116): AlwaysPreTouch commits the full heap up front;
+# 116G was a typo that OOMed the 32G box. Cap below physical RAM.
+-Xms12G
+-Xmx14G
+
+-XX:+UseG1GC
+-XX:MaxGCPauseMillis=500
+-XX:+ParallelRefProcEnabled
+-XX:+DisableExplicitGC
+-XX:+AlwaysPreTouch
+-XX:+PerfDisableSharedMem
+
+-Xlog:gc*:file=logs/gc-pregen.log:time,uptime,level,tags:filecount=5,filesize=20M
+
+# UKGeo: planning yes; prefetch is for players — off during mass pregen
+-Dukgeo.asyncChunkPlanning=true
+-Dukgeo.useDedicatedPlanPool=true
+-Dukgeo.planThreads=8
+-Dukgeo.enableRiverSearchIndex=true
+-Dukgeo.debugPerfSummary=true
+-Dukgeo.perfLogIntervalChunks=200
+-Dukgeo.slowFillFromNoiseWarnMs=500
+-Dukgeo.slowApplyBiomeDecorationWarnMs=500
+-Dukgeo.slowPlanWarnMs=500
+
+-Dukgeo.maxOreVeinPlanCache=65536
+-Dukgeo.maxOreSliceBagCache=65536
+-Dukgeo.maxOreRegionIndexEntries=8192
+
+-Dukgeo.enableTravelPrefetch=false
+
+-Dukgeo.enableDhLodGenerator=false
+
+-Dukgeo.chunkyWatchdog=true

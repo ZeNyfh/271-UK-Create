@@ -1,0 +1,31 @@
+# zenvibelaptop play — players online (8C/16T, 32G RAM)
+# Fixed 8G heap: predictable latency; leave ~24G for OS, page cache, natives.
+-Xms8G
+-Xmx8G
+
+-XX:+UseG1GC
+-XX:MaxGCPauseMillis=200
+-XX:+ParallelRefProcEnabled
+-XX:+DisableExplicitGC
+-XX:+AlwaysPreTouch
+-XX:+PerfDisableSharedMem
+
+-Xlog:gc*:file=logs/gc.log:time,uptime,level,tags:filecount=5,filesize=10M
+
+-Dukgeo.asyncChunkPlanning=true
+-Dukgeo.useDedicatedPlanPool=true
+-Dukgeo.planThreads=6
+-Dukgeo.enableRiverSearchIndex=true
+-Dukgeo.debugPerfSummary=false
+
+-Dukgeo.maxOreVeinPlanCache=131072
+-Dukgeo.maxOreSliceBagCache=131072
+-Dukgeo.maxOreRegionIndexEntries=16384
+
+-Dukgeo.enableTravelPrefetch=true
+-Dukgeo.prefetchMaxTickets=96
+-Dukgeo.prefetchLookAheadSeconds=2.5
+-Dukgeo.prefetchHalfWidthChunks=1
+-Dukgeo.prefetchIntervalTicks=10
+
+-Dukgeo.enableDhLodGenerator=false

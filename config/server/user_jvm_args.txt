@@ -1,29 +1,23 @@
-# zenvibelaptop: Ryzen 7 5825U 8C/16T, 32G RAM — server-focused UKGeo profile
-# Heap 8G start; raise to 10G only if GC logs show pressure.
+# zenvibelaptop play — players online (8C/16T, 32G RAM)
+# Fixed 8G heap: predictable latency; leave ~24G for OS, page cache, natives.
+# Default synced by deploy. For Chunky: use config/server/pregen/ instead.
 -Xms8G
 -Xmx8G
 
-# G1: prefer Java 21 defaults; tune pause target before forcing generation sizes.
 -XX:+UseG1GC
--XX:MaxGCPauseMillis=300
+-XX:MaxGCPauseMillis=200
 -XX:+ParallelRefProcEnabled
 -XX:+DisableExplicitGC
 -XX:+AlwaysPreTouch
 -XX:+PerfDisableSharedMem
 
-# GC logging for heap/thread experiments
 -Xlog:gc*:file=logs/gc.log:time,uptime,level,tags:filecount=5,filesize=10M
 
-# UKGeo dedicated planners (main test = 8; also try 4/6/10/12 when benchmarking)
 -Dukgeo.asyncChunkPlanning=true
 -Dukgeo.useDedicatedPlanPool=true
--Dukgeo.planThreads=8
+-Dukgeo.planThreads=6
 -Dukgeo.enableRiverSearchIndex=true
--Dukgeo.debugPerfSummary=true
--Dukgeo.perfLogIntervalChunks=100
--Dukgeo.slowFillFromNoiseWarnMs=250
--Dukgeo.slowApplyBiomeDecorationWarnMs=250
--Dukgeo.slowPlanWarnMs=250
+-Dukgeo.debugPerfSummary=false
 
 -Dukgeo.maxOreVeinPlanCache=131072
 -Dukgeo.maxOreSliceBagCache=131072
@@ -35,5 +29,4 @@
 -Dukgeo.prefetchHalfWidthChunks=1
 -Dukgeo.prefetchIntervalTicks=10
 
-# DH not shipped on dedicated server pack.
 -Dukgeo.enableDhLodGenerator=false

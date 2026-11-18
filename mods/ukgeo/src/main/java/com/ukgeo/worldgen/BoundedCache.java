@@ -37,4 +37,13 @@ final class BoundedCache<K, V> {
             values.remove(victim);
         }
     }
+
+    void clear() {
+        values.clear();
+        fifoKeys.clear();
+    }
+
+    int size() {
+        return values.size();
+    }
 }

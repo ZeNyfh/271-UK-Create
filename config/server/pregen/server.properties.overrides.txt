@@ -1,0 +1,5 @@
+# Apply manually to server.properties during Chunky / mass pregen (do not overwrite blindly).
+# Restart required after editing server.properties.
+max-tick-time=-1
+view-distance=6
+simulation-distance=4

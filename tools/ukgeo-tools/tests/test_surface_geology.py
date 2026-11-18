@@ -43,3 +43,24 @@ def test_coherent_region_untouched():
     before = arr.copy()
     assert remove_isolated_surface_pixels(arr, max_island=3) == 0
     assert np.array_equal(arr, before)
+
+
+def test_paleogene_clay_silt_sand_keywords():
+    """BGS 625k keyword gap: Solent Group clay/silt/sand vs bare sand stealing sandstone."""
+    import re
+    from pathlib import Path
+
+    import yaml
+
+    rules = yaml.safe_load(
+        (Path(__file__).resolve().parents[1] / "examples" / "surface_geology_625k.yml").read_text()
+    )
+    sand_kw = rules["classes"]["sand_gravel"]["keywords"]
+    clay_kw = rules["classes"]["clay_silt"]["keywords"]
+    assert "sand" not in sand_kw
+    sand_pat = re.compile("|".join(re.escape(k.lower()) for k in sand_kw))
+    clay_pat = re.compile("|".join(re.escape(k.lower()) for k in clay_kw))
+
+    solent = "solent group - clay, silt and sand"
+    assert clay_pat.search(solent), "clay/silt keywords should match Solent Group text"
+    assert not sand_pat.search("sandstone"), "sand_gravel must not match sandstone (no bare sand)"

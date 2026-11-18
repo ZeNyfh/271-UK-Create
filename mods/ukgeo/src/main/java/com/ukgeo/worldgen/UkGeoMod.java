@@ -12,7 +12,9 @@ import net.neoforged.fml.ModList;
 import net.neoforged.fml.config.ModConfig;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.neoforge.common.NeoForge;
+import net.neoforged.neoforge.event.server.ServerStartedEvent;
 import net.neoforged.neoforge.event.tick.ServerTickEvent;
+import com.ukgeo.worldgen.pregen.ChunkyPregenWatchdog;
 import net.neoforged.neoforge.registries.RegisterEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -33,7 +35,12 @@ public final class UkGeoMod {
         NeoForge.EVENT_BUS.addListener(UkGeoOilIntegration::onServerTick);
         NeoForge.EVENT_BUS.addListener(TravelChunkPrefetch::onServerTick);
         NeoForge.EVENT_BUS.addListener(UkGeoMod::onServerTick);
+        NeoForge.EVENT_BUS.addListener(UkGeoMod::onServerStarted);
         maybeInitDistantHorizonsLodGenerator();
+    }
+
+    private static void onServerStarted(ServerStartedEvent event) {
+        ChunkyPregenWatchdog.tryStart(event.getServer());
     }
 
     /**
