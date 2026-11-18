@@ -38,7 +38,8 @@ final class RainViewerMathTest {
         assertEquals(1.0F, RainViewerMath.intensityFromRgba(255, 10, 10, 255), 0.0001F);
         assertEquals(5.0F, RainViewerMath.intensityToPrecipitationMm(0.5F), 0.0001F);
         assertEquals(20.0F, RainViewerMath.intensityToPrecipitationMm(1.0F), 0.0001F);
-        assertEquals(RainViewerMath.PRECIPITATION_MAX_MM, RainViewerMath.intensityToPrecipitationMm(2.0F), 0.0001F);
+        // intensity clamped to [0,1], so >1 still caps at intensity^2*20 = 20
+        assertEquals(20.0F, RainViewerMath.intensityToPrecipitationMm(2.0F), 0.0001F);
 
         assertEquals(0, RainViewerMath.weatherCodeForPrecipitation(0.0F));
         assertEquals(61, RainViewerMath.weatherCodeForPrecipitation(0.5F));
@@ -51,7 +52,8 @@ final class RainViewerMathTest {
         assertEquals(5.0F, weather.precipitation(), 0.0001F);
         assertEquals(5.0F, weather.rain(), 0.0001F);
         assertEquals(0.0F, weather.snowfall(), 0.0001F);
-        assertEquals(61, weather.weatherCode());
+        // intensity 0.5 -> 5 mm/h -> moderate rain (63), not light (61)
+        assertEquals(63, weather.weatherCode());
         assertEquals(MeteorologicalPrecipitation.RAIN, weather.meteorologicalPrecipitation());
     }
 
