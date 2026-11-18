@@ -96,6 +96,16 @@ Generate a categorical surface geology skin from the same 625k data:
   --out ./uk_world_data
 ```
 
+Fill Republic of Ireland zeros from EGDI without overwriting BGS GB/NI. `--fill-only` only paints zero cells; `pack_layer_regions` then merge-packs sparse raws into existing regions:
+
+```bash
+.venv/bin/ukgeo add-egdi-surface-geology-tiles \
+  --manifest ./uk_world_data/manifest.json \
+  --out ./uk_world_data \
+  --cache-dir ../../data/egdi_wfs_cache \
+  --fill-only
+```
+
 Merge COP30 GeoTIFF elevation from `rasters_COP30.tar.gz` into an existing height dataset for Ireland, Northern Ireland, the Isle of Man, and nearby Irish/IoM islands:
 
 ```bash
@@ -199,6 +209,21 @@ tools/ukgeo-tools/.venv/bin/ukgeo bake-river-stations \
 ```
 
 Do not use `--resume-tiles` when correcting old station data: it skips completed tiles. The four outputs are `water/river_reach_id`, `water/river_station_id`, `water/river_water_y`, and `water/river_flow_azimuth`. The staging folder is a layer bundle, not a standalone runtime dataset. Review it against the matching source manifest before applying it to a separate test dataset/world. Changing existing worlds or installing these layers is a separate deployment step; the commands above do neither. Use [the mod's regression checks](../../mods/ukgeo/README.md#river-regression-checks-and-previews) and validate the result in newly generated test chunks.
+
+
+### Ore-chunk Chunky CSV
+
+Build a Chunky CSV of chunks that intersect metal ore layers (default coal/iron/copper/zinc/gold), then dilate by `--dilate` chunks:
+
+```bash
+.venv/bin/ukgeo ore-chunk-csv \
+  --root ./uk_world_data_gb \
+  --out ./uk_world_data_gb/pregen/ores_metals.csv \
+  --ores coal,iron,copper,zinc,gold \
+  --dilate 4
+```
+
+Copy the CSV to `config/chunky/ores_metals.csv` on the server and run `chunky pattern csv ores_metals` then `chunky start`. See [mods/ukgeo README](../../mods/ukgeo/README.md#ore-only-chunky-pregen-csv).
 
 ## Validate, preview, sample
 

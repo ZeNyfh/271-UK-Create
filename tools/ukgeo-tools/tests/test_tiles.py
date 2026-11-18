@@ -1,6 +1,15 @@
 import numpy as np
 
-from ukgeo.tiles import HEIGHT_NODATA, pack_manifest_regions, read_layer_tile, read_r16_tile, read_u8_tile, write_r16_tile, write_u8_tile
+from ukgeo.tiles import (
+    HEIGHT_NODATA,
+    pack_layer_regions,
+    pack_manifest_regions,
+    read_layer_tile,
+    read_r16_tile,
+    read_u8_tile,
+    write_r16_tile,
+    write_u8_tile,
+)
 
 
 def test_r16_roundtrip(tmp_path):
@@ -123,6 +132,45 @@ def test_pack_manifest_regions_skips_already_packed_layers(tmp_path):
     assert manifest["ore_layers"]["copper"]["storage"] == "regions"
     assert np.array_equal(read_layer_tile(tmp_path, manifest["height"], 0, 0, 512), height)
     assert np.array_equal(read_layer_tile(tmp_path, manifest["ore_layers"]["copper"], 1, 1, 512), ore)
+
+
+def test_pack_layer_regions_merge_raw_into_existing_regions(tmp_path):
+    """Sparse raw overlay must merge into packed regions without zeroing untouched tiles."""
+    manifest = {
+        "format": "uk-raster-tiles-v1",
+        "tile_size": 512,
+        "world": {
+            "width": 1024,
+            "depth": 1024,
+            "padded_width": 1024,
+            "padded_depth": 1024,
+            "minecraft_min_x": 0,
+            "minecraft_min_z": 0,
+        },
+    }
+    layer = {
+        "path": "geology/surface",
+        "extension": ".u8",
+        "dtype": "uint8",
+    }
+    tile_00 = np.full((512, 512), 11, dtype=np.uint8)
+    tile_11 = np.full((512, 512), 22, dtype=np.uint8)
+    write_u8_tile(tmp_path / "geology" / "surface" / "000_000.u8", tile_00)
+    write_u8_tile(tmp_path / "geology" / "surface" / "001_001.u8", tile_11)
+
+    pack_layer_regions(tmp_path, layer, manifest, region_tiles=2, delete_raw=True)
+    assert layer["storage"] == "regions"
+    assert not (tmp_path / "geology" / "surface" / "000_000.u8").exists()
+
+    new_00 = np.full((512, 512), 33, dtype=np.uint8)
+    write_u8_tile(tmp_path / "geology" / "surface" / "000_000.u8", new_00)
+
+    pack_layer_regions(tmp_path, layer, manifest, region_tiles=2, delete_raw=True)
+
+    assert layer["storage"] == "regions"
+    assert not (tmp_path / "geology" / "surface" / "000_000.u8").exists()
+    assert np.array_equal(read_layer_tile(tmp_path, layer, 0, 0, 512), new_00)
+    assert np.array_equal(read_layer_tile(tmp_path, layer, 1, 1, 512), tile_11)
 
 
 def test_is_valid_region_file_rejects_empty_and_truncated(tmp_path):

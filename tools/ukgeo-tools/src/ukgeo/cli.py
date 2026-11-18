@@ -29,6 +29,7 @@ from .landmask import mask_height_to_bgs_land as mask_height_to_bgs_land_impl
 from .manifest import read_manifest, write_manifest
 from .ore_image_overlay import apply_named_svg_ore_overlays as apply_named_svg_ore_overlays_impl
 from .ore_image_overlay import apply_ore_image_overlay as apply_ore_image_overlay_impl
+from .ore_chunk_csv import build_ore_chunk_csv
 from .ores import make_ore_tiles as make_ore_tiles_impl
 from .preview import make_preview
 from .river_stations import bake_river_stations_standalone as bake_river_stations_standalone_impl
@@ -629,6 +630,39 @@ def sample(root: Path, x: int = typer.Option(..., "--x"), z: int = typer.Option(
     for ore, layer in manifest.get("ore_layers", {}).items():
         score = int(read_layer_tile(root, layer, tx, tz, manifest["tile_size"])[lz, lx])
         console.print(f"{ore}: {score}")
+
+
+@app.command("ore-chunk-csv")
+def ore_chunk_csv_cmd(
+    root: Path = typer.Option(..., "--root", help="uk_world_data_gb (or equivalent) root with manifest.json"),
+    out: Path = typer.Option(..., "--out", help="Output Chunky CSV path (chunkX,chunkZ per line)"),
+    ores: str = typer.Option("coal,iron,copper,zinc,gold", "--ores", help="Comma-separated ore layer names"),
+    dilate: int = typer.Option(4, "--dilate", min=0, help="Chebyshev dilation radius in chunks"),
+    threshold: int = typer.Option(0, "--threshold", help="Pixel value must be > threshold to count as ore"),
+    mca_snap: bool = typer.Option(False, "--mca-snap/--no-mca-snap", help="Expand to full 32x32 MCA regions (fatter)"),
+) -> None:
+    try:
+        summary = build_ore_chunk_csv(
+            root,
+            out,
+            ores=ores,
+            dilate=dilate,
+            threshold=threshold,
+            mca_snap=mca_snap,
+        )
+    except (FileNotFoundError, KeyError, ValueError) as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    console.print(
+        f"[green]Wrote {summary['chunk_count']} chunks[/green] "
+        f"({summary['pct_of_full_rect']:.2f}% of {summary['full_rect']}) → {out}"
+    )
+    console.print(
+        f"raw ore chunks: {summary['raw_chunks']}; dilate={summary['dilate']}; mca_snap={summary['mca_snap']}"
+    )
+    console.print(
+        f"est. size @15–25 KiB/chunk: {summary['est_gb_lo']:.1f}–{summary['est_gb_hi']:.1f} GB"
+    )
 
 
 if __name__ == "__main__":

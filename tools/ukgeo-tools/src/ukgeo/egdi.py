@@ -166,7 +166,7 @@ def add_egdi_surface_geology_tiles(
                 updated = existing
             if not np.array_equal(updated, existing):
                 changed_tiles += 1
-            write_u8_tile(root / f"{tile_x:03d}_{tile_z:03d}{extension}", updated, tile_size)
+                write_u8_tile(root / f"{tile_x:03d}_{tile_z:03d}{extension}", updated, tile_size)
 
     classes = {str(key): value for key, value in surface_layer.get("classes", {}).items()}
     for class_id, meta in EGDI_SURFACE_CLASSES.items():

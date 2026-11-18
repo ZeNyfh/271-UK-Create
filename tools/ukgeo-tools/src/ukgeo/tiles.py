@@ -459,11 +459,56 @@ def pack_layer_regions(root: Path, layer: dict[str, Any], manifest: dict[str, An
     # regions and only refresh metadata. Re-reading missing raws would zero-fill and
     # overwrite good region files.
     missing_tile = int(layer.get("missing_tile", default_tile_value(dtype)))
-    if not _has_raw_tiles(raw_root, extension) and _has_region_files(region_root, region_ext):
+    has_raw = _has_raw_tiles(raw_root, extension)
+    has_regions = _has_region_files(region_root, region_ext)
+    if not has_raw and has_regions:
         layer.update(region_metadata(layer_path, dtype, region_tiles=region_tiles, missing_tile=missing_tile))
         return
+    # Sparse EGDI/overlay raws over an already-packed layer: merge only touched
+    # region windows so missing raws keep existing region data instead of zero-fill.
+    if has_raw and has_regions:
+        tiles_layer = {**layer, "extension": extension, "dtype": dtype, "missing_tile": missing_tile, "storage": "tiles"}
+        regions_layer = {
+            **layer,
+            "extension": extension,
+            "dtype": dtype,
+            "missing_tile": missing_tile,
+            **region_metadata(layer_path, dtype, region_tiles=region_tiles, missing_tile=missing_tile),
+        }
+        for region_z in range(math.ceil(tiles_z / region_tiles)):
+            for region_x in range(math.ceil(tiles_x / region_tiles)):
+                if not _region_window_has_raw(raw_root, region_x, region_z, tiles_x, tiles_z, region_tiles, extension):
+                    continue
+                tiles: list[np.ndarray | None] = []
+                for local_z in range(region_tiles):
+                    for local_x in range(region_tiles):
+                        tile_x = region_x * region_tiles + local_x
+                        tile_z = region_z * region_tiles + local_z
+                        if tile_x >= tiles_x or tile_z >= tiles_z:
+                            tiles.append(None)
+                            continue
+                        raw_path = raw_root / tile_filename(tile_x, tile_z, extension)
+                        if resolve_existing_tile(raw_path).exists():
+                            tiles.append(read_layer_tile(root, tiles_layer, tile_x, tile_z, tile_size))
+                        else:
+                            tiles.append(read_region_tile(root, regions_layer, tile_x, tile_z, tile_size))
+                write_region_file_from_tiles(
+                    region_root / tile_filename(region_x, region_z, region_ext),
+                    tiles=tiles,
+                    tile_size=tile_size,
+                    region_tiles=region_tiles,
+                    dtype=dtype,
+                    missing_tile=missing_tile,
+                )
+        layer.update(region_metadata(layer_path, dtype, region_tiles=region_tiles, missing_tile=missing_tile))
+        if delete_raw and raw_root.exists():
+            for tile in raw_root.glob(f"*{extension}"):
+                tile.unlink(missing_ok=True)
+            for tile in raw_root.glob(f"*{extension}.gz"):
+                tile.unlink(missing_ok=True)
+        return
     source_layer = {**layer, "extension": extension, "dtype": dtype, "missing_tile": missing_tile}
-    if _has_raw_tiles(raw_root, extension):
+    if has_raw:
         source_layer["storage"] = "tiles"
     region_root.mkdir(parents=True, exist_ok=True)
     for region_z in range(math.ceil(tiles_z / region_tiles)):
@@ -495,6 +540,26 @@ def _has_raw_tiles(raw_root: Path, extension: str) -> bool:
     if not raw_root.exists():
         return False
     return any(raw_root.glob(f"*{extension}")) or any(raw_root.glob(f"*{extension}.gz"))
+
+
+def _region_window_has_raw(
+    raw_root: Path,
+    region_x: int,
+    region_z: int,
+    tiles_x: int,
+    tiles_z: int,
+    region_tiles: int,
+    extension: str,
+) -> bool:
+    for local_z in range(region_tiles):
+        for local_x in range(region_tiles):
+            tile_x = region_x * region_tiles + local_x
+            tile_z = region_z * region_tiles + local_z
+            if tile_x >= tiles_x or tile_z >= tiles_z:
+                continue
+            if resolve_existing_tile(raw_root / tile_filename(tile_x, tile_z, extension)).exists():
+                return True
+    return False
 
 
 def is_valid_region_file(path: Path) -> bool:

@@ -207,6 +207,12 @@ fi
   --manifest "$TMP_ROOT/manifest.json" \
   --out "$TMP_ROOT"
 
+"$UKGEO" add-egdi-surface-geology-tiles \
+  --manifest "$TMP_ROOT/manifest.json" \
+  --out "$TMP_ROOT" \
+  --cache-dir "$REPO_ROOT/data/egdi_wfs_cache" \
+  --fill-only
+
 "$UKGEO" make-river-tiles \
   --rivers "$RIVERS_ZIP" \
   --manifest "$TMP_ROOT/manifest.json" \

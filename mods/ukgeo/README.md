@@ -151,6 +151,31 @@ Safe vegetal path (biome feature decoration stays off by default): pale oaks / p
 Runtime forest expand (no tile rebuild) promotes vegetation classes 3–9 toward woodland in those priority boxes plus densest IE/NI belts. Nautiluses are disabled via instance `config/vanillabackport-common.toml` (`has_nautilus = false`), not a biome modifier.
 
 
+
+## Ore-only Chunky pregen (CSV)
+
+Pregenerate only chunks that contain metal ore layers (coal/iron/copper/zinc/gold) via Chunky’s CSV pattern:
+
+```bash
+cd tools/ukgeo-tools
+.venv/bin/ukgeo ore-chunk-csv \
+  --root ./uk_world_data_gb \
+  --out ./uk_world_data_gb/pregen/ores_metals.csv \
+  --ores coal,iron,copper,zinc,gold \
+  --dilate 4
+```
+
+Copy `ores_metals.csv` into the server’s `config/chunky/` directory, then in-game (after pausing/cancelling any rectangle task):
+
+```text
+chunky pause
+chunky cancel
+chunky pattern csv ores_metals
+chunky start
+```
+
+`--dilate 4` expands ~64 blocks (Chebyshev) so shores/access aren’t razor-thin. Optional `--mca-snap` expands to full 32×32 MCA regions (fatter).
+
 ## Chunky pregen watchdog
 
 Optional recovery helper for long Chunky pregen runs that stall when UKGeo ore caches grow large. Requires the `chunky` mod and an explicit enable flag (default off):
