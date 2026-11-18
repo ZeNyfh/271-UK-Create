@@ -31,6 +31,8 @@ public final class OpenMeteoClient {
         "wind_gusts_10m"
     );
     private static final long INTER_BATCH_DELAY_MS = 250L;
+    /** National grid is ≤3 dense batches (≤32 pts each); run two HTTP calls in flight. */
+    private static final int NATIONAL_BATCH_CONCURRENCY = 2;
 
     private final HttpClient httpClient;
     private final Semaphore concurrentRequests;
@@ -45,7 +47,31 @@ public final class OpenMeteoClient {
 
     public CompletableFuture<List<OpenMeteoResponse.LocationWeather>> fetchCurrent(List<OpenMeteoResponse.LocationRequest> requests) {
         List<List<OpenMeteoResponse.LocationRequest>> batches = OpenMeteoRequestBatcher.batch(requests);
-        // Serialize batches: free-tier Open-Meteo 429s when parallel batch fans-out on cold start.
+        if (batches.isEmpty()) {
+            return CompletableFuture.completedFuture(List.of());
+        }
+        if (batches.size() == 1) {
+            return fetchBatch(batches.get(0));
+        }
+        // Dense national-grid refreshes: parallel under concurrency 2.
+        // Serialize + 250ms only when safeguards are on and batches look like small player-tile fallbacks.
+        if (shouldSerializeBatches(batches)) {
+            return fetchBatchesSerialized(batches);
+        }
+        return fetchBatchesParallel(batches, NATIONAL_BATCH_CONCURRENCY);
+    }
+
+    private static boolean shouldSerializeBatches(List<List<OpenMeteoResponse.LocationRequest>> batches) {
+        if (!ServerWeatherConfig.safeBoolean(ServerWeatherConfig.REQUEST_BUDGET_SAFEGUARDS, true)) {
+            return false;
+        }
+        int smallCap = Math.max(1, ServerWeatherConfig.safeInt(ServerWeatherConfig.MAX_TILES_PER_REFRESH, 12));
+        return batches.size() > 1 && batches.stream().allMatch(batch -> batch.size() <= smallCap);
+    }
+
+    private CompletableFuture<List<OpenMeteoResponse.LocationWeather>> fetchBatchesSerialized(
+        List<List<OpenMeteoResponse.LocationRequest>> batches
+    ) {
         CompletableFuture<List<OpenMeteoResponse.LocationWeather>> chain = CompletableFuture.completedFuture(new ArrayList<>());
         for (int i = 0; i < batches.size(); i++) {
             List<OpenMeteoResponse.LocationRequest> batch = batches.get(i);
@@ -70,6 +96,33 @@ public final class OpenMeteoClient {
         return chain;
     }
 
+    private CompletableFuture<List<OpenMeteoResponse.LocationWeather>> fetchBatchesParallel(
+        List<List<OpenMeteoResponse.LocationRequest>> batches,
+        int concurrency
+    ) {
+        // Wave-based so we never block the HttpClient's (often single-thread) executor on a semaphore.
+        int limit = Math.max(1, concurrency);
+        CompletableFuture<List<OpenMeteoResponse.LocationWeather>> chain = CompletableFuture.completedFuture(new ArrayList<>());
+        for (int start = 0; start < batches.size(); start += limit) {
+            int end = Math.min(start + limit, batches.size());
+            List<List<OpenMeteoResponse.LocationRequest>> wave = batches.subList(start, end);
+            chain = chain.thenCompose(accumulated -> {
+                List<CompletableFuture<List<OpenMeteoResponse.LocationWeather>>> futures = new ArrayList<>(wave.size());
+                for (List<OpenMeteoResponse.LocationRequest> batch : wave) {
+                    futures.add(fetchBatchHttp(batch));
+                }
+                return CompletableFuture.allOf(futures.toArray(CompletableFuture[]::new)).thenApply(ignored -> {
+                    List<OpenMeteoResponse.LocationWeather> merged = new ArrayList<>(accumulated);
+                    for (CompletableFuture<List<OpenMeteoResponse.LocationWeather>> future : futures) {
+                        merged.addAll(future.join());
+                    }
+                    return merged;
+                });
+            });
+        }
+        return chain;
+    }
+
     private CompletableFuture<List<OpenMeteoResponse.LocationWeather>> fetchBatch(List<OpenMeteoResponse.LocationRequest> batch) {
         try {
             concurrentRequests.acquire();
@@ -77,6 +130,10 @@ public final class OpenMeteoClient {
             Thread.currentThread().interrupt();
             return CompletableFuture.failedFuture(exception);
         }
+        return fetchBatchHttp(batch).whenComplete((ignored, throwable) -> concurrentRequests.release());
+    }
+
+    private CompletableFuture<List<OpenMeteoResponse.LocationWeather>> fetchBatchHttp(List<OpenMeteoResponse.LocationRequest> batch) {
         HttpRequest request = HttpRequest.newBuilder(URI.create(buildUrl(batch)))
             .timeout(Duration.ofSeconds(20))
             .header("User-Agent", "RealtimeLocalisedWeather/" + RealtimeLocalisedWeatherMod.MOD_VERSION)
@@ -92,8 +149,7 @@ public final class OpenMeteoClient {
                     throw new IllegalStateException(detail);
                 }
                 return OpenMeteoParser.parse(response.body()).locations();
-            })
-            .whenComplete((ignored, throwable) -> concurrentRequests.release());
+            });
     }
 
     String buildUrl(List<OpenMeteoResponse.LocationRequest> batch) {

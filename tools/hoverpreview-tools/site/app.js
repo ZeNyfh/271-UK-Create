@@ -2243,6 +2243,8 @@ async function fetchOpenMeteoOmWeather(config) {
   const provider = config?.tile_provider;
   if (!provider || provider.kind !== "openmeteo-om") throw new Error("Open-Meteo OM tile provider is not configured");
   const library = await loadOpenMeteoWeatherMapLayer(provider);
+  const reader = openMeteoOmFileReader(library);
+  const domainGrid = openMeteoDomainGrid(library, provider);
   const grid = config.grid;
   const total = Number(grid.rows) * Number(grid.columns);
   const latitudes = Array.from(grid.latitudes || [], (value) => Number(value));
@@ -2250,59 +2252,159 @@ async function fetchOpenMeteoOmWeather(config) {
   const precipVar = provider.variables?.downfall_coverage || "precipitation";
   const snowVar = provider.variables?.snowfall || "snowfall";
   let timeStep = String(provider.time_step || LIVE_WEATHER_OPEN_METEO_TIME_STEP).trim();
-  let precipitationUrl = openMeteoOmUrl(provider, precipVar, timeStep);
+  let precipFile;
   try {
-    await primeOpenMeteoOmVariable(library, precipitationUrl);
+    precipFile = await resolveOpenMeteoOmFile(provider, precipVar, timeStep, library);
   } catch (error) {
     if (timeStep === LIVE_WEATHER_OPEN_METEO_TIME_STEP_FALLBACK) throw error;
-    console.warn(`[hoverpreview] OM prime failed for ${timeStep}; retrying ${LIVE_WEATHER_OPEN_METEO_TIME_STEP_FALLBACK}`, error);
+    console.warn(`[hoverpreview] OM resolve failed for ${timeStep}; retrying ${LIVE_WEATHER_OPEN_METEO_TIME_STEP_FALLBACK}`, error);
     timeStep = LIVE_WEATHER_OPEN_METEO_TIME_STEP_FALLBACK;
-    precipitationUrl = openMeteoOmUrl(provider, precipVar, timeStep);
-    await primeOpenMeteoOmVariable(library, precipitationUrl);
+    precipFile = await resolveOpenMeteoOmFile(provider, precipVar, timeStep, library);
   }
-  const downfall = await sampleOpenMeteoOmGrid(library, precipitationUrl, latitudes, longitudes, total);
+  const downfall = await sampleOpenMeteoOmGrid(reader, domainGrid, precipFile, latitudes, longitudes, total);
 
   let snowfall;
-  const snowUrl = openMeteoOmUrl(provider, snowVar, timeStep);
   try {
-    await primeOpenMeteoOmVariable(library, snowUrl);
-    snowfall = await sampleOpenMeteoOmGrid(library, snowUrl, latitudes, longitudes, total);
+    const snowFile = await resolveOpenMeteoOmFile(provider, snowVar, timeStep, library);
+    snowfall = await sampleOpenMeteoOmGrid(reader, domainGrid, snowFile, latitudes, longitudes, total);
     if (!liveWeatherValuesHaveSignal(snowfall)) {
       throw new Error("snowfall variable has no signal");
     }
   } catch (error) {
     console.warn("[hoverpreview] OM snowfall failed or empty; trying snowfall_water_equivalent", error);
-    const sweUrl = openMeteoOmUrl(provider, "snowfall_water_equivalent", timeStep);
-    await primeOpenMeteoOmVariable(library, sweUrl);
-    snowfall = await sampleOpenMeteoOmGrid(library, sweUrl, latitudes, longitudes, total);
+    const sweFile = await resolveOpenMeteoOmFile(provider, "snowfall_water_equivalent", timeStep, library);
+    snowfall = await sampleOpenMeteoOmGrid(reader, domainGrid, sweFile, latitudes, longitudes, total);
   }
   return { downfall_coverage: downfall, snowfall };
 }
 
-function openMeteoOmUrl(provider, variable, timeStepOverride) {
-  const base = String(provider.data_base_url || LIVE_WEATHER_OPEN_METEO_MAP_TILES_BASE_URL).replace(/\/+$/, "");
-  const domain = encodeURIComponent(String(provider.domain || LIVE_WEATHER_OPEN_METEO_DOMAIN));
-  const url = new URL(`${base}/${domain}/latest.json`);
-  url.searchParams.set("variable", String(variable));
-  const timeStep = String(timeStepOverride ?? provider.time_step ?? LIVE_WEATHER_OPEN_METEO_TIME_STEP).trim();
-  if (timeStep) url.searchParams.set("time_step", timeStep);
-  return `om://${url.href}`;
+function openMeteoPad2(value) {
+  return String(Math.trunc(Number(value) || 0)).padStart(2, "0");
 }
 
-async function sampleOpenMeteoOmGrid(library, omUrl, latitudes, longitudes, total) {
+function openMeteoTimeStepTargetDate(timeStep, now = new Date()) {
+  const date = new Date(now.getTime());
+  const match = String(timeStep || "").trim().match(/^(current_time|valid_times)(_)?(\+|-)?(.*)?$/);
+  if (!match) return date;
+  const [, capture, , modifier, amountAndUnit] = match;
+  if (capture !== "current_time" || !amountAndUnit) return date;
+  const parts = amountAndUnit.match(/[a-zA-Z]+|[0-9]+/g);
+  if (!parts?.length) return date;
+  const signed = (modifier === "-" ? -1 : 1) * Number(parts[0]);
+  if (!Number.isFinite(signed) || signed === 0) return date;
+  const unit = parts[1];
+  if (unit === "H") date.setHours(date.getHours() + signed);
+  else if (unit === "M") date.setMinutes(date.getMinutes() + signed);
+  else if (unit === "d") date.setDate(date.getDate() + signed);
+  else if (unit === "m") date.setMonth(date.getMonth() + signed);
+  return date;
+}
+
+function pickClosestOpenMeteoValidTime(validTimes, target) {
+  let best = null;
+  let bestDiff = Infinity;
+  const targetMs = target.getTime();
+  for (const entry of validTimes || []) {
+    const candidate = new Date(entry);
+    const ms = candidate.getTime();
+    if (!Number.isFinite(ms)) continue;
+    const diff = Math.abs(ms - targetMs);
+    if (diff < bestDiff) {
+      bestDiff = diff;
+      best = candidate;
+    }
+  }
+  return best;
+}
+
+function openMeteoDeltaTimeHours(library, validTime, validTimes) {
+  if (typeof library?.deltaTimeHoursAt === "function") {
+    const step = library.deltaTimeHoursAt(validTime, validTimes);
+    if (Number.isFinite(step) && step > 0) return step;
+  }
+  const times = (validTimes || [])
+    .map((entry) => new Date(entry).getTime())
+    .filter((ms) => Number.isFinite(ms))
+    .sort((a, b) => a - b);
+  const index = times.indexOf(validTime.getTime());
+  if (index < 0 || times.length < 2) return 1;
+  const stepMs = index === 0 ? times[1] - times[0] : times[index] - times[index - 1];
+  const hours = stepMs / 3_600_000;
+  return Number.isFinite(hours) && hours > 0 ? hours : 1;
+}
+
+async function resolveOpenMeteoOmFile(provider, variable, timeStep, library) {
+  const base = String(provider.data_base_url || LIVE_WEATHER_OPEN_METEO_MAP_TILES_BASE_URL).replace(/\/+$/, "");
+  const domain = String(provider.domain || LIVE_WEATHER_OPEN_METEO_DOMAIN);
+  const metaUrl = new URL(`${base}/${encodeURIComponent(domain)}/latest.json`);
+  metaUrl.searchParams.set("variable", String(variable));
+  const step = String(timeStep || "").trim();
+  if (step) metaUrl.searchParams.set("time_step", step);
+  const response = await fetch(metaUrl.href);
+  if (!response.ok) throw new Error(`Failed to fetch ${metaUrl.href}: ${response.status}`);
+  const meta = await response.json();
+  const reference = new Date(meta.reference_time);
+  if (!Number.isFinite(reference.getTime())) throw new Error("Open-Meteo latest.json missing reference_time");
+  const validTimes = Array.isArray(meta.valid_times) ? meta.valid_times : [];
+  const target = openMeteoTimeStepTargetDate(step);
+  const valid = pickClosestOpenMeteoValidTime(validTimes, target) || target;
+  const fileTime = new Date(valid);
+  fileTime.setUTCMinutes(0, 0, 0);
+  const runFolder = `${reference.getUTCFullYear()}/${openMeteoPad2(reference.getUTCMonth() + 1)}/${openMeteoPad2(reference.getUTCDate())}/${openMeteoPad2(reference.getUTCHours())}00Z`;
+  const fileName = `${fileTime.getUTCFullYear()}-${openMeteoPad2(fileTime.getUTCMonth() + 1)}-${openMeteoPad2(fileTime.getUTCDate())}T${openMeteoPad2(fileTime.getUTCHours())}00.om`;
+  return {
+    httpsOmUrl: `${base}/${domain}/${runFolder}/${fileName}`,
+    variable: String(variable),
+    deltaTimeHours: openMeteoDeltaTimeHours(library, fileTime, validTimes),
+  };
+}
+
+function openMeteoOmFileReader(library) {
+  if (typeof library?.getProtocolInstance === "function" && library?.defaultOmProtocolSettings) {
+    const instance = library.getProtocolInstance(library.defaultOmProtocolSettings);
+    if (instance?.omFileReader?.readVariable) return instance.omFileReader;
+  }
+  if (library?.omFileReader?.readVariable) return library.omFileReader;
+  throw new Error("Open-Meteo weather-map-layer did not expose omFileReader.readVariable");
+}
+
+function openMeteoDomainGrid(library, provider) {
+  const domainValue = String(provider.domain || LIVE_WEATHER_OPEN_METEO_DOMAIN);
+  const domains = Array.isArray(library?.domainOptions) ? library.domainOptions : [];
+  const domain = domains.find((entry) => entry?.value === domainValue);
+  if (!domain?.grid || typeof library?.GridFactory?.create !== "function") {
+    throw new Error(`Open-Meteo domain grid unavailable for ${domainValue}`);
+  }
+  return {
+    domain,
+    grid: library.GridFactory.create(domain.grid, null),
+  };
+}
+
+async function sampleOpenMeteoOmGrid(reader, domainGrid, resolved, latitudes, longitudes, total) {
+  const controller = new AbortController();
+  const data = await reader.readVariable(
+    resolved.httpsOmUrl,
+    resolved.variable,
+    null,
+    controller.signal,
+    { deltaTimeHours: resolved.deltaTimeHours, domain: domainGrid.domain }
+  );
+  const field = data?.values;
+  if (!field || typeof field.length !== "number") {
+    throw new Error("Open-Meteo readVariable returned no values");
+  }
   const values = new Float32Array(total);
+  const grid = domainGrid.grid;
   for (let start = 0; start < total; start += LIVE_WEATHER_SAMPLE_BATCH_POINTS) {
     const end = Math.min(total, start + LIVE_WEATHER_SAMPLE_BATCH_POINTS);
-    await Promise.all(Array.from({ length: end - start }, async (_, offset) => {
-      const index = start + offset;
+    for (let index = start; index < end; index += 1) {
       const latitude = latitudes[index];
       const longitude = longitudes[index];
-      if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
-      const sample = await library.getValueFromLatLong(latitude, longitude, omUrl);
-      values[index] = clampPrecipitationMm(sample?.value);
-    }));
-    // Promise completions are still processed on the main thread. Yield between chunks so
-    // pointer/zoom events and rendering are not starved by a large UK-wide sampling grid.
+      if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) continue;
+      values[index] = clampPrecipitationMm(grid.getInterpolatedValue(field, latitude, longitude, "linear"));
+    }
+    // Yield between chunks so pointer/zoom events are not starved by a dense UK grid.
     if (end < total) await yieldToBrowser();
   }
   return values;
@@ -2315,11 +2417,6 @@ function liveWeatherValuesHaveSignal(values) {
   return false;
 }
 
-async function primeOpenMeteoOmVariable(library, omUrl) {
-  const controller = new AbortController();
-  await library.omProtocol({ url: omUrl, type: "json" }, { signal: controller.signal });
-}
-
 async function loadOpenMeteoWeatherMapLayer(providerOrUrl) {
   if (openMeteoWeatherMapLayerPromise) return openMeteoWeatherMapLayerPromise;
   const provider = typeof providerOrUrl === "string" ? { script_url: providerOrUrl } : (providerOrUrl || {});
@@ -2327,17 +2424,19 @@ async function loadOpenMeteoWeatherMapLayer(providerOrUrl) {
     const mjsUrl = provider.mjs_url || LIVE_WEATHER_OPEN_METEO_LAYER_MJS_URL;
     try {
       const mod = await import(/* webpackIgnore: true */ mjsUrl);
-      if (mod?.omProtocol && mod?.getValueFromLatLong) return mod;
+      if (mod?.getProtocolInstance && mod?.GridFactory && mod?.defaultOmProtocolSettings && mod?.domainOptions) {
+        return mod;
+      }
     } catch (error) {
       console.warn("[hoverpreview] weather-map-layer 0.3.2 ESM import failed; falling back to 0.0.19 UMD", error);
     }
-    if (globalThis.OMWeatherMapLayer?.omProtocol && globalThis.OMWeatherMapLayer?.getValueFromLatLong) {
+    if (globalThis.OMWeatherMapLayer?.getProtocolInstance && globalThis.OMWeatherMapLayer?.GridFactory) {
       return globalThis.OMWeatherMapLayer;
     }
     await loadScript(provider.script_url || LIVE_WEATHER_OPEN_METEO_LAYER_SCRIPT_URL);
     const library = globalThis.OMWeatherMapLayer;
-    if (!library?.omProtocol || !library?.getValueFromLatLong) {
-      throw new Error("Open-Meteo weather-map-layer did not expose the expected OM reader API");
+    if (!library?.getProtocolInstance || !library?.GridFactory || !library?.defaultOmProtocolSettings) {
+      throw new Error("Open-Meteo weather-map-layer did not expose the bulk OM reader API");
     }
     return library;
   })();

@@ -218,6 +218,16 @@ serving only `site/` do not match the published path layout.
   lists in the hover status. Animal lookup uses the vegetation/landcover sample
   value first and falls back to aliases from `animals.txt`.
 
+## Live weather performance
+
+Live Rain/Snow layers load UKMO Open-Meteo spatial `.om` grids in bulk via
+`@openmeteo/weather-map-layer` (`readVariable` + local `GridFactory` sampling)
+into the existing offscreen weather canvas. Forecast API remains the fallback.
+
+If Open-Meteo spatial sampling is still too slow or flaky for the hover site,
+the next option is RainViewer XYZ radar tiles (do not implement unless needed):
+https://www.rainviewer.com/api.html
+
 ## Validation
 
 From the repository root:

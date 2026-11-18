@@ -139,9 +139,12 @@ test("live weather controls work with older manifests and fetch Open-Meteo", () 
   assert.match(appJs, /tile_provider:\s*\{/);
   assert.match(appJs, /kind: "openmeteo-om"/);
   assert.match(appJs, /function fetchOpenMeteoOmWeather\(config\)/);
-  assert.match(appJs, /function openMeteoOmUrl\(provider, variable/);
-  assert.match(appJs, /library\.omProtocol\(\{ url: omUrl, type: "json" \}/);
-  assert.match(appJs, /library\.getValueFromLatLong\(latitude, longitude, omUrl\)/);
+  assert.match(appJs, /function resolveOpenMeteoOmFile\(provider, variable, timeStep, library\)/);
+  assert.match(appJs, /getProtocolInstance\(library\.defaultOmProtocolSettings\)/);
+  assert.match(appJs, /reader\.readVariable\(/);
+  assert.match(appJs, /GridFactory\.create\(domain\.grid, null\)/);
+  assert.match(appJs, /grid\.getInterpolatedValue\(field, latitude, longitude, "linear"\)/);
+  assert.doesNotMatch(appJs, /library\.getValueFromLatLong\(/);
   assert.match(appJs, /https:\/\/api\.open-meteo\.com\/v1\/forecast/);
   assert.match(appJs, /prefer_forecast_api:\s*config\?\.prefer_forecast_api === true/);
   assert.match(appJs, /forecast_api_fallback:\s*config\?\.forecast_api_fallback !== false/);
@@ -207,8 +210,8 @@ test("layer checkbox selections persist only selected layer names in a cookie", 
   // Layer selection stays cookie-only; weather forecast may use sessionStorage as a rate-limit cache.
   assert.doesNotMatch(appJs, /sessionStorage\.(setItem|getItem|removeItem).*SELECTED_LAYERS/);
   assert.match(appJs, /hoverpreview:om-forecast/);
-  assert.match(rootIndexHtml, /app\.js\?v=20261117-1/);
-  assert.match(siteIndexHtml, /app\.js\?v=20261117-1/);
+  assert.match(rootIndexHtml, /app\.js\?v=20261118-1/);
+  assert.match(siteIndexHtml, /app\.js\?v=20261118-1/);
 });
 
 test("hoverpreview defaults use larger tiles to reduce request count", () => {

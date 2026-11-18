@@ -58,10 +58,13 @@ With Serene installed, this mod can drive the season calendar from real wall-clo
 - Multiplayer clients do not contact Open-Meteo.
 - Multiplayer clients poll their Minecraft server for the latest cached tile snapshots and receive server-authoritative precipitation data.
 - LIVE mode uses one national multipoint forecast pass (default 8×10, ≤96 points) over the UKGeo WGS84 bbox; weather tiles bilinear-sample that grid instead of issuing per-tile HTTP calls.
+- National-grid Open-Meteo batches (≤32 points each, typically 3 for an 8×10 grid) run with concurrency 2; the older serialize+250ms gap is kept only for `request_budget_safeguards` many-small player-tile fallbacks.
+- Grid HTTP refresh runs at most once per `refresh_interval_minutes`; every ~40 ticks only re-samples the cached grid when still fresh.
 - If the national grid refresh fails, the server falls back to the legacy per-tile fetch path (still rate-limit aware).
 - Requests use Java 21 `HttpClient.sendAsync`.
 - Cached snapshots remain usable during upstream outages.
 - Expired or failed data are marked stale rather than crashing or freezing the server.
+- If Open-Meteo national-grid latency is still too high, the next option is RainViewer XYZ radar tiles ([api.rainviewer.com](https://www.rainviewer.com/api.html)) — not implemented in this mod yet.
 
 Open-Meteo variables used:
 
