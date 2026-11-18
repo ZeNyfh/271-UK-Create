@@ -102,11 +102,12 @@ uses that metadata instead of hardcoding paths; older exports still fall back to
 full/cropped sample images where tile metadata is missing.
 
 By default the exporter also writes static metadata that the browser can use to
-fetch live Open-Meteo weather overlays:
+fetch live RainViewer radar overlays:
 
-- `Rain / precipitation` and `Snow / snowfall` via Open-Meteo OM spatial
-  (`openmeteo.s3.amazonaws.com/data_spatial`, domain `ukmo_uk_deterministic_2km`);
-  the forecast-point API is the fallback when OM spatial fails.
+- `Radar / precipitation` via RainViewer XYZ tiles
+  (`api.rainviewer.com` weather-maps + `tilecache.rainviewer.com`);
+  Open-Meteo forecast multipoint is a soft fallback only if RainViewer fails.
+- Attribution: link to https://www.rainviewer.com/ (required for free use).
 
 The browser fetches those overlays at runtime using the exported UKGeo
 georeferencing-derived WGS84 query grid. The site remains static; weather does
@@ -220,13 +221,11 @@ serving only `site/` do not match the published path layout.
 
 ## Live weather performance
 
-Live Rain/Snow layers load UKMO Open-Meteo spatial `.om` grids in bulk via
-`@openmeteo/weather-map-layer` (`readVariable` + local `GridFactory` sampling)
-into the existing offscreen weather canvas. Forecast API remains the fallback.
-
-If Open-Meteo spatial sampling is still too slow or flaky for the hover site,
-the next option is RainViewer XYZ radar tiles (do not implement unless needed):
-https://www.rainviewer.com/api.html
+Live radar uses RainViewer XYZ PNGs (typically z=5–6, a handful of UK tiles,
+refresh ~5 minutes). Frames are stitched in-browser and resampled onto the
+existing offscreen weather canvas, preserving RainViewer colours. Open-Meteo
+forecast multipoint remains a soft fallback only. Attribution:
+https://www.rainviewer.com/
 
 ## Validation
 

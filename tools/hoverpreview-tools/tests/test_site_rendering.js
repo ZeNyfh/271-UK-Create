@@ -119,7 +119,7 @@ test("published root page includes the current hover map shell", () => {
   assert.match(appJs, /if \(!controls\) \{/);
 });
 
-test("live weather controls work with older manifests and fetch Open-Meteo", () => {
+test("live weather controls work with older manifests and fetch RainViewer", () => {
   const appJs = fs.readFileSync(path.join(__dirname, "../site/app.js"), "utf8");
   const indexHtml = fs.readFileSync(path.join(__dirname, "../site/index.html"), "utf8");
 
@@ -128,26 +128,24 @@ test("live weather controls work with older manifests and fetch Open-Meteo", () 
   assert.match(appJs, /function resolveLiveWeatherConfig\(manifest\)/);
   assert.match(appJs, /function buildLiveWeatherGrid\(manifest, requestedColumns\)/);
   assert.match(appJs, /function britishNationalGridToWgs84\(easting, northing\)/);
-  assert.match(appJs, /https:\/\/unpkg\.com\/@openmeteo\/weather-map-layer@0\.3\.2\/dist\/index\.mjs/);
-  assert.match(appJs, /https:\/\/unpkg\.com\/@openmeteo\/weather-map-layer@0\.0\.19\/dist\/index\.js/);
-  assert.match(appJs, /https:\/\/openmeteo\.s3\.amazonaws\.com\/data_spatial/);
-  assert.doesNotMatch(appJs, /map-tiles\.open-meteo\.com/);
-  assert.match(appJs, /ukmo_uk_deterministic_2km/);
-  assert.match(appJs, /current_time_1H/);
-  assert.match(appJs, /snowfall_water_equivalent/);
-  assert.match(appJs, /import\(/);
-  assert.match(appJs, /tile_provider:\s*\{/);
-  assert.match(appJs, /kind: "openmeteo-om"/);
-  assert.match(appJs, /function fetchOpenMeteoOmWeather\(config\)/);
-  assert.match(appJs, /function resolveOpenMeteoOmFile\(provider, variable, timeStep, library\)/);
-  assert.match(appJs, /getProtocolInstance\(library\.defaultOmProtocolSettings\)/);
-  assert.match(appJs, /reader\.readVariable\(/);
-  assert.match(appJs, /GridFactory\.create\(domain\.grid, null\)/);
-  assert.match(appJs, /grid\.getInterpolatedValue\(field, latitude, longitude, "linear"\)/);
-  assert.doesNotMatch(appJs, /library\.getValueFromLatLong\(/);
+  assert.match(appJs, /https:\/\/api\.rainviewer\.com\/public\/weather-maps\.json/);
+  assert.match(appJs, /https:\/\/www\.rainviewer\.com\//);
+  assert.match(appJs, /function fetchRainViewerRadar\(config\)/);
+  assert.match(appJs, /function chooseRainViewerZoom\(bbox, maxTiles\)/);
+  assert.match(appJs, /function rainViewerIntensityToMm\(r, g, b, a\)/);
+  assert.match(appJs, /function ensureRainViewerAttribution\(\)/);
+  assert.match(appJs, /Radar © RainViewer/);
+  assert.match(appJs, /const LIVE_WEATHER_REFRESH_MS = 5 \* 60 \* 1000;/);
+  assert.match(appJs, /const LIVE_WEATHER_RAINVIEWER_MAX_TILES = 24;/);
+  assert.match(appJs, /prefer_rainviewer:\s*config\?\.prefer_rainviewer !== false/);
+  assert.match(appJs, /provider: config\?\.provider \|\| "RainViewer"/);
+  assert.match(appJs, /kind = String\(tileProvider\.kind \|\| "rainviewer"\)/);
+  // Forecast multipoint remains soft fallback only; OM spatial stays off the hot path.
   assert.match(appJs, /https:\/\/api\.open-meteo\.com\/v1\/forecast/);
+  assert.match(appJs, /RainViewer radar failed; using Open-Meteo forecast fallback/);
   assert.match(appJs, /prefer_forecast_api:\s*config\?\.prefer_forecast_api === true/);
   assert.match(appJs, /forecast_api_fallback:\s*config\?\.forecast_api_fallback !== false/);
+  assert.doesNotMatch(appJs, /trying OM spatial/);
   assert.match(appJs, /const DEFAULT_VISIBLE_OVERLAYS = new Set\(\);/);
   assert.match(appJs, /const LIVE_WEATHER_GRID_COLUMNS = 256;/);
   assert.match(appJs, /const LIVE_WEATHER_FORECAST_GRID_COLUMNS = 48;/);
@@ -156,21 +154,17 @@ test("live weather controls work with older manifests and fetch Open-Meteo", () 
   assert.match(appJs, /const LIVE_WEATHER_SAMPLE_BATCH_POINTS = 512;/);
   assert.match(appJs, /function bestLiveWeatherGrid\(manifest, configuredGrid\)/);
   assert.match(appJs, /grid: bestLiveWeatherGrid\(manifest, configured\.grid\)/);
-  assert.match(appJs, /function livePrecipitationColor\(value\)/);
   assert.match(appJs, /const LIVE_WEATHER_BATCH_POINTS = 12;/);
   assert.match(appJs, /const LIVE_WEATHER_BATCH_DELAY_MS = 900;/);
   assert.match(appJs, /const LIVE_WEATHER_MAX_RETRIES = 5;/);
   assert.doesNotMatch(appJs, /fetchLiveWeather\(manifest, \{ prefetch: true \}\)/);
   assert.match(appJs, /url\.searchParams\.set\("current", "precipitation,snowfall"\)/);
-  assert.doesNotMatch(appJs, /url\.searchParams\.set\("hourly", "precipitation_probability"\)/);
   assert.match(appJs, /async function fetchOpenMeteoBatch\(url\)/);
-  assert.match(appJs, /response\.status !== 429/);
-  assert.match(appJs, /function openMeteoRetryDelay\(response, attempt\)/);
   assert.match(appJs, /function liveWeatherPlaceholder\(latitude, longitude\)/);
   assert.match(appJs, /!Number\.isFinite\(event\.clientX\)/);
   assert.match(appJs, /requestAnimationFrame\(\(\) => refreshStatus\(\)\)/);
-  assert.match(appJs, /label: "Rain \/ precipitation"/);
-  assert.match(appJs, /label: "Snow \/ snowfall"/);
+  assert.match(appJs, /label: "Radar \/ precipitation"/);
+  assert.doesNotMatch(appJs, /label: "Snow \/ snowfall"/);
   assert.doesNotMatch(appJs, /label: "Cloud coverage"/);
   assert.match(appJs, /input\.checked && layer\.kind === "weather-live"/);
   assert.match(appJs, /function hasEnabledLiveWeatherLayer\(\)/);
@@ -210,8 +204,8 @@ test("layer checkbox selections persist only selected layer names in a cookie", 
   // Layer selection stays cookie-only; weather forecast may use sessionStorage as a rate-limit cache.
   assert.doesNotMatch(appJs, /sessionStorage\.(setItem|getItem|removeItem).*SELECTED_LAYERS/);
   assert.match(appJs, /hoverpreview:om-forecast/);
-  assert.match(rootIndexHtml, /app\.js\?v=20261118-1/);
-  assert.match(siteIndexHtml, /app\.js\?v=20261118-1/);
+  assert.match(rootIndexHtml, /app\.js\?v=20261118-2/);
+  assert.match(siteIndexHtml, /app\.js\?v=20261118-2/);
 });
 
 test("hoverpreview defaults use larger tiles to reduce request count", () => {

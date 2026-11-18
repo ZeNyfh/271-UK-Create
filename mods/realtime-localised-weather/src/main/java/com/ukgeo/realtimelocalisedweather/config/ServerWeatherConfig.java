@@ -22,6 +22,10 @@ public final class ServerWeatherConfig {
     public static final ModConfigSpec.BooleanValue NATIONAL_GRID_ENABLED;
     public static final ModConfigSpec.IntValue NATIONAL_GRID_COLUMNS;
     public static final ModConfigSpec.IntValue NATIONAL_GRID_ROWS;
+    public static final ModConfigSpec.BooleanValue RAINVIEWER_ENABLED;
+    public static final ModConfigSpec.ConfigValue<String> RAINVIEWER_META_URL;
+    public static final ModConfigSpec.IntValue RAINVIEWER_META_TTL_SECONDS;
+    public static final ModConfigSpec.IntValue RAINVIEWER_MAX_TILES;
     public static final ModConfigSpec.IntValue ZONE_SIZE_BLOCKS;
     public static final ModConfigSpec.IntValue ACTIVE_ZONE_RADIUS;
     public static final ModConfigSpec.IntValue PREFETCH_ZONE_RADIUS;
@@ -79,6 +83,18 @@ public final class ServerWeatherConfig {
         NATIONAL_GRID_ROWS = builder
             .comment("National multipoint grid rows (total points clamped to 96).")
             .defineInRange("national_grid_rows", 10, 2, 48);
+        RAINVIEWER_ENABLED = builder
+            .comment("When true (default), LIVE mode samples RainViewer radar XYZ tiles instead of Open-Meteo national grid. Attribution: https://www.rainviewer.com/")
+            .define("rainviewer_enabled", true);
+        RAINVIEWER_META_URL = builder
+            .comment("RainViewer weather-maps.json URL.")
+            .define("rainviewer_meta_url", "https://api.rainviewer.com/public/weather-maps.json");
+        RAINVIEWER_META_TTL_SECONDS = builder
+            .comment("Cache TTL for weather-maps.json before re-fetch (seconds).")
+            .defineInRange("rainviewer_meta_ttl_seconds", 180, 60, 3600);
+        RAINVIEWER_MAX_TILES = builder
+            .comment("Max RainViewer XYZ tiles per refresh (UK typically 4 at z=5 or 12 at z=6).")
+            .defineInRange("rainviewer_max_tiles", 24, 1, 64);
         ZONE_SIZE_BLOCKS = builder.defineInRange("zone_size_blocks", 256, 32, 2048);
         ACTIVE_ZONE_RADIUS = builder.defineInRange("active_zone_radius", 2, 0, 12);
         PREFETCH_ZONE_RADIUS = builder.defineInRange("prefetch_zone_radius", 1, 0, 8);

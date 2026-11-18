@@ -978,26 +978,25 @@ def _live_weather_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
     settings = _weather_overlay_settings()
     grid = build_weather_overlay_grid(manifest, grid_columns=settings["grid_columns"])
     return {
-        "provider": "Open-Meteo",
+        "provider": "RainViewer",
         "api_base_url": settings["api_base_url"],
         "weather_model": settings["weather_model"],
         "timeout_seconds": settings["timeout_seconds"],
         "batch_points": settings["batch_points"],
+        "prefer_rainviewer": True,
         "prefer_forecast_api": False,
         "forecast_api_fallback": True,
         "tile_provider": {
-            "kind": "openmeteo-om",
-            "data_base_url": "https://openmeteo.s3.amazonaws.com/data_spatial",
-            "domain": "ukmo_uk_deterministic_2km",
-            "time_step": "current_time_1H",
-            "variables": {
-                "downfall_coverage": "precipitation",
-                "snowfall": "snowfall",
-            },
+            "kind": "rainviewer",
+            "meta_url": "https://api.rainviewer.com/public/weather-maps.json",
+            "size": 256,
+            "color": 2,
+            "smooth": 1,
+            "snow": 0,
+            "max_tiles": 24,
         },
         "metrics": {
-            "downfall_coverage": {"unit": "mm", "source": "current.precipitation"},
-            "snowfall": {"unit": "mm", "source": "current.snowfall"},
+            "downfall_coverage": {"unit": "mm", "source": "rainviewer.radar"},
         },
         "grid": {
             "rows": grid.rows,

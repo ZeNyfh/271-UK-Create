@@ -41,21 +41,29 @@ const PINCH_MIN_DISTANCE = 8;
 const SAMPLE_CROP_SIZE = 512;
 const DEFAULT_RENDERER_PREFERENCE = "auto";
 const FIT_VIEW_PADDING_PX = 72;
-const LIVE_WEATHER_REFRESH_MS = 15 * 60 * 1000;
+const LIVE_WEATHER_REFRESH_MS = 5 * 60 * 1000;
 const LIVE_WEATHER_PREFETCH_DELAY_MS = 750;
-// Dense grid is fine for OM map-tile sampling; forecast API uses the coarser column count.
+// Dense grid is fine for radar resampling; forecast API uses the coarser column count.
 const LIVE_WEATHER_GRID_COLUMNS = 256;
 const LIVE_WEATHER_FORECAST_GRID_COLUMNS = 48;
 // Keep live weather work below a frame's budget so the map remains responsive while loading.
 const LIVE_WEATHER_SAMPLE_BATCH_POINTS = 512;
 const LIVE_WEATHER_RASTER_BATCH_POINTS = 4096;
-// Free Open-Meteo 429s hard on 128-location URLs; keep batches small + paced.
+// Free Open-Meteo 429s hard on 128-location URLs; keep batches small + paced (forecast fallback only).
 const LIVE_WEATHER_BATCH_POINTS = 12;
 const LIVE_WEATHER_BATCH_DELAY_MS = 900;
 const LIVE_WEATHER_MAX_RETRIES = 5;
 const LIVE_WEATHER_RETRY_BASE_DELAY_MS = 4000;
 const LIVE_WEATHER_RATE_LIMIT_COOLDOWN_MS = 20_000;
 const LIVE_WEATHER_PRECIPITATION_MAX_MM = 30;
+const LIVE_WEATHER_RAINVIEWER_META_URL = "https://api.rainviewer.com/public/weather-maps.json";
+const LIVE_WEATHER_RAINVIEWER_ATTR_URL = "https://www.rainviewer.com/";
+const LIVE_WEATHER_RAINVIEWER_TILE_SIZE = 256;
+const LIVE_WEATHER_RAINVIEWER_COLOR = 2;
+const LIVE_WEATHER_RAINVIEWER_SMOOTH = 1;
+const LIVE_WEATHER_RAINVIEWER_SNOW = 0;
+const LIVE_WEATHER_RAINVIEWER_MAX_TILES = 24;
+const LIVE_WEATHER_RAINVIEWER_MAX_Z = 7;
 const LIVE_WEATHER_OPEN_METEO_LAYER_MJS_URL = "https://unpkg.com/@openmeteo/weather-map-layer@0.3.2/dist/index.mjs";
 const LIVE_WEATHER_OPEN_METEO_LAYER_SCRIPT_URL = "https://unpkg.com/@openmeteo/weather-map-layer@0.0.19/dist/index.js";
 const LIVE_WEATHER_OPEN_METEO_MAP_TILES_BASE_URL = "https://openmeteo.s3.amazonaws.com/data_spatial";
@@ -552,17 +560,24 @@ function installLiveWeatherLayers(manifest) {
   addLayer({
     name: "downfall_coverage",
     kind: "weather-live",
-    label: "Rain / precipitation",
+    label: "Radar / precipitation",
     value_format: "precipitation_mm",
     live_weather_metric: "downfall_coverage",
   });
-  addLayer({
-    name: "snowfall",
-    kind: "weather-live",
-    label: "Snow / snowfall",
-    value_format: "precipitation_mm",
-    live_weather_metric: "snowfall",
-  });
+  ensureRainViewerAttribution();
+}
+
+function ensureRainViewerAttribution() {
+  if (document.querySelector(".rainviewer-attr")) return;
+  const host = elements.layerControls?.parentElement || elements.controls;
+  if (!host) return;
+  const link = document.createElement("a");
+  link.className = "rainviewer-attr";
+  link.href = LIVE_WEATHER_RAINVIEWER_ATTR_URL;
+  link.target = "_blank";
+  link.rel = "noopener noreferrer";
+  link.textContent = "Radar © RainViewer";
+  host.append(link);
 }
 
 function resolveLiveWeatherConfig(manifest) {
@@ -577,10 +592,9 @@ function resolveLiveWeatherConfig(manifest) {
   const grid = buildLiveWeatherGrid(manifest, LIVE_WEATHER_GRID_COLUMNS);
   if (!grid) return null;
   return normalizeLiveWeatherConfig({
-    provider: "Open-Meteo",
+    provider: "RainViewer",
     metrics: {
-      downfall_coverage: { unit: "mm", source: "current.precipitation" },
-      snowfall: { unit: "mm", source: "current.snowfall" },
+      downfall_coverage: { unit: "mm", source: "rainviewer.radar" },
     },
     grid,
   });
@@ -588,11 +602,19 @@ function resolveLiveWeatherConfig(manifest) {
 
 function normalizeLiveWeatherConfig(config) {
   const tileProvider = config?.tile_provider || {};
+  const kind = String(tileProvider.kind || "rainviewer").trim() || "rainviewer";
   return {
     ...config,
-    provider: config?.provider || "Open-Meteo",
+    provider: config?.provider || "RainViewer",
     tile_provider: {
-      kind: "openmeteo-om",
+      kind,
+      meta_url: tileProvider.meta_url || LIVE_WEATHER_RAINVIEWER_META_URL,
+      size: Number(tileProvider.size) || LIVE_WEATHER_RAINVIEWER_TILE_SIZE,
+      color: Number.isFinite(Number(tileProvider.color)) ? Number(tileProvider.color) : LIVE_WEATHER_RAINVIEWER_COLOR,
+      smooth: Number.isFinite(Number(tileProvider.smooth)) ? Number(tileProvider.smooth) : LIVE_WEATHER_RAINVIEWER_SMOOTH,
+      snow: Number.isFinite(Number(tileProvider.snow)) ? Number(tileProvider.snow) : LIVE_WEATHER_RAINVIEWER_SNOW,
+      max_tiles: Number(tileProvider.max_tiles) || LIVE_WEATHER_RAINVIEWER_MAX_TILES,
+      // Open-Meteo fields kept only for optional forecast soft-fallback / legacy manifests.
       mjs_url: tileProvider.mjs_url || LIVE_WEATHER_OPEN_METEO_LAYER_MJS_URL,
       script_url: tileProvider.script_url || LIVE_WEATHER_OPEN_METEO_LAYER_SCRIPT_URL,
       data_base_url: tileProvider.data_base_url || LIVE_WEATHER_OPEN_METEO_MAP_TILES_BASE_URL,
@@ -606,6 +628,7 @@ function normalizeLiveWeatherConfig(config) {
     api_base_url: config?.api_base_url || "https://api.open-meteo.com/v1/forecast",
     weather_model: config?.weather_model || "auto",
     batch_points: config?.batch_points || LIVE_WEATHER_BATCH_POINTS,
+    prefer_rainviewer: config?.prefer_rainviewer !== false,
     prefer_forecast_api: config?.prefer_forecast_api === true,
     forecast_api_fallback: config?.forecast_api_fallback !== false,
   };
@@ -2205,26 +2228,35 @@ async function fetchLiveWeather(manifest, { prefetch = false } = {}) {
   if (state.liveWeather.loading) return;
   state.liveWeather.loading = true;
   try {
-    let metrics;
-    if (config.prefer_forecast_api) {
-      try {
-        const payloads = await fetchOpenMeteoWeather(config);
-        metrics = decodeLiveWeatherMetrics(config, payloads);
-      } catch (forecastError) {
-        console.warn("[hoverpreview] Forecast API weather failed; trying OM spatial", forecastError);
-        metrics = await fetchOpenMeteoOmWeather(config);
-      }
-    } else {
-      metrics = await fetchOpenMeteoOmWeather(config).catch(async (error) => {
-        if (!config.forecast_api_fallback) throw error;
-        console.warn("[hoverpreview] Open-Meteo OM weather failed; using forecast API fallback", error);
-        const payloads = await fetchOpenMeteoWeather(config);
-        return decodeLiveWeatherMetrics(config, payloads);
-      });
-    }
     const metricGrid = config.grid || grid;
-    state.liveWeather.downfall_coverage = await createLiveWeatherMetric("downfall_coverage", metrics.downfall_coverage, metricGrid.columns, metricGrid.rows);
-    state.liveWeather.snowfall = await createLiveWeatherMetric("snowfall", metrics.snowfall, metricGrid.columns, metricGrid.rows);
+    if (config.prefer_forecast_api) {
+      const payloads = await fetchOpenMeteoWeather(config);
+      const metrics = decodeLiveWeatherMetrics(config, payloads);
+      state.liveWeather.downfall_coverage = await createLiveWeatherMetric(
+        "downfall_coverage",
+        metrics.downfall_coverage,
+        metricGrid.columns,
+        metricGrid.rows
+      );
+      state.liveWeather.snowfall = null;
+    } else {
+      try {
+        state.liveWeather.downfall_coverage = await fetchRainViewerRadar(config);
+        state.liveWeather.snowfall = null;
+      } catch (error) {
+        if (!config.forecast_api_fallback) throw error;
+        console.warn("[hoverpreview] RainViewer radar failed; using Open-Meteo forecast fallback", error);
+        const payloads = await fetchOpenMeteoWeather(config);
+        const metrics = decodeLiveWeatherMetrics(config, payloads);
+        state.liveWeather.downfall_coverage = await createLiveWeatherMetric(
+          "downfall_coverage",
+          metrics.downfall_coverage,
+          metricGrid.columns,
+          metricGrid.rows
+        );
+        state.liveWeather.snowfall = null;
+      }
+    }
     scheduleRender();
     refreshStatus();
   } finally {
@@ -2237,6 +2269,181 @@ async function fetchLiveWeather(manifest, { prefetch = false } = {}) {
       }, LIVE_WEATHER_REFRESH_MS);
     }
   }
+}
+
+async function fetchRainViewerRadar(config) {
+  const provider = config?.tile_provider || {};
+  const metaUrl = String(provider.meta_url || LIVE_WEATHER_RAINVIEWER_META_URL);
+  const response = await fetch(metaUrl, { cache: "no-store" });
+  if (!response.ok) throw new Error(`RainViewer meta ${response.status}`);
+  const meta = await response.json();
+  const host = String(meta?.host || "").replace(/\/+$/, "");
+  const past = Array.isArray(meta?.radar?.past) ? meta.radar.past : [];
+  const frame = past.length ? past[past.length - 1] : null;
+  if (!host || !frame?.path) throw new Error("RainViewer weather-maps.json missing host/path");
+
+  const grid = config.grid;
+  const latitudes = Array.from(grid.latitudes || [], (value) => Number(value));
+  const longitudes = Array.from(grid.longitudes || [], (value) => Number(value));
+  const columns = Math.max(1, Number(grid.columns) || 1);
+  const rows = Math.max(1, Number(grid.rows) || Math.floor(latitudes.length / columns) || 1);
+  const bbox = rainViewerGridBBox(latitudes, longitudes);
+  const maxTiles = Math.max(1, Number(provider.max_tiles) || LIVE_WEATHER_RAINVIEWER_MAX_TILES);
+  const zoom = chooseRainViewerZoom(bbox, maxTiles);
+  const range = rainViewerTileRange(bbox, zoom);
+  const tileCount = (range.maxX - range.minX + 1) * (range.maxY - range.minY + 1);
+  if (tileCount > maxTiles) {
+    throw new Error(`RainViewer tile count ${tileCount} exceeds cap ${maxTiles} at z=${zoom}`);
+  }
+
+  const size = Number(provider.size) || LIVE_WEATHER_RAINVIEWER_TILE_SIZE;
+  const color = Number.isFinite(Number(provider.color)) ? Number(provider.color) : LIVE_WEATHER_RAINVIEWER_COLOR;
+  const smooth = Number.isFinite(Number(provider.smooth)) ? Number(provider.smooth) : LIVE_WEATHER_RAINVIEWER_SMOOTH;
+  const snow = Number.isFinite(Number(provider.snow)) ? Number(provider.snow) : LIVE_WEATHER_RAINVIEWER_SNOW;
+  const path = String(frame.path);
+  const tiles = [];
+  const fetches = [];
+  for (let ty = range.minY; ty <= range.maxY; ty += 1) {
+    for (let tx = range.minX; tx <= range.maxX; tx += 1) {
+      const url = `${host}${path}/${size}/${zoom}/${tx}/${ty}/${color}/${smooth}_${snow}.png`;
+      fetches.push(
+        loadRainViewerTile(url).then((bitmap) => {
+          tiles.push({ x: tx, y: ty, bitmap });
+        })
+      );
+    }
+  }
+  await Promise.all(fetches);
+
+  const stitch = document.createElement("canvas");
+  stitch.width = (range.maxX - range.minX + 1) * size;
+  stitch.height = (range.maxY - range.minY + 1) * size;
+  const stitchCtx = stitch.getContext("2d", { willReadFrequently: true });
+  stitchCtx.clearRect(0, 0, stitch.width, stitch.height);
+  for (const tile of tiles) {
+    stitchCtx.drawImage(tile.bitmap, (tile.x - range.minX) * size, (tile.y - range.minY) * size);
+    if (typeof tile.bitmap.close === "function") tile.bitmap.close();
+  }
+  const stitchData = stitchCtx.getImageData(0, 0, stitch.width, stitch.height);
+
+  const total = columns * rows;
+  const values = new Float32Array(total);
+  const rgba = new Uint8ClampedArray(total * 4);
+  const n = 2 ** zoom;
+  for (let start = 0; start < total; start += LIVE_WEATHER_SAMPLE_BATCH_POINTS) {
+    const end = Math.min(total, start + LIVE_WEATHER_SAMPLE_BATCH_POINTS);
+    for (let index = start; index < end; index += 1) {
+      const lat = latitudes[index];
+      const lon = longitudes[index];
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+      const merc = wgs84ToWebMercatorPixel(lon, lat, n, size);
+      const px = Math.round(merc.x - range.minX * size);
+      const py = Math.round(merc.y - range.minY * size);
+      if (px < 0 || py < 0 || px >= stitch.width || py >= stitch.height) continue;
+      const src = (py * stitch.width + px) * 4;
+      const base = index * 4;
+      const r = stitchData.data[src];
+      const g = stitchData.data[src + 1];
+      const b = stitchData.data[src + 2];
+      const a = stitchData.data[src + 3];
+      rgba[base] = r;
+      rgba[base + 1] = g;
+      rgba[base + 2] = b;
+      rgba[base + 3] = a;
+      values[index] = rainViewerIntensityToMm(r, g, b, a);
+    }
+    if (end < total) await yieldToBrowser();
+  }
+  return createLiveWeatherMetricFromRgba("downfall_coverage", rgba, values, columns, rows);
+}
+
+function rainViewerGridBBox(latitudes, longitudes) {
+  let minLat = Infinity;
+  let maxLat = -Infinity;
+  let minLon = Infinity;
+  let maxLon = -Infinity;
+  for (let index = 0; index < latitudes.length; index += 1) {
+    const lat = latitudes[index];
+    const lon = longitudes[index];
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+    if (lat < minLat) minLat = lat;
+    if (lat > maxLat) maxLat = lat;
+    if (lon < minLon) minLon = lon;
+    if (lon > maxLon) maxLon = lon;
+  }
+  if (!Number.isFinite(minLat) || !Number.isFinite(maxLat) || !Number.isFinite(minLon) || !Number.isFinite(maxLon)) {
+    throw new Error("RainViewer grid has no finite lat/lon");
+  }
+  return { minLat, maxLat, minLon, maxLon };
+}
+
+function chooseRainViewerZoom(bbox, maxTiles) {
+  // Prefer denser UK coverage (z=6 ≈ 12 tiles) when under the cap; else drop to z=5 (~4).
+  for (const zoom of [6, 5, 4]) {
+    if (zoom > LIVE_WEATHER_RAINVIEWER_MAX_Z) continue;
+    const range = rainViewerTileRange(bbox, zoom);
+    const count = (range.maxX - range.minX + 1) * (range.maxY - range.minY + 1);
+    if (count <= maxTiles) return zoom;
+  }
+  return 5;
+}
+
+function rainViewerTileRange(bbox, zoom) {
+  const nw = wgs84ToTileXY(bbox.minLon, bbox.maxLat, zoom);
+  const se = wgs84ToTileXY(bbox.maxLon, bbox.minLat, zoom);
+  const maxIndex = (2 ** zoom) - 1;
+  return {
+    minX: Math.max(0, Math.min(nw.x, se.x)),
+    maxX: Math.min(maxIndex, Math.max(nw.x, se.x)),
+    minY: Math.max(0, Math.min(nw.y, se.y)),
+    maxY: Math.min(maxIndex, Math.max(nw.y, se.y)),
+  };
+}
+
+function wgs84ToTileXY(lon, lat, zoom) {
+  const n = 2 ** zoom;
+  const x = Math.floor((lon + 180) / 360 * n);
+  const latRad = lat * Math.PI / 180;
+  const y = Math.floor((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2 * n);
+  return { x, y };
+}
+
+function wgs84ToWebMercatorPixel(lon, lat, n, tileSize) {
+  const x = (lon + 180) / 360 * n * tileSize;
+  const latRad = lat * Math.PI / 180;
+  const y = (1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2 * n * tileSize;
+  return { x, y };
+}
+
+async function loadRainViewerTile(url) {
+  const response = await fetch(url, { cache: "force-cache" });
+  if (!response.ok) throw new Error(`RainViewer tile ${response.status}: ${url}`);
+  const blob = await response.blob();
+  if (typeof createImageBitmap === "function") {
+    return createImageBitmap(blob);
+  }
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error(`Failed to decode RainViewer tile ${url}`));
+    image.src = URL.createObjectURL(blob);
+  });
+}
+
+function rainViewerIntensityToMm(r, g, b, a) {
+  if ((a || 0) < 8) return 0;
+  const intensity = Math.max(r || 0, g || 0, b || 0) / 255;
+  // Reflectivity proxy (not true gauge mm/h): intensity^2 * 20.
+  return Math.min(LIVE_WEATHER_PRECIPITATION_MAX_MM, intensity * intensity * 20);
+}
+
+function createLiveWeatherMetricFromRgba(metricName, rgba, values, columns, rows) {
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, columns);
+  canvas.height = Math.max(1, rows);
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  ctx.putImageData(new ImageData(rgba, canvas.width, canvas.height), 0, 0);
+  return { metricName, values, columns, rows, canvas };
 }
 
 async function fetchOpenMeteoOmWeather(config) {

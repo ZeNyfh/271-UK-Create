@@ -366,13 +366,15 @@ def test_export_hover_previews_writes_live_weather_query_metadata(tmp_path):
 
     hover_manifest = json.loads((out / "hover_manifest.json").read_text(encoding="utf-8"))
     assert "live_weather" in hover_manifest
-    assert hover_manifest["live_weather"]["provider"] == "Open-Meteo"
+    assert hover_manifest["live_weather"]["provider"] == "RainViewer"
+    assert hover_manifest["live_weather"]["prefer_rainviewer"] is True
     assert hover_manifest["live_weather"]["prefer_forecast_api"] is False
-    assert hover_manifest["live_weather"]["tile_provider"]["data_base_url"] == "https://openmeteo.s3.amazonaws.com/data_spatial"
-    assert hover_manifest["live_weather"]["tile_provider"]["domain"] == "ukmo_uk_deterministic_2km"
+    assert hover_manifest["live_weather"]["forecast_api_fallback"] is True
+    assert hover_manifest["live_weather"]["tile_provider"]["kind"] == "rainviewer"
+    assert hover_manifest["live_weather"]["tile_provider"]["meta_url"] == "https://api.rainviewer.com/public/weather-maps.json"
     assert "cloud_cover" not in hover_manifest["live_weather"]["metrics"]
-    assert hover_manifest["live_weather"]["metrics"]["downfall_coverage"]["source"] == "current.precipitation"
-    assert hover_manifest["live_weather"]["metrics"]["snowfall"]["source"] == "current.snowfall"
+    assert "snowfall" not in hover_manifest["live_weather"]["metrics"]
+    assert hover_manifest["live_weather"]["metrics"]["downfall_coverage"]["source"] == "rainviewer.radar"
     assert hover_manifest["live_weather"]["grid"]["rows"] >= 2
     assert hover_manifest["live_weather"]["grid"]["columns"] >= 2
     assert len(hover_manifest["live_weather"]["grid"]["latitudes"]) == (

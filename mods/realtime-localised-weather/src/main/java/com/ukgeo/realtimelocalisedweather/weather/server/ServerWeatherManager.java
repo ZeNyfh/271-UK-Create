@@ -19,6 +19,8 @@ import com.ukgeo.realtimelocalisedweather.network.WeatherTileUpdatePayload;
 import com.ukgeo.realtimelocalisedweather.openmeteo.NationalWeatherGrid;
 import com.ukgeo.realtimelocalisedweather.openmeteo.OpenMeteoClient;
 import com.ukgeo.realtimelocalisedweather.openmeteo.OpenMeteoResponse;
+import com.ukgeo.realtimelocalisedweather.rainviewer.RainViewerClient;
+import com.ukgeo.realtimelocalisedweather.rainviewer.RainViewerMath;
 import com.ukgeo.realtimelocalisedweather.weather.MeteorologicalPrecipitation;
 import com.ukgeo.realtimelocalisedweather.weather.GameplaySeverity;
 import com.ukgeo.realtimelocalisedweather.weather.LocalWeatherState;
@@ -63,11 +65,13 @@ public final class ServerWeatherManager implements RegionalWeatherAccess {
     /** Approx column samples per Minecraft day: 1200 gameplay ticks/day x 2 samples / 256 columns. */
     private static final double GAMEPLAY_COLUMN_SAMPLES_PER_MINECRAFT_DAY = 9.375D;
 
-    private final OpenMeteoClient openMeteoClient = new OpenMeteoClient(Executors.newFixedThreadPool(1, runnable -> {
+    private final java.util.concurrent.ExecutorService weatherHttpExecutor = Executors.newFixedThreadPool(1, runnable -> {
         Thread thread = new Thread(runnable, "realtime-localised-weather-http");
         thread.setDaemon(true);
         return thread;
-    }));
+    });
+    private final OpenMeteoClient openMeteoClient = new OpenMeteoClient(weatherHttpExecutor);
+    private final RainViewerClient rainViewerClient = new RainViewerClient(weatherHttpExecutor);
     private final Map<net.minecraft.resources.ResourceKey<Level>, LevelState> levelStates = new HashMap<>();
 
     @SubscribeEvent
@@ -470,11 +474,184 @@ public final class ServerWeatherManager implements RegionalWeatherAccess {
             return byX != 0 ? byX : Integer.compare(left.key().tileZ(), right.key().tileZ());
         });
 
+        if (ServerWeatherConfig.safeBoolean(ServerWeatherConfig.RAINVIEWER_ENABLED, true)) {
+            requestFetchesRainViewer(level, state, force, priorityMissingTile, staleCandidates, now);
+            return;
+        }
         if (ServerWeatherConfig.safeBoolean(ServerWeatherConfig.NATIONAL_GRID_ENABLED, true)) {
             requestFetchesNational(level, state, force, priorityMissingTile, staleCandidates, now);
             return;
         }
         requestFetchesPerTile(level, state, force, priorityMissingTile, staleCandidates, now);
+    }
+
+    private void requestFetchesRainViewer(
+        ServerLevel level,
+        LevelState state,
+        boolean force,
+        boolean priorityMissingTile,
+        List<StaleCandidate> staleCandidates,
+        Instant now
+    ) {
+        List<WeatherTileKey> staleKeys = staleCandidates.stream().map(StaleCandidate::key).toList();
+        Duration frameFreshFor = Duration.ofMinutes(Math.max(1, ServerWeatherConfig.safeInt(ServerWeatherConfig.REFRESH_INTERVAL_MINUTES, 15)));
+        boolean frameFresh = !force && rainViewerClient.hasFrame()
+            && !now.isAfter(rainViewerClient.observedAt().plus(frameFreshFor))
+            && rainViewerClient.cachedTileCount() > 0;
+        if (frameFresh) {
+            int applied = applyRainViewerSamples(level, state, staleKeys);
+            if (applied > 0) {
+                state.nextFetchAllowed = now.plusSeconds(30);
+                RealtimeLocalisedWeatherMod.LOGGER.info(
+                    "Realtime weather sampled {} tile(s) from RainViewer radar (observedAt={}, tiles={})",
+                    applied,
+                    rainViewerClient.observedAt(),
+                    rainViewerClient.cachedTileCount()
+                );
+                syncPlayers(level, state, false);
+            }
+            return;
+        }
+        if (state.pendingRainViewerRefresh != null && !state.pendingRainViewerRefresh.isDone()) {
+            return;
+        }
+        RainViewerMath.BBox bbox = rainViewerBBoxFor(state, staleKeys);
+        int maxTiles = ServerWeatherConfig.safeInt(ServerWeatherConfig.RAINVIEWER_MAX_TILES, 24);
+        state.nextFetchAllowed = now.plusSeconds(30);
+        RealtimeLocalisedWeatherMod.LOGGER.info(
+            "Realtime weather refreshing RainViewer radar for {} stale tile(s) (maxTiles={} priority={} force={})",
+            staleKeys.size(),
+            maxTiles,
+            priorityMissingTile,
+            force
+        );
+        CompletableFuture<Void> future = rainViewerClient.ensureTiles(bbox, maxTiles);
+        state.pendingRainViewerRefresh = future;
+        CompletableFuture<List<OpenMeteoResponse.LocationWeather>> pendingMarker = future.thenApply(ignored -> List.<OpenMeteoResponse.LocationWeather>of());
+        for (WeatherTileKey key : staleKeys) {
+            state.pendingFetches.put(key, pendingMarker);
+        }
+        future.whenComplete((ignored, throwable) -> level.getServer().execute(() -> {
+            state.pendingRainViewerRefresh = null;
+            for (WeatherTileKey key : staleKeys) {
+                state.pendingFetches.remove(key);
+            }
+            if (throwable != null) {
+                Instant failureTime = Instant.now();
+                String message = throwable.getMessage() == null ? "" : throwable.getMessage();
+                Duration backoff = state.fetchFailureBackoff.isZero() ? WEATHER_FETCH_FAILURE_INITIAL_BACKOFF : state.fetchFailureBackoff.multipliedBy(2);
+                if (backoff.compareTo(WEATHER_FETCH_FAILURE_MAX_BACKOFF) > 0) {
+                    backoff = WEATHER_FETCH_FAILURE_MAX_BACKOFF;
+                }
+                state.fetchFailureBackoff = backoff;
+                state.nextFetchAllowed = failureTime.plus(backoff);
+                if (!failureTime.isBefore(state.nextFetchFailureLogAllowed)) {
+                    RealtimeLocalisedWeatherMod.LOGGER.warn(
+                        "Realtime weather RainViewer refresh failed: {}; falling back to Open-Meteo national; backing off for {}s",
+                        message,
+                        backoff.toSeconds()
+                    );
+                    state.nextFetchFailureLogAllowed = failureTime.plus(WEATHER_FETCH_LOG_INTERVAL);
+                }
+                for (WeatherTileKey key : staleKeys) {
+                    ManagedTile existing = state.tiles.get(key);
+                    if (existing != null && existing.snapshot != null) {
+                        existing.snapshot = stale(existing.snapshot);
+                    }
+                }
+                state.nextFetchAllowed = Instant.EPOCH;
+                requestFetchesNational(level, state, force, priorityMissingTile, staleCandidates, Instant.now());
+                return;
+            }
+            state.fetchFailureBackoff = Duration.ZERO;
+            state.nextFetchAllowed = Instant.now().plusSeconds(30);
+            int applied = applyRainViewerSamples(level, state, staleKeys);
+            RealtimeLocalisedWeatherMod.LOGGER.info(
+                "Realtime weather RainViewer ready; sampled {}/{} tile(s) (cachedTiles={})",
+                applied,
+                staleKeys.size(),
+                rainViewerClient.cachedTileCount()
+            );
+            state.lastSuccessfulRefresh = Instant.now();
+            syncPlayers(level, state, false);
+        }));
+    }
+
+    private RainViewerMath.BBox rainViewerBBoxFor(LevelState state, Collection<WeatherTileKey> keys) {
+        int tileSize = ServerWeatherConfig.ZONE_SIZE_BLOCKS.get();
+        double minLat = Double.POSITIVE_INFINITY;
+        double maxLat = Double.NEGATIVE_INFINITY;
+        double minLon = Double.POSITIVE_INFINITY;
+        double maxLon = Double.NEGATIVE_INFINITY;
+        for (WeatherTileKey key : keys) {
+            double centerX = key.tileX() * tileSize + tileSize / 2.0D;
+            double centerZ = key.tileZ() * tileSize + tileSize / 2.0D;
+            Optional<Wgs84Coordinate> wgs84 = state.reference.minecraftToWgs84(centerX, centerZ);
+            if (wgs84.isEmpty()) {
+                continue;
+            }
+            double lat = wgs84.get().latitude();
+            double lon = wgs84.get().longitude();
+            minLat = Math.min(minLat, lat);
+            maxLat = Math.max(maxLat, lat);
+            minLon = Math.min(minLon, lon);
+            maxLon = Math.max(maxLon, lon);
+        }
+        if (!Double.isFinite(minLat) || !Double.isFinite(maxLat) || !Double.isFinite(minLon) || !Double.isFinite(maxLon)) {
+            // Active tiles empty/out of range: cover UKGeo reference corners.
+            for (double[] mz : new double[][] {
+                {state.reference.minecraftMinX(), state.reference.minecraftMinZ()},
+                {state.reference.minecraftMaxX(), state.reference.minecraftMinZ()},
+                {state.reference.minecraftMinX(), state.reference.minecraftMaxZ()},
+                {state.reference.minecraftMaxX(), state.reference.minecraftMaxZ()}
+            }) {
+                Optional<Wgs84Coordinate> wgs84 = state.reference.minecraftToWgs84(mz[0], mz[1]);
+                if (wgs84.isEmpty()) {
+                    continue;
+                }
+                minLat = Math.min(minLat, wgs84.get().latitude());
+                maxLat = Math.max(maxLat, wgs84.get().latitude());
+                minLon = Math.min(minLon, wgs84.get().longitude());
+                maxLon = Math.max(maxLon, wgs84.get().longitude());
+            }
+        }
+        if (!Double.isFinite(minLat) || !Double.isFinite(maxLat) || !Double.isFinite(minLon) || !Double.isFinite(maxLon)) {
+            return new RainViewerMath.BBox(49.5D, 61.0D, -8.5D, 2.0D);
+        }
+        // Pad a little so edge tile centres still land inside fetched XYZ tiles.
+        double padLat = Math.max(0.15D, (maxLat - minLat) * 0.05D);
+        double padLon = Math.max(0.15D, (maxLon - minLon) * 0.05D);
+        return new RainViewerMath.BBox(minLat - padLat, maxLat + padLat, minLon - padLon, maxLon + padLon);
+    }
+
+    private int applyRainViewerSamples(ServerLevel level, LevelState state, Collection<WeatherTileKey> keys) {
+        if (!rainViewerClient.hasFrame()) {
+            return 0;
+        }
+        int tileSize = ServerWeatherConfig.ZONE_SIZE_BLOCKS.get();
+        int applied = 0;
+        for (WeatherTileKey key : keys) {
+            double centerX = key.tileX() * tileSize + tileSize / 2.0D;
+            double centerZ = key.tileZ() * tileSize + tileSize / 2.0D;
+            Optional<Wgs84Coordinate> wgs84 = state.reference.minecraftToWgs84(centerX, centerZ);
+            if (wgs84.isEmpty()) {
+                continue;
+            }
+            Optional<OpenMeteoResponse.LocationWeather> sampled = rainViewerClient.sampleLocation(
+                wgs84.get().latitude(),
+                wgs84.get().longitude()
+            );
+            if (sampled.isEmpty()) {
+                continue;
+            }
+            ManagedTile tile = state.tiles.computeIfAbsent(key, ignored -> new ManagedTile(null, 0L, System.currentTimeMillis(), randomSeed(key)));
+            tile.snapshot = buildSnapshot(level, state, key, sampled.get(), tile.revision + 1L);
+            tile.revision = tile.snapshot.revision();
+            tile.lastTouchedMillis = System.currentTimeMillis();
+            state.memoryCache.put(key, tile.snapshot, Instant.now());
+            applied++;
+        }
+        return applied;
     }
 
     private void requestFetchesNational(
@@ -1097,6 +1274,7 @@ public final class ServerWeatherManager implements RegionalWeatherAccess {
         private final Map<WeatherTileKey, CompletableFuture<List<OpenMeteoResponse.LocationWeather>>> pendingFetches = new HashMap<>();
         private NationalWeatherGrid nationalGrid;
         private CompletableFuture<Boolean> pendingNationalRefresh;
+        private CompletableFuture<Void> pendingRainViewerRefresh;
         private final Map<UUID, PlayerSyncState> playerSync = new HashMap<>();
         private final WeatherOverrideManager overrideManager = new WeatherOverrideManager();
         private final VisualOverrideManager visualOverrideManager = new VisualOverrideManager();

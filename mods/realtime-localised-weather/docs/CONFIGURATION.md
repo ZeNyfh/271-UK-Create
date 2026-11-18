@@ -16,9 +16,13 @@ Primary controls:
 - `hard_cache_expiry_hours`
 - `maximum_concurrent_requests`
 - `max_tiles_per_refresh`
-- `national_grid_enabled`: one UK/Ireland multipoint Open-Meteo pass; tiles sample locally (default true; reduces 429s)
+- `national_grid_enabled`: one UK/Ireland multipoint Open-Meteo pass; tiles sample locally (default true; used when RainViewer is disabled)
 - `national_grid_columns`: multipoint lattice columns (default 8; total points clamped to 96)
 - `national_grid_rows`: multipoint lattice rows (default 10; total points clamped to 96)
+- `rainviewer_enabled`: LIVE mode uses RainViewer radar XYZ tiles (default true); disable to use Open-Meteo national grid
+- `rainviewer_meta_url`: weather-maps.json URL (default `https://api.rainviewer.com/public/weather-maps.json`)
+- `rainviewer_meta_ttl_seconds`: meta cache TTL (default 180)
+- `rainviewer_max_tiles`: max XYZ tiles per refresh (default 24; UK typically 4 at z=5 or 12 at z=6)
 - `zone_size_blocks`
 - `active_zone_radius`
 - `prefetch_zone_radius`
@@ -52,8 +56,11 @@ Operational guidance:
 
 - changing `zone_size_blocks` should be treated as a restart or world-reload setting
 - increasing `active_zone_radius` or `prefetch_zone_radius` raises request and cache pressure
-- with `national_grid_enabled`, LIVE mode refreshes one national multipoint grid then samples every stale weather tile locally (Minecraft-side equivalent of maps.open-meteo’s one spatial field); disable only to fall back to per-tile HTTP
+- with `rainviewer_enabled` (default), LIVE mode refreshes one RainViewer radar frame (z=5/6 XYZ PNGs) then samples every stale weather tile centre locally; precipitation is a reflectivity proxy (`intensity^2 * 20` mm/h), snowfall stays 0
+- if RainViewer fails, the server falls back to the Open-Meteo national grid path
+- with RainViewer disabled and `national_grid_enabled`, LIVE mode refreshes one national multipoint grid then samples every stale weather tile locally; disable national grid only to fall back to per-tile HTTP
 - `hard_cache_expiry_hours` is the limit after which old data should no longer be trusted
+- RainViewer attribution: https://www.rainviewer.com/
 
 ## Client: `config/realtime_localised_weather-client.toml`
 

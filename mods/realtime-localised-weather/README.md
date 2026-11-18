@@ -1,6 +1,6 @@
 # Realtime Localised Weather
 
-Realtime Localised Weather is a NeoForge 1.21.1 mod for UKGeo worlds that replaces vanilla global overworld weather with server-authoritative, geographically localised, real-time weather tiles sourced from Open-Meteo.
+Realtime Localised Weather is a NeoForge 1.21.1 mod for UKGeo worlds that replaces vanilla global overworld weather with server-authoritative, geographically localised, real-time weather tiles sourced from RainViewer radar (Open-Meteo national grid as fallback).
 
 This mod is required on both sides:
 
@@ -15,7 +15,7 @@ UKGeo is a required dependency. Serene Seasons is optional.
 ## What it does
 
 - The server converts active UKGeo regions from Minecraft block coordinates to British National Grid and then to WGS84 latitude/longitude.
-- In LIVE mode the server refreshes one national Open-Meteo multipoint grid over the UK/Ireland map, then samples weather tiles locally (avoids per-tile HTTP 429s).
+- In LIVE mode the server refreshes RainViewer radar XYZ tiles over active UK regions (z=5/6), then samples weather tiles locally; Open-Meteo national grid remains available when `rainviewer_enabled=false`.
 - The server owns authoritative regional precipitation, thunder eligibility, gameplay severity, cache state, overrides, and synchronisation.
 - Clients poll the server for the newest authoritative precipitation snapshots.
 - The client uses vanilla rain and snow textures with local interpolation, density, fog, and weather sound mixing.
@@ -23,7 +23,7 @@ UKGeo is a required dependency. Serene Seasons is optional.
 
 ## Weather authority modes
 
-- `LIVE`: Open-Meteo drives regional weather and vanilla natural weather is suspended in UKGeo worlds.
+- `LIVE`: RainViewer radar (default) or Open-Meteo drives regional weather and vanilla natural weather is suspended in UKGeo worlds.
 - `MANUAL`: administrator overrides remain active until cleared or expired.
 - `VANILLA`: regional weather is disabled and normal vanilla weather resumes.
 
@@ -52,21 +52,24 @@ With Serene installed, this mod can drive the season calendar from real wall-clo
 - the first run on a world anchors at local midnight in the configured timezone (default `Europe/London`)
 - Serene's Minecraft-time `doSeasonCycle` is turned off so it does not fight the realtime clock
 
-## Open-Meteo integration
+## RainViewer + Open-Meteo integration
 
 - Requests are performed only by the logical server.
-- Multiplayer clients do not contact Open-Meteo.
+- Multiplayer clients do not contact RainViewer or Open-Meteo.
 - Multiplayer clients poll their Minecraft server for the latest cached tile snapshots and receive server-authoritative precipitation data.
-- LIVE mode uses one national multipoint forecast pass (default 8×10, ≤96 points) over the UKGeo WGS84 bbox; weather tiles bilinear-sample that grid instead of issuing per-tile HTTP calls.
-- National-grid Open-Meteo batches (≤32 points each, typically 3 for an 8×10 grid) run with concurrency 2; the older serialize+250ms gap is kept only for `request_budget_safeguards` many-small player-tile fallbacks.
-- Grid HTTP refresh runs at most once per `refresh_interval_minutes`; every ~40 ticks only re-samples the cached grid when still fresh.
-- If the national grid refresh fails, the server falls back to the legacy per-tile fetch path (still rate-limit aware).
+- LIVE mode defaults to RainViewer radar (`rainviewer_enabled=true`):
+  - fetch/cache `weather-maps.json` (TTL ~3 minutes)
+  - fetch covering XYZ PNGs at z=6 when ≤`rainviewer_max_tiles` (else z=5)
+  - `sampleIntensity(lat,lon)` → reflectivity proxy mm/h = `intensity^2 * 20` (capped at 30); snowfall = 0; WMO rain `weather_code` when precip &gt; 0
+- When RainViewer is disabled (or fails), LIVE mode uses one national Open-Meteo multipoint forecast pass (default 8×10, ≤96 points) over the UKGeo WGS84 bbox; weather tiles bilinear-sample that grid.
+- National-grid Open-Meteo batches (≤32 points each) run with concurrency 2; the older serialize+250ms gap is kept only for `request_budget_safeguards` many-small player-tile fallbacks.
+- Radar/grid HTTP refresh runs at most once per `refresh_interval_minutes`; every ~40 ticks only re-samples the cached frame/grid when still fresh.
+- If the national grid refresh fails, the server falls back to the legacy per-tile Open-Meteo fetch path (still rate-limit aware).
 - Requests use Java 21 `HttpClient.sendAsync`.
 - Cached snapshots remain usable during upstream outages.
 - Expired or failed data are marked stale rather than crashing or freezing the server.
-- If Open-Meteo national-grid latency is still too high, the next option is RainViewer XYZ radar tiles ([api.rainviewer.com](https://www.rainviewer.com/api.html)) — not implemented in this mod yet.
 
-Open-Meteo variables used:
+Open-Meteo variables used (fallback path):
 
 - `precipitation`
 - `rain`
@@ -80,7 +83,10 @@ Open-Meteo variables used:
 - `wind_direction_10m`
 - `wind_gusts_10m`
 
-Open-Meteo attribution: Weather data by [Open-Meteo](https://open-meteo.com/).
+Attribution:
+
+- Radar © [RainViewer](https://www.rainviewer.com/)
+- Weather data by [Open-Meteo](https://open-meteo.com/) (fallback)
 
 ## Installation
 

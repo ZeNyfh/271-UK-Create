@@ -8,7 +8,8 @@ At the time of review, the repository advertised the MIT licence on GitHub. The 
 
 Weather data attribution:
 
-- Open-Meteo weather data service: https://open-meteo.com/
+- RainViewer radar tiles: https://www.rainviewer.com/
+- Open-Meteo weather data service (fallback): https://open-meteo.com/
 
 Optional compatibility target:
 
