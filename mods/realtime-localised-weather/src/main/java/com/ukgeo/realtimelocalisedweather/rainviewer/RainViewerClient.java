@@ -28,7 +28,7 @@ import java.util.concurrent.Executor;
 import javax.imageio.ImageIO;
 
 /**
- * Server-side RainViewer radar client: caches weather-maps.json + XYZ PNG tiles (z=5/6),
+ * Server-side RainViewer radar client: caches weather-maps.json + XYZ PNG tiles (z=5/6/7),
  * samples intensity at WGS84 points. No Open-Meteo on this path.
  */
 public final class RainViewerClient {
@@ -75,7 +75,7 @@ public final class RainViewerClient {
             });
     }
 
-    /** Ensure tiles covering bbox are cached at a zoom that fits maxTiles (prefer 6, else 5). */
+    /** Ensure tiles covering bbox are cached at a zoom that fits maxTiles (prefer 7, else 6/5). */
     public CompletableFuture<Void> ensureTiles(BBox bbox, int maxTiles) {
         return ensureFrame().thenCompose(ignored -> {
             FrameMeta meta = requireFrame();
@@ -108,7 +108,7 @@ public final class RainViewerClient {
         if (meta == null) {
             return Optional.empty();
         }
-        for (int zoom : new int[] {6, 5, 4}) {
+        for (int zoom : new int[] {7, 6, 5}) {
             Pixel pixel = RainViewerMath.latLonToPixel(latitude, longitude, zoom);
             CachedTile tile = tileCache.get(tileKey(meta.path(), zoom, pixel.tileX(), pixel.tileY()));
             if (tile == null) {

@@ -5,13 +5,20 @@ import java.time.Instant;
 
 /**
  * Pure RainViewer WebMercator / intensity helpers (no network).
- * Reflectivity proxy mm/h = intensity^2 * 20 (capped), not gauge rainfall.
+ * Met Office–calibrated scheme-2 colour proxy for mm/h (not gauge rainfall).
  */
 public final class RainViewerMath {
     public static final int TILE_SIZE = 256;
     public static final int MAX_Z = 7;
-    public static final float PRECIPITATION_MAX_MM = 30.0F;
+    public static final float PRECIPITATION_MAX_MM = 40.0F;
     public static final float INTENSITY_ALPHA_THRESHOLD = 8.0F;
+
+    private static final float[] INTENSITY_STOPS = {
+        0.0F, 0.15F, 0.25F, 0.35F, 0.45F, 0.55F, 0.65F, 0.80F, 1.0F
+    };
+    private static final float[] MM_STOPS = {
+        0.0F, 0.40F, 0.75F, 1.50F, 3.00F, 6.00F, 12.0F, 24.0F, 40.0F
+    };
 
     private RainViewerMath() {
     }
@@ -51,10 +58,10 @@ public final class RainViewerMath {
         );
     }
 
-    /** Prefer z=6 for denser UK coverage when under maxTiles; else z=5 (~4 tiles). */
+    /** Prefer z=7 for denser UK coverage when under maxTiles; else z=6 / z=5. */
     public static int chooseZoom(BBox bbox, int maxTiles) {
         int cap = Math.max(1, maxTiles);
-        for (int zoom : new int[] {6, 5, 4}) {
+        for (int zoom : new int[] {7, 6, 5}) {
             if (zoom > MAX_Z) {
                 continue;
             }
@@ -79,12 +86,19 @@ public final class RainViewerMath {
         return new Pixel(tileX, tileY, px, py);
     }
 
-    /** 0–1 intensity from RGBA; transparent / near-transparent → 0. */
+    /**
+     * 0–1 intensity from RainViewer scheme-2 RGBA.
+     * Warm yellow/orange/red uses green falloff; cool blue/cyan uses max(g,b).
+     */
     public static float intensityFromRgba(int r, int g, int b, int a) {
         if (a < INTENSITY_ALPHA_THRESHOLD) {
             return 0.0F;
         }
-        return Math.max(r, Math.max(g, b)) / 255.0F;
+        if (r >= 200 && b <= 80) {
+            float t = 1.0F - clamp01(g / 255.0F);
+            return 0.62F + 0.38F * t;
+        }
+        return 0.62F * Math.max(g, b) / 255.0F;
     }
 
     public static float intensityFromArgb(int argb) {
@@ -95,10 +109,20 @@ public final class RainViewerMath {
         return intensityFromRgba(r, g, b, a);
     }
 
-    /** Reflectivity proxy mm/h: intensity^2 * 20, capped. */
+    /** Met Office–aligned piecewise mm/h from scheme-2 intensity, capped. */
     public static float intensityToPrecipitationMm(float intensity) {
-        float clamped = Math.max(0.0F, Math.min(1.0F, intensity));
-        return Math.min(PRECIPITATION_MAX_MM, clamped * clamped * 20.0F);
+        float x = clamp01(intensity);
+        for (int i = 1; i < INTENSITY_STOPS.length; i++) {
+            if (x <= INTENSITY_STOPS[i]) {
+                float x0 = INTENSITY_STOPS[i - 1];
+                float x1 = INTENSITY_STOPS[i];
+                float y0 = MM_STOPS[i - 1];
+                float y1 = MM_STOPS[i];
+                float t = (x - x0) / Math.max(1.0e-6F, x1 - x0);
+                return Math.min(PRECIPITATION_MAX_MM, y0 + t * (y1 - y0));
+            }
+        }
+        return PRECIPITATION_MAX_MM;
     }
 
     /** WMO rain bands when precip > 0; clear otherwise. Snow always 0 from radar. */
@@ -139,6 +163,10 @@ public final class RainViewerMath {
             0.0F,
             0.0F
         );
+    }
+
+    private static float clamp01(float value) {
+        return Math.max(0.0F, Math.min(1.0F, value));
     }
 
     private static int clamp(int value, int min, int max) {

@@ -44,7 +44,7 @@ const FIT_VIEW_PADDING_PX = 72;
 const LIVE_WEATHER_REFRESH_MS = 5 * 60 * 1000;
 const LIVE_WEATHER_PREFETCH_DELAY_MS = 750;
 // Dense grid is fine for radar resampling; forecast API uses the coarser column count.
-const LIVE_WEATHER_GRID_COLUMNS = 256;
+const LIVE_WEATHER_GRID_COLUMNS = 512;
 const LIVE_WEATHER_FORECAST_GRID_COLUMNS = 48;
 // Keep live weather work below a frame's budget so the map remains responsive while loading.
 const LIVE_WEATHER_SAMPLE_BATCH_POINTS = 512;
@@ -55,14 +55,14 @@ const LIVE_WEATHER_BATCH_DELAY_MS = 900;
 const LIVE_WEATHER_MAX_RETRIES = 5;
 const LIVE_WEATHER_RETRY_BASE_DELAY_MS = 4000;
 const LIVE_WEATHER_RATE_LIMIT_COOLDOWN_MS = 20_000;
-const LIVE_WEATHER_PRECIPITATION_MAX_MM = 30;
+const LIVE_WEATHER_PRECIPITATION_MAX_MM = 40;
 const LIVE_WEATHER_RAINVIEWER_META_URL = "https://api.rainviewer.com/public/weather-maps.json";
 const LIVE_WEATHER_RAINVIEWER_ATTR_URL = "https://www.rainviewer.com/";
 const LIVE_WEATHER_RAINVIEWER_TILE_SIZE = 256;
 const LIVE_WEATHER_RAINVIEWER_COLOR = 2;
 const LIVE_WEATHER_RAINVIEWER_SMOOTH = 1;
 const LIVE_WEATHER_RAINVIEWER_SNOW = 0;
-const LIVE_WEATHER_RAINVIEWER_MAX_TILES = 24;
+const LIVE_WEATHER_RAINVIEWER_MAX_TILES = 48;
 const LIVE_WEATHER_RAINVIEWER_MAX_Z = 7;
 const LIVE_WEATHER_OPEN_METEO_LAYER_MJS_URL = "https://unpkg.com/@openmeteo/weather-map-layer@0.3.2/dist/index.mjs";
 const LIVE_WEATHER_OPEN_METEO_LAYER_SCRIPT_URL = "https://unpkg.com/@openmeteo/weather-map-layer@0.0.19/dist/index.js";
@@ -2328,7 +2328,6 @@ async function fetchRainViewerRadar(config) {
 
   const total = columns * rows;
   const values = new Float32Array(total);
-  const rgba = new Uint8ClampedArray(total * 4);
   const n = 2 ** zoom;
   for (let start = 0; start < total; start += LIVE_WEATHER_SAMPLE_BATCH_POINTS) {
     const end = Math.min(total, start + LIVE_WEATHER_SAMPLE_BATCH_POINTS);
@@ -2341,20 +2340,15 @@ async function fetchRainViewerRadar(config) {
       const py = Math.round(merc.y - range.minY * size);
       if (px < 0 || py < 0 || px >= stitch.width || py >= stitch.height) continue;
       const src = (py * stitch.width + px) * 4;
-      const base = index * 4;
       const r = stitchData.data[src];
       const g = stitchData.data[src + 1];
       const b = stitchData.data[src + 2];
       const a = stitchData.data[src + 3];
-      rgba[base] = r;
-      rgba[base + 1] = g;
-      rgba[base + 2] = b;
-      rgba[base + 3] = a;
       values[index] = rainViewerIntensityToMm(r, g, b, a);
     }
     if (end < total) await yieldToBrowser();
   }
-  return createLiveWeatherMetricFromRgba("downfall_coverage", rgba, values, columns, rows);
+  return await createLiveWeatherMetric("downfall_coverage", values, columns, rows);
 }
 
 function rainViewerGridBBox(latitudes, longitudes) {
@@ -2378,8 +2372,8 @@ function rainViewerGridBBox(latitudes, longitudes) {
 }
 
 function chooseRainViewerZoom(bbox, maxTiles) {
-  // Prefer denser UK coverage (z=6 ≈ 12 tiles) when under the cap; else drop to z=5 (~4).
-  for (const zoom of [6, 5, 4]) {
+  // Prefer denser UK coverage (z=7 ≈ 40 tiles) when under the cap; else z=6 / z=5.
+  for (const zoom of [7, 6, 5]) {
     if (zoom > LIVE_WEATHER_RAINVIEWER_MAX_Z) continue;
     const range = rainViewerTileRange(bbox, zoom);
     const count = (range.maxX - range.minX + 1) * (range.maxY - range.minY + 1);
@@ -2432,18 +2426,28 @@ async function loadRainViewerTile(url) {
 
 function rainViewerIntensityToMm(r, g, b, a) {
   if ((a || 0) < 8) return 0;
-  const intensity = Math.max(r || 0, g || 0, b || 0) / 255;
-  // Reflectivity proxy (not true gauge mm/h): intensity^2 * 20.
-  return Math.min(LIVE_WEATHER_PRECIPITATION_MAX_MM, intensity * intensity * 20);
-}
-
-function createLiveWeatherMetricFromRgba(metricName, rgba, values, columns, rows) {
-  const canvas = document.createElement("canvas");
-  canvas.width = Math.max(1, columns);
-  canvas.height = Math.max(1, rows);
-  const ctx = canvas.getContext("2d", { willReadFrequently: true });
-  ctx.putImageData(new ImageData(rgba, canvas.width, canvas.height), 0, 0);
-  return { metricName, values, columns, rows, canvas };
+  let intensity;
+  if ((r || 0) >= 200 && (b || 0) <= 80) {
+    const t = 1 - Math.max(0, Math.min(1, (g || 0) / 255));
+    intensity = 0.62 + 0.38 * t;
+  } else {
+    intensity = 0.62 * Math.max(g || 0, b || 0) / 255;
+  }
+  // Met Office–aligned piecewise mm/h (scheme-2 colour proxy, not gauge rainfall).
+  const stopsI = [0, 0.15, 0.25, 0.35, 0.45, 0.55, 0.65, 0.80, 1.0];
+  const stopsMm = [0, 0.40, 0.75, 1.50, 3.00, 6.00, 12.0, 24.0, 40.0];
+  const x = Math.max(0, Math.min(1, intensity));
+  for (let i = 1; i < stopsI.length; i += 1) {
+    if (x <= stopsI[i]) {
+      const x0 = stopsI[i - 1];
+      const x1 = stopsI[i];
+      const y0 = stopsMm[i - 1];
+      const y1 = stopsMm[i];
+      const t = (x - x0) / Math.max(1e-6, x1 - x0);
+      return Math.min(LIVE_WEATHER_PRECIPITATION_MAX_MM, y0 + t * (y1 - y0));
+    }
+  }
+  return LIVE_WEATHER_PRECIPITATION_MAX_MM;
 }
 
 async function fetchOpenMeteoOmWeather(config) {
@@ -2918,19 +2922,16 @@ async function createLiveWeatherMetric(metricName, values, columns, rows) {
 function livePrecipitationColor(value) {
   const amount = Number(value) || 0;
   if (amount < 0.05) return [0, 0, 0, 0];
+  // Met Office rainfall-rate legend bins (approx colours).
   const stops = [
-    [0.05, 134, 205, 250, 48],
-    [0.11, 118, 197, 250, 72],
-    [0.45, 64, 161, 251, 104],
-    [0.95, 0, 96, 233, 132],
-    [2, 0, 177, 236, 158],
-    [4.95, 0, 241, 141, 178],
-    [7.45, 66, 248, 0, 198],
-    [10, 255, 221, 0, 216],
-    [15, 255, 111, 0, 232],
-    [20, 255, 0, 0, 242],
-    [25, 215, 0, 94, 250],
-    [30, 175, 0, 153, 255],
+    [0.25, 40, 90, 200, 90],
+    [0.75, 50, 130, 220, 120],
+    [1.5, 40, 190, 220, 150],
+    [3, 40, 200, 80, 170],
+    [6, 255, 220, 0, 190],
+    [12, 255, 140, 0, 210],
+    [24, 230, 40, 30, 230],
+    [40, 140, 0, 40, 245],
   ];
   return interpolateWeatherStops(Math.min(LIVE_WEATHER_PRECIPITATION_MAX_MM, amount), stops);
 }

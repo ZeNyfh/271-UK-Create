@@ -59,8 +59,8 @@ With Serene installed, this mod can drive the season calendar from real wall-clo
 - Multiplayer clients poll their Minecraft server for the latest cached tile snapshots and receive server-authoritative precipitation data.
 - LIVE mode defaults to RainViewer radar (`rainviewer_enabled=true`):
   - fetch/cache `weather-maps.json` (TTL ~3 minutes)
-  - fetch covering XYZ PNGs at z=6 when ≤`rainviewer_max_tiles` (else z=5)
-  - `sampleIntensity(lat,lon)` → reflectivity proxy mm/h = `intensity^2 * 20` (capped at 30); snowfall = 0; WMO rain `weather_code` when precip &gt; 0
+  - fetch covering XYZ PNGs at z=7 when ≤`rainviewer_max_tiles` (else z=6 / z=5; UK ≈40/12/4 tiles)
+  - `sampleIntensity(lat,lon)` → Met Office–calibrated scheme-2 proxy mm/h (capped at 40); snowfall = 0; WMO rain `weather_code` when precip &gt; 0
 - When RainViewer is disabled (or fails), LIVE mode uses one national Open-Meteo multipoint forecast pass (default 8×10, ≤96 points) over the UKGeo WGS84 bbox; weather tiles bilinear-sample that grid.
 - National-grid Open-Meteo batches (≤32 points each) run with concurrency 2; the older serialize+250ms gap is kept only for `request_budget_safeguards` many-small player-tile fallbacks.
 - Radar/grid HTTP refresh runs at most once per `refresh_interval_minutes`; every ~40 ticks only re-samples the cached frame/grid when still fresh.

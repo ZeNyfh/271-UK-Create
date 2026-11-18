@@ -22,7 +22,7 @@ Primary controls:
 - `rainviewer_enabled`: LIVE mode uses RainViewer radar XYZ tiles (default true); disable to use Open-Meteo national grid
 - `rainviewer_meta_url`: weather-maps.json URL (default `https://api.rainviewer.com/public/weather-maps.json`)
 - `rainviewer_meta_ttl_seconds`: meta cache TTL (default 180)
-- `rainviewer_max_tiles`: max XYZ tiles per refresh (default 24; UK typically 4 at z=5 or 12 at z=6)
+- `rainviewer_max_tiles`: max XYZ tiles per refresh (default 48; UK 40@z7 / 12@z6 / 4@z5)
 - `zone_size_blocks`
 - `active_zone_radius`
 - `prefetch_zone_radius`

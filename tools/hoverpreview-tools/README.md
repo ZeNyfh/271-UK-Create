@@ -221,11 +221,11 @@ serving only `site/` do not match the published path layout.
 
 ## Live weather performance
 
-Live radar uses RainViewer XYZ PNGs (typically z=5–6, a handful of UK tiles,
-refresh ~5 minutes). Frames are stitched in-browser and resampled onto the
-existing offscreen weather canvas, preserving RainViewer colours. Open-Meteo
-forecast multipoint remains a soft fallback only. Attribution:
-https://www.rainviewer.com/
+Live radar uses RainViewer XYZ PNGs (prefer z=7 when ≤48 tiles; else z=6 / z=5;
+UK ≈40/12/4 tiles, refresh ~5 minutes). Scheme-2 colours are converted to
+Met Office–calibrated mm/h and painted with Met Office–style legend colours;
+attribution remains RainViewer (https://www.rainviewer.com/). Open-Meteo
+forecast multipoint remains a soft fallback only.
 
 ## Validation
 

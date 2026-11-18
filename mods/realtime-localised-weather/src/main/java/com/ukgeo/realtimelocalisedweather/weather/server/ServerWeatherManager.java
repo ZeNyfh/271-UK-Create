@@ -516,7 +516,7 @@ public final class ServerWeatherManager implements RegionalWeatherAccess {
             return;
         }
         RainViewerMath.BBox bbox = rainViewerBBoxFor(state, staleKeys);
-        int maxTiles = ServerWeatherConfig.safeInt(ServerWeatherConfig.RAINVIEWER_MAX_TILES, 24);
+        int maxTiles = ServerWeatherConfig.safeInt(ServerWeatherConfig.RAINVIEWER_MAX_TILES, 48);
         state.nextFetchAllowed = now.plusSeconds(30);
         RealtimeLocalisedWeatherMod.LOGGER.info(
             "Realtime weather refreshing RainViewer radar for {} stale tile(s) (maxTiles={} priority={} force={})",

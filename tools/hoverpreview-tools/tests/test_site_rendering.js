@@ -136,7 +136,8 @@ test("live weather controls work with older manifests and fetch RainViewer", () 
   assert.match(appJs, /function ensureRainViewerAttribution\(\)/);
   assert.match(appJs, /Radar © RainViewer/);
   assert.match(appJs, /const LIVE_WEATHER_REFRESH_MS = 5 \* 60 \* 1000;/);
-  assert.match(appJs, /const LIVE_WEATHER_RAINVIEWER_MAX_TILES = 24;/);
+  assert.match(appJs, /const LIVE_WEATHER_RAINVIEWER_MAX_TILES = 48;/);
+  assert.match(appJs, /const LIVE_WEATHER_PRECIPITATION_MAX_MM = 40;/);
   assert.match(appJs, /prefer_rainviewer:\s*config\?\.prefer_rainviewer !== false/);
   assert.match(appJs, /provider: config\?\.provider \|\| "RainViewer"/);
   assert.match(appJs, /kind = String\(tileProvider\.kind \|\| "rainviewer"\)/);
@@ -147,7 +148,7 @@ test("live weather controls work with older manifests and fetch RainViewer", () 
   assert.match(appJs, /forecast_api_fallback:\s*config\?\.forecast_api_fallback !== false/);
   assert.doesNotMatch(appJs, /trying OM spatial/);
   assert.match(appJs, /const DEFAULT_VISIBLE_OVERLAYS = new Set\(\);/);
-  assert.match(appJs, /const LIVE_WEATHER_GRID_COLUMNS = 256;/);
+  assert.match(appJs, /const LIVE_WEATHER_GRID_COLUMNS = 512;/);
   assert.match(appJs, /const LIVE_WEATHER_FORECAST_GRID_COLUMNS = 48;/);
   assert.match(appJs, /function forecastApiWeatherGrid\(config\)/);
   assert.match(appJs, /LIVE_WEATHER_RATE_LIMIT_COOLDOWN_MS/);
