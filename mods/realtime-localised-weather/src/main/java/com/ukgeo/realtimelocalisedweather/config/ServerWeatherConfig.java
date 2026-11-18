@@ -93,7 +93,7 @@ public final class ServerWeatherConfig {
             .comment("Cache TTL for weather-maps.json before re-fetch (seconds).")
             .defineInRange("rainviewer_meta_ttl_seconds", 180, 60, 3600);
         RAINVIEWER_MAX_TILES = builder
-            .comment("Max RainViewer XYZ tiles per refresh (UK: 40@z7 / 12@z6 / 4@z5).")
+            .comment("Max RainViewer XYZ tiles per snow-mode path per refresh (UK: 40@z7 / 12@z6 / 4@z5). Dual-fetch snow=0+1 doubles HTTP.")
             .defineInRange("rainviewer_max_tiles", 48, 1, 128);
         ZONE_SIZE_BLOCKS = builder.defineInRange("zone_size_blocks", 256, 32, 2048);
         ACTIVE_ZONE_RADIUS = builder.defineInRange("active_zone_radius", 2, 0, 12);

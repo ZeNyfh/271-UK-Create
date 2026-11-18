@@ -8,6 +8,7 @@ import com.ukgeo.realtimelocalisedweather.config.ServerWeatherConfig;
 import com.ukgeo.realtimelocalisedweather.openmeteo.OpenMeteoResponse;
 import com.ukgeo.realtimelocalisedweather.rainviewer.RainViewerMath.BBox;
 import com.ukgeo.realtimelocalisedweather.rainviewer.RainViewerMath.Pixel;
+import com.ukgeo.realtimelocalisedweather.rainviewer.RainViewerMath.SampledIntensities;
 import com.ukgeo.realtimelocalisedweather.rainviewer.RainViewerMath.TileRange;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
@@ -29,14 +30,15 @@ import javax.imageio.ImageIO;
 
 /**
  * Server-side RainViewer radar client: caches weather-maps.json + XYZ PNG tiles (z=5/6/7),
- * samples intensity at WGS84 points. No Open-Meteo on this path.
+ * dual-fetches snow=0 (intensity) + snow=1 (snow mask), samples rain/snow mm/h at WGS84 points.
  */
 public final class RainViewerClient {
     public static final String DEFAULT_META_URL = "https://api.rainviewer.com/public/weather-maps.json";
     public static final String ATTRIBUTION_URL = "https://www.rainviewer.com/";
     private static final int COLOR = 2;
     private static final int SMOOTH = 1;
-    private static final int SNOW = 0;
+    private static final int SNOW_OFF = 0;
+    private static final int SNOW_ON = 1;
 
     private final HttpClient httpClient;
     private final Map<String, CachedTile> tileCache = new ConcurrentHashMap<>();
@@ -75,7 +77,10 @@ public final class RainViewerClient {
             });
     }
 
-    /** Ensure tiles covering bbox are cached at a zoom that fits maxTiles (prefer 7, else 6/5). */
+    /**
+     * Ensure tiles covering bbox are cached at a zoom that fits maxTiles (prefer 7, else 6/5).
+     * maxTiles is per snow-mode path; fetches both snow=0 and snow=1 (2× HTTP).
+     */
     public CompletableFuture<Void> ensureTiles(BBox bbox, int maxTiles) {
         return ensureFrame().thenCompose(ignored -> {
             FrameMeta meta = requireFrame();
@@ -89,11 +94,13 @@ public final class RainViewerClient {
             List<CompletableFuture<Void>> fetches = new ArrayList<>();
             for (int ty = range.minY(); ty <= range.maxY(); ty++) {
                 for (int tx = range.minX(); tx <= range.maxX(); tx++) {
-                    String key = tileKey(meta.path(), zoom, tx, ty);
-                    if (tileCache.containsKey(key)) {
-                        continue;
+                    for (int snow : new int[] {SNOW_OFF, SNOW_ON}) {
+                        String key = tileKey(meta.path(), zoom, tx, ty, snow);
+                        if (tileCache.containsKey(key)) {
+                            continue;
+                        }
+                        fetches.add(fetchTile(meta, zoom, tx, ty, snow));
                     }
-                    fetches.add(fetchTile(meta, zoom, tx, ty));
                 }
             }
             if (fetches.isEmpty()) {
@@ -103,20 +110,32 @@ public final class RainViewerClient {
         });
     }
 
-    public Optional<Float> sampleIntensity(double latitude, double longitude) {
+    public Optional<SampledIntensities> sampleIntensities(double latitude, double longitude) {
         FrameMeta meta = frame;
         if (meta == null) {
             return Optional.empty();
         }
         for (int zoom : new int[] {7, 6, 5}) {
             Pixel pixel = RainViewerMath.latLonToPixel(latitude, longitude, zoom);
-            CachedTile tile = tileCache.get(tileKey(meta.path(), zoom, pixel.tileX(), pixel.tileY()));
-            if (tile == null) {
+            CachedTile intensityTile = tileCache.get(tileKey(meta.path(), zoom, pixel.tileX(), pixel.tileY(), SNOW_OFF));
+            CachedTile maskTile = tileCache.get(tileKey(meta.path(), zoom, pixel.tileX(), pixel.tileY(), SNOW_ON));
+            if (intensityTile == null || maskTile == null) {
                 continue;
             }
-            return Optional.of(tile.intensity(pixel.px(), pixel.py()));
+            float intensity = intensityTile.intensity(pixel.px(), pixel.py());
+            boolean snow = maskTile.isSnow(pixel.px(), pixel.py());
+            if (snow) {
+                return Optional.of(new SampledIntensities(0.0F, intensity));
+            }
+            return Optional.of(new SampledIntensities(intensity, 0.0F));
         }
         return Optional.empty();
+    }
+
+    /** Dominant channel intensity (rain or snow); prefer {@link #sampleIntensities}. */
+    public Optional<Float> sampleIntensity(double latitude, double longitude) {
+        return sampleIntensities(latitude, longitude)
+            .map(sample -> Math.max(sample.rainIntensity(), sample.snowIntensity()));
     }
 
     public Optional<OpenMeteoResponse.LocationWeather> sampleLocation(double latitude, double longitude) {
@@ -124,8 +143,14 @@ public final class RainViewerClient {
         if (meta == null) {
             return Optional.empty();
         }
-        return sampleIntensity(latitude, longitude)
-            .map(intensity -> RainViewerMath.toLocationWeather(latitude, longitude, meta.observedAt(), intensity));
+        return sampleIntensities(latitude, longitude)
+            .map(sample -> RainViewerMath.toLocationWeather(
+                latitude,
+                longitude,
+                meta.observedAt(),
+                sample.rainIntensity(),
+                sample.snowIntensity()
+            ));
     }
 
     public boolean hasFrame() {
@@ -141,21 +166,21 @@ public final class RainViewerClient {
         return tileCache.size();
     }
 
-    /** Test hook: install a decoded tile without HTTP. */
-    void putTileForTest(String path, int zoom, int x, int y, BufferedImage image, Instant observedAt) {
+    /** Test hook: install a decoded tile without HTTP (snowMode 0 or 1). */
+    void putTileForTest(String path, int zoom, int x, int y, int snowMode, BufferedImage image, Instant observedAt) {
         frame = new FrameMeta("https://tilecache.rainviewer.com", path, observedAt, Instant.now());
-        tileCache.put(tileKey(path, zoom, x, y), new CachedTile(image));
+        tileCache.put(tileKey(path, zoom, x, y, snowMode), new CachedTile(image));
     }
 
-    private CompletableFuture<Void> fetchTile(FrameMeta meta, int zoom, int x, int y) {
+    private CompletableFuture<Void> fetchTile(FrameMeta meta, int zoom, int x, int y, int snow) {
         String url = meta.host() + meta.path() + "/" + RainViewerMath.TILE_SIZE + "/" + zoom + "/" + x + "/" + y
-            + "/" + COLOR + "/" + SMOOTH + "_" + SNOW + ".png";
+            + "/" + COLOR + "/" + SMOOTH + "_" + snow + ".png";
         HttpRequest request = HttpRequest.newBuilder(URI.create(url))
             .timeout(Duration.ofSeconds(20))
             .header("User-Agent", "RealtimeLocalisedWeather/" + RealtimeLocalisedWeatherMod.MOD_VERSION)
             .GET()
             .build();
-        String key = tileKey(meta.path(), zoom, x, y);
+        String key = tileKey(meta.path(), zoom, x, y, snow);
         return httpClient.sendAsync(request, HttpResponse.BodyHandlers.ofByteArray())
             .thenAccept(response -> {
                 if (response.statusCode() < 200 || response.statusCode() >= 300) {
@@ -201,8 +226,8 @@ public final class RainViewerClient {
         return new FrameMeta(host, path, observedAt, Instant.now());
     }
 
-    private static String tileKey(String path, int zoom, int x, int y) {
-        return path + "|" + zoom + "|" + x + "|" + y;
+    private static String tileKey(String path, int zoom, int x, int y, int snow) {
+        return path + "|" + zoom + "|" + x + "|" + y + "|s" + snow;
     }
 
     public record FrameMeta(String host, String path, Instant observedAt, Instant fetchedAt) {
@@ -215,10 +240,18 @@ public final class RainViewerClient {
             this.image = image;
         }
 
-        private float intensity(int px, int py) {
+        private int argb(int px, int py) {
             int x = Math.max(0, Math.min(image.getWidth() - 1, px));
             int y = Math.max(0, Math.min(image.getHeight() - 1, py));
-            return RainViewerMath.intensityFromArgb(image.getRGB(x, y));
+            return image.getRGB(x, y);
+        }
+
+        private float intensity(int px, int py) {
+            return RainViewerMath.intensityFromArgb(argb(px, py));
+        }
+
+        private boolean isSnow(int px, int py) {
+            return RainViewerMath.isSnowTintArgb(argb(px, py));
         }
     }
 }

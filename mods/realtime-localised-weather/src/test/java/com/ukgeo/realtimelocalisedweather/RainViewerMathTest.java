@@ -75,6 +75,40 @@ final class RainViewerMathTest {
     }
 
     @Test
+    void snowTintHeuristicMatchesLiveCyanSamples() {
+        assertTrue(RainViewerMath.isSnowTint(206, 255, 255, 255));
+        assertTrue(RainViewerMath.isSnowTint(203, 255, 255, 200));
+        assertTrue(RainViewerMath.isSnowTint(199, 255, 255, 128));
+        assertFalse(RainViewerMath.isSnowTint(206, 255, 255, 4));
+        assertFalse(RainViewerMath.isSnowTint(0, 119, 170, 255)); // rain blue
+        assertFalse(RainViewerMath.isSnowTint(255, 224, 0, 255)); // rain yellow
+        assertFalse(RainViewerMath.isSnowTint(255, 255, 255, 255)); // pure white, r>=240
+        assertFalse(RainViewerMath.isSnowTint(100, 255, 255, 255)); // r too low
+    }
+
+    @Test
+    void toLocationWeatherRoutesSnowBranch() {
+        assertEquals(71, RainViewerMath.weatherCodeForSnowfall(0.5F));
+        assertEquals(73, RainViewerMath.weatherCodeForSnowfall(3.0F));
+        assertEquals(75, RainViewerMath.weatherCodeForSnowfall(10.0F));
+
+        OpenMeteoResponse.LocationWeather snow = RainViewerMath.toLocationWeather(
+            51.5D, -0.12D, Instant.parse("2026-11-18T12:00:00Z"), 0.0F, 0.5F
+        );
+        assertTrue(snow.snowfall() > 3.0F && snow.snowfall() < 6.0F);
+        assertEquals(0.0F, snow.rain(), 0.0001F);
+        assertEquals(snow.snowfall(), snow.precipitation(), 0.0001F);
+        assertEquals(73, snow.weatherCode());
+        assertEquals(MeteorologicalPrecipitation.SNOW, snow.meteorologicalPrecipitation());
+
+        OpenMeteoResponse.LocationWeather rainWins = RainViewerMath.toLocationWeather(
+            51.5D, -0.12D, Instant.parse("2026-11-18T12:00:00Z"), 0.8F, 0.2F
+        );
+        assertTrue(rainWins.rain() > rainWins.snowfall());
+        assertEquals(MeteorologicalPrecipitation.RAIN, rainWins.meteorologicalPrecipitation());
+    }
+
+    @Test
     void parseMetaUsesLatestPastFrame() {
         String json = """
             {

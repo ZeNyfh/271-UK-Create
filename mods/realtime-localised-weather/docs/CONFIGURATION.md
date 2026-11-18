@@ -56,7 +56,7 @@ Operational guidance:
 
 - changing `zone_size_blocks` should be treated as a restart or world-reload setting
 - increasing `active_zone_radius` or `prefetch_zone_radius` raises request and cache pressure
-- with `rainviewer_enabled` (default), LIVE mode refreshes one RainViewer radar frame (z=5/6 XYZ PNGs) then samples every stale weather tile centre locally; precipitation is a reflectivity proxy (`intensity^2 * 20` mm/h), snowfall stays 0
+- with `rainviewer_enabled` (default), LIVE mode dual-fetches RainViewer radar tiles (`snow=0` intensity + `snow=1` mask; `rainviewer_max_tiles` per mode) then samples every stale weather tile centre locally into rain and snowfall channels (Met Office–calibrated scheme-2 mm/h)
 - if RainViewer fails, the server falls back to the Open-Meteo national grid path
 - with RainViewer disabled and `national_grid_enabled`, LIVE mode refreshes one national multipoint grid then samples every stale weather tile locally; disable national grid only to fall back to per-tile HTTP
 - `hard_cache_expiry_hours` is the limit after which old data should no longer be trusted

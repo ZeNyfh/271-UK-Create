@@ -373,7 +373,7 @@ def test_export_hover_previews_writes_live_weather_query_metadata(tmp_path):
     assert hover_manifest["live_weather"]["tile_provider"]["kind"] == "rainviewer"
     assert hover_manifest["live_weather"]["tile_provider"]["meta_url"] == "https://api.rainviewer.com/public/weather-maps.json"
     assert "cloud_cover" not in hover_manifest["live_weather"]["metrics"]
-    assert "snowfall" not in hover_manifest["live_weather"]["metrics"]
+    assert hover_manifest["live_weather"]["metrics"]["snowfall"]["source"] == "rainviewer.radar"
     assert hover_manifest["live_weather"]["metrics"]["downfall_coverage"]["source"] == "rainviewer.radar"
     assert hover_manifest["live_weather"]["grid"]["rows"] >= 2
     assert hover_manifest["live_weather"]["grid"]["columns"] >= 2

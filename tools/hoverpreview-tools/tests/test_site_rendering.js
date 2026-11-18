@@ -164,8 +164,11 @@ test("live weather controls work with older manifests and fetch RainViewer", () 
   assert.match(appJs, /function liveWeatherPlaceholder\(latitude, longitude\)/);
   assert.match(appJs, /!Number\.isFinite\(event\.clientX\)/);
   assert.match(appJs, /requestAnimationFrame\(\(\) => refreshStatus\(\)\)/);
-  assert.match(appJs, /label: "Radar \/ precipitation"/);
-  assert.doesNotMatch(appJs, /label: "Snow \/ snowfall"/);
+  assert.match(appJs, /label: "Radar \/ rain"/);
+  assert.match(appJs, /label: "Radar \/ snow"/);
+  assert.match(appJs, /live_weather_metric: "snowfall"/);
+  assert.match(appJs, /function isRainViewerSnowTint\(r, g, b, a\)/);
+  assert.match(appJs, /stitchRainViewerTiles\(/);
   assert.doesNotMatch(appJs, /label: "Cloud coverage"/);
   assert.match(appJs, /input\.checked && layer\.kind === "weather-live"/);
   assert.match(appJs, /function hasEnabledLiveWeatherLayer\(\)/);
@@ -205,8 +208,8 @@ test("layer checkbox selections persist only selected layer names in a cookie", 
   // Layer selection stays cookie-only; weather forecast may use sessionStorage as a rate-limit cache.
   assert.doesNotMatch(appJs, /sessionStorage\.(setItem|getItem|removeItem).*SELECTED_LAYERS/);
   assert.match(appJs, /hoverpreview:om-forecast/);
-  assert.match(rootIndexHtml, /app\.js\?v=20261118-2/);
-  assert.match(siteIndexHtml, /app\.js\?v=20261118-2/);
+  assert.match(rootIndexHtml, /app\.js\?v=20261118-3/);
+  assert.match(siteIndexHtml, /app\.js\?v=20261118-3/);
 });
 
 test("hoverpreview defaults use larger tiles to reduce request count", () => {

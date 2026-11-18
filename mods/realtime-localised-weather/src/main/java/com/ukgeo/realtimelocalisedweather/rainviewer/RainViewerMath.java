@@ -6,6 +6,7 @@ import java.time.Instant;
 /**
  * Pure RainViewer WebMercator / intensity helpers (no network).
  * Met Office–calibrated scheme-2 colour proxy for mm/h (not gauge rainfall).
+ * snow=1 tiles retint snow-classified echoes; use {@link #isSnowTint} to split channels.
  */
 public final class RainViewerMath {
     public static final int TILE_SIZE = 256;
@@ -36,6 +37,10 @@ public final class RainViewerMath {
     }
 
     public record Pixel(int tileX, int tileY, int px, int py) {
+    }
+
+    /** Rain / snow intensity pair (0–1 scheme-2), one channel usually 0. */
+    public record SampledIntensities(float rainIntensity, float snowIntensity) {
     }
 
     public static TileXY wgs84ToTileXY(double lon, double lat, int zoom) {
@@ -87,6 +92,27 @@ public final class RainViewerMath {
     }
 
     /**
+     * RainViewer snow=1 retints snow-classified echoes pale cyan/white
+     * (e.g. RGB ~200–206,255,255). Avoid marking normal rain yellows/blues.
+     */
+    public static boolean isSnowTint(int r, int g, int b, int a) {
+        return a >= 8
+            && b >= 220
+            && g >= 220
+            && r >= 160
+            && r < 240
+            && Math.abs(g - b) <= 20;
+    }
+
+    public static boolean isSnowTintArgb(int argb) {
+        int a = (argb >>> 24) & 0xFF;
+        int r = (argb >>> 16) & 0xFF;
+        int g = (argb >>> 8) & 0xFF;
+        int b = argb & 0xFF;
+        return isSnowTint(r, g, b, a);
+    }
+
+    /**
      * 0–1 intensity from RainViewer scheme-2 RGBA.
      * Warm yellow/orange/red uses green falloff; cool blue/cyan uses max(g,b).
      */
@@ -125,7 +151,7 @@ public final class RainViewerMath {
         return PRECIPITATION_MAX_MM;
     }
 
-    /** WMO rain bands when precip > 0; clear otherwise. Snow always 0 from radar. */
+    /** WMO rain bands when precip > 0; clear otherwise. */
     public static int weatherCodeForPrecipitation(float precipitationMm) {
         if (precipitationMm <= 0.05F) {
             return 0;
@@ -139,23 +165,50 @@ public final class RainViewerMath {
         return 65;
     }
 
+    /** WMO snow bands 71/73/75 by rate (cm/h or liquid-equivalent mm/h proxy). */
+    public static int weatherCodeForSnowfall(float snowfallCm) {
+        if (snowfallCm <= 0.05F) {
+            return 0;
+        }
+        if (snowfallCm < 2.0F) {
+            return 71;
+        }
+        if (snowfallCm < 8.0F) {
+            return 73;
+        }
+        return 75;
+    }
+
+    /**
+     * Build LocationWeather from dual rain/snow intensities (0–1).
+     * Snowfall field uses liquid-equivalent mm/h as cm/h snow-depth proxy (Open-Meteo scale).
+     */
     public static OpenMeteoResponse.LocationWeather toLocationWeather(
         double latitude,
         double longitude,
         Instant observedAt,
-        float intensity
+        float rainIntensity,
+        float snowIntensity
     ) {
-        float precip = intensityToPrecipitationMm(intensity);
-        int weatherCode = weatherCodeForPrecipitation(precip);
+        float rainMm = intensityToPrecipitationMm(rainIntensity);
+        float snowMm = intensityToPrecipitationMm(snowIntensity);
+        float snowfall = snowMm;
+        float precip = rainMm + snowMm;
+        int weatherCode;
+        if (snowfall > rainMm && snowfall > 0.05F) {
+            weatherCode = weatherCodeForSnowfall(snowfall);
+        } else {
+            weatherCode = weatherCodeForPrecipitation(rainMm);
+        }
         return new OpenMeteoResponse.LocationWeather(
             latitude,
             longitude,
             observedAt,
             weatherCode,
             precip,
-            precip,
+            rainMm,
             0.0F,
-            0.0F,
+            snowfall,
             10000.0F,
             10.0F,
             70.0F,
@@ -163,6 +216,16 @@ public final class RainViewerMath {
             0.0F,
             0.0F
         );
+    }
+
+    /** Rain-only convenience (snow intensity 0). */
+    public static OpenMeteoResponse.LocationWeather toLocationWeather(
+        double latitude,
+        double longitude,
+        Instant observedAt,
+        float intensity
+    ) {
+        return toLocationWeather(latitude, longitude, observedAt, intensity, 0.0F);
     }
 
     private static float clamp01(float value) {

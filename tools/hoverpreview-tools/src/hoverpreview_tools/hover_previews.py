@@ -992,11 +992,12 @@ def _live_weather_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
             "size": 256,
             "color": 2,
             "smooth": 1,
-            "snow": 0,
+            "snow": 1,
             "max_tiles": 48,
         },
         "metrics": {
             "downfall_coverage": {"unit": "mm", "source": "rainviewer.radar"},
+            "snowfall": {"unit": "mm", "source": "rainviewer.radar"},
         },
         "grid": {
             "rows": grid.rows,

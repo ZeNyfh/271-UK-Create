@@ -61,7 +61,8 @@ const LIVE_WEATHER_RAINVIEWER_ATTR_URL = "https://www.rainviewer.com/";
 const LIVE_WEATHER_RAINVIEWER_TILE_SIZE = 256;
 const LIVE_WEATHER_RAINVIEWER_COLOR = 2;
 const LIVE_WEATHER_RAINVIEWER_SMOOTH = 1;
-const LIVE_WEATHER_RAINVIEWER_SNOW = 0;
+/** Mask tiles use snow=1; intensity tiles use snow=0 (dual-fetch). max_tiles is per snow mode. */
+const LIVE_WEATHER_RAINVIEWER_SNOW = 1;
 const LIVE_WEATHER_RAINVIEWER_MAX_TILES = 48;
 const LIVE_WEATHER_RAINVIEWER_MAX_Z = 7;
 const LIVE_WEATHER_OPEN_METEO_LAYER_MJS_URL = "https://unpkg.com/@openmeteo/weather-map-layer@0.3.2/dist/index.mjs";
@@ -560,9 +561,16 @@ function installLiveWeatherLayers(manifest) {
   addLayer({
     name: "downfall_coverage",
     kind: "weather-live",
-    label: "Radar / precipitation",
+    label: "Radar / rain",
     value_format: "precipitation_mm",
     live_weather_metric: "downfall_coverage",
+  });
+  addLayer({
+    name: "snowfall",
+    kind: "weather-live",
+    label: "Radar / snow",
+    value_format: "precipitation_mm",
+    live_weather_metric: "snowfall",
   });
   ensureRainViewerAttribution();
 }
@@ -595,6 +603,7 @@ function resolveLiveWeatherConfig(manifest) {
     provider: "RainViewer",
     metrics: {
       downfall_coverage: { unit: "mm", source: "rainviewer.radar" },
+      snowfall: { unit: "mm", source: "rainviewer.radar" },
     },
     grid,
   });
@@ -2238,11 +2247,17 @@ async function fetchLiveWeather(manifest, { prefetch = false } = {}) {
         metricGrid.columns,
         metricGrid.rows
       );
-      state.liveWeather.snowfall = null;
+      state.liveWeather.snowfall = await createLiveWeatherMetric(
+        "snowfall",
+        metrics.snowfall,
+        metricGrid.columns,
+        metricGrid.rows
+      );
     } else {
       try {
-        state.liveWeather.downfall_coverage = await fetchRainViewerRadar(config);
-        state.liveWeather.snowfall = null;
+        const radar = await fetchRainViewerRadar(config);
+        state.liveWeather.downfall_coverage = radar.downfall_coverage;
+        state.liveWeather.snowfall = radar.snowfall;
       } catch (error) {
         if (!config.forecast_api_fallback) throw error;
         console.warn("[hoverpreview] RainViewer radar failed; using Open-Meteo forecast fallback", error);
@@ -2254,7 +2269,12 @@ async function fetchLiveWeather(manifest, { prefetch = false } = {}) {
           metricGrid.columns,
           metricGrid.rows
         );
-        state.liveWeather.snowfall = null;
+        state.liveWeather.snowfall = await createLiveWeatherMetric(
+          "snowfall",
+          metrics.snowfall,
+          metricGrid.columns,
+          metricGrid.rows
+        );
       }
     }
     scheduleRender();
@@ -2288,6 +2308,7 @@ async function fetchRainViewerRadar(config) {
   const columns = Math.max(1, Number(grid.columns) || 1);
   const rows = Math.max(1, Number(grid.rows) || Math.floor(latitudes.length / columns) || 1);
   const bbox = rainViewerGridBBox(latitudes, longitudes);
+  // max_tiles is per snow-mode path; dual-fetch (snow=0 + snow=1) doubles HTTP.
   const maxTiles = Math.max(1, Number(provider.max_tiles) || LIVE_WEATHER_RAINVIEWER_MAX_TILES);
   const zoom = chooseRainViewerZoom(bbox, maxTiles);
   const range = rainViewerTileRange(bbox, zoom);
@@ -2299,8 +2320,51 @@ async function fetchRainViewerRadar(config) {
   const size = Number(provider.size) || LIVE_WEATHER_RAINVIEWER_TILE_SIZE;
   const color = Number.isFinite(Number(provider.color)) ? Number(provider.color) : LIVE_WEATHER_RAINVIEWER_COLOR;
   const smooth = Number.isFinite(Number(provider.smooth)) ? Number(provider.smooth) : LIVE_WEATHER_RAINVIEWER_SMOOTH;
-  const snow = Number.isFinite(Number(provider.snow)) ? Number(provider.snow) : LIVE_WEATHER_RAINVIEWER_SNOW;
   const path = String(frame.path);
+  const [intensityData, maskData] = await Promise.all([
+    stitchRainViewerTiles(host, path, size, zoom, range, color, smooth, 0),
+    stitchRainViewerTiles(host, path, size, zoom, range, color, smooth, 1),
+  ]);
+
+  const total = columns * rows;
+  const rainValues = new Float32Array(total);
+  const snowValues = new Float32Array(total);
+  const n = 2 ** zoom;
+  for (let start = 0; start < total; start += LIVE_WEATHER_SAMPLE_BATCH_POINTS) {
+    const end = Math.min(total, start + LIVE_WEATHER_SAMPLE_BATCH_POINTS);
+    for (let index = start; index < end; index += 1) {
+      const lat = latitudes[index];
+      const lon = longitudes[index];
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+      const merc = wgs84ToWebMercatorPixel(lon, lat, n, size);
+      const px = Math.round(merc.x - range.minX * size);
+      const py = Math.round(merc.y - range.minY * size);
+      if (px < 0 || py < 0 || px >= intensityData.width || py >= intensityData.height) continue;
+      const src = (py * intensityData.width + px) * 4;
+      const mr = maskData.data[src];
+      const mg = maskData.data[src + 1];
+      const mb = maskData.data[src + 2];
+      const ma = maskData.data[src + 3];
+      const ir = intensityData.data[src];
+      const ig = intensityData.data[src + 1];
+      const ib = intensityData.data[src + 2];
+      const ia = intensityData.data[src + 3];
+      const mm = rainViewerIntensityToMm(ir, ig, ib, ia);
+      if (isRainViewerSnowTint(mr, mg, mb, ma)) {
+        snowValues[index] = mm;
+      } else {
+        rainValues[index] = mm;
+      }
+    }
+    if (end < total) await yieldToBrowser();
+  }
+  return {
+    downfall_coverage: await createLiveWeatherMetric("downfall_coverage", rainValues, columns, rows),
+    snowfall: await createLiveWeatherMetric("snowfall", snowValues, columns, rows),
+  };
+}
+
+async function stitchRainViewerTiles(host, path, size, zoom, range, color, smooth, snow) {
   const tiles = [];
   const fetches = [];
   for (let ty = range.minY; ty <= range.maxY; ty += 1) {
@@ -2314,7 +2378,6 @@ async function fetchRainViewerRadar(config) {
     }
   }
   await Promise.all(fetches);
-
   const stitch = document.createElement("canvas");
   stitch.width = (range.maxX - range.minX + 1) * size;
   stitch.height = (range.maxY - range.minY + 1) * size;
@@ -2324,31 +2387,17 @@ async function fetchRainViewerRadar(config) {
     stitchCtx.drawImage(tile.bitmap, (tile.x - range.minX) * size, (tile.y - range.minY) * size);
     if (typeof tile.bitmap.close === "function") tile.bitmap.close();
   }
-  const stitchData = stitchCtx.getImageData(0, 0, stitch.width, stitch.height);
+  return stitchCtx.getImageData(0, 0, stitch.width, stitch.height);
+}
 
-  const total = columns * rows;
-  const values = new Float32Array(total);
-  const n = 2 ** zoom;
-  for (let start = 0; start < total; start += LIVE_WEATHER_SAMPLE_BATCH_POINTS) {
-    const end = Math.min(total, start + LIVE_WEATHER_SAMPLE_BATCH_POINTS);
-    for (let index = start; index < end; index += 1) {
-      const lat = latitudes[index];
-      const lon = longitudes[index];
-      if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
-      const merc = wgs84ToWebMercatorPixel(lon, lat, n, size);
-      const px = Math.round(merc.x - range.minX * size);
-      const py = Math.round(merc.y - range.minY * size);
-      if (px < 0 || py < 0 || px >= stitch.width || py >= stitch.height) continue;
-      const src = (py * stitch.width + px) * 4;
-      const r = stitchData.data[src];
-      const g = stitchData.data[src + 1];
-      const b = stitchData.data[src + 2];
-      const a = stitchData.data[src + 3];
-      values[index] = rainViewerIntensityToMm(r, g, b, a);
-    }
-    if (end < total) await yieldToBrowser();
-  }
-  return await createLiveWeatherMetric("downfall_coverage", values, columns, rows);
+/** RainViewer snow=1 retints snow-classified echoes pale cyan/white. */
+function isRainViewerSnowTint(r, g, b, a) {
+  return (a || 0) >= 8
+    && (b || 0) >= 220
+    && (g || 0) >= 220
+    && (r || 0) >= 160
+    && (r || 0) < 240
+    && Math.abs((g || 0) - (b || 0)) <= 20;
 }
 
 function rainViewerGridBBox(latitudes, longitudes) {

@@ -60,7 +60,8 @@ With Serene installed, this mod can drive the season calendar from real wall-clo
 - LIVE mode defaults to RainViewer radar (`rainviewer_enabled=true`):
   - fetch/cache `weather-maps.json` (TTL ~3 minutes)
   - fetch covering XYZ PNGs at z=7 when ≤`rainviewer_max_tiles` (else z=6 / z=5; UK ≈40/12/4 tiles)
-  - `sampleIntensity(lat,lon)` → Met Office–calibrated scheme-2 proxy mm/h (capped at 40); snowfall = 0; WMO rain `weather_code` when precip &gt; 0
+  - dual-fetch `snow=0` (intensity) + `snow=1` (snow mask); `max_tiles` is per snow mode
+  - `sampleIntensities(lat,lon)` → rain and snow mm/h via Met Office–calibrated scheme-2 proxy (capped at 40); snow-tinted pixels populate snowfall (WMO 71/73/75), else rain (61/63/65)
 - When RainViewer is disabled (or fails), LIVE mode uses one national Open-Meteo multipoint forecast pass (default 8×10, ≤96 points) over the UKGeo WGS84 bbox; weather tiles bilinear-sample that grid.
 - National-grid Open-Meteo batches (≤32 points each) run with concurrency 2; the older serialize+250ms gap is kept only for `request_budget_safeguards` many-small player-tile fallbacks.
 - Radar/grid HTTP refresh runs at most once per `refresh_interval_minutes`; every ~40 ticks only re-samples the cached frame/grid when still fresh.
